@@ -2,8 +2,7 @@
 
 Firmware for a custom 4-key emoji macro keyboard.
 
-See [`docs/requirements.md`](docs/requirements.md) for the full requirements
-and [`tasks/`](tasks/) for the task backlog.
+See [`tasks/`](tasks/) for the task backlog.
 
 ## Layout
 

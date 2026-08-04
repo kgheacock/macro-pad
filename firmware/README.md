@@ -21,6 +21,9 @@ The firmware runs on the microcontroller only. It does the following:
   - HID, for the primary action.
   - CDC serial, for state, raw events, and audio.
 
+See [`docs/wire-protocol.md`](../docs/wire-protocol.md) for the byte layout
+of every message sent or received over these channels.
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

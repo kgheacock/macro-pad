@@ -3,6 +3,9 @@
 The host controller. It runs on the computer the macro pad plugs into, and
 talks to the firmware over USB HID and CDC serial.
 
+See [`docs/wire-protocol.md`](../docs/wire-protocol.md) for the byte layout
+of every message sent or received over these channels.
+
 **Status: deferred.** This pass covers hardware and firmware only. No driver
 code exists yet.
 

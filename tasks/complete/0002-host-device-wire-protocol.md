@@ -1,9 +1,9 @@
 ---
 id: "0002"
 title: "Define the host/device wire protocol"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-04"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -103,16 +103,16 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `docs/wire-protocol.md` defines the byte layout for all
+- [x] **DoD-1** — `docs/wire-protocol.md` defines the byte layout for all
   three message types, with field sizes. **Proof:** `docs/wire-protocol.md`
-- [ ] **DoD-2** — Each message type states which side sends it and over
+- [x] **DoD-2** — Each message type states which side sends it and over
   which channel. **Proof:** `docs/wire-protocol.md`, message table
-- [ ] **DoD-3** — The document states the version byte's role and how a
+- [x] **DoD-3** — The document states the version byte's role and how a
   breaking change raises it. **Proof:** `docs/wire-protocol.md`, section
   "Versioning"
-- [ ] **DoD-4** — `firmware/README.md` and `driver/README.md` link to the
+- [x] **DoD-4** — `firmware/README.md` and `driver/README.md` link to the
   new document. **Proof:** both files
-- [ ] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

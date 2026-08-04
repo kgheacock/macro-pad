@@ -7,7 +7,7 @@ updated: "2026-08-03"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/1"
 branch: "0001-test-harness-circuitpython-mocks"
 related: ["0003", "0004", "0005", "0006", "0007", "0008", "0009"]
 tags: ["firmware", "testing"]

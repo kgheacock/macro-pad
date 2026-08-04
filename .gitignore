@@ -19,3 +19,4 @@ assets/generated/
 .DS_Store
 .vscode/
 .idea/
+.claude/

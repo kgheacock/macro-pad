@@ -7,7 +7,7 @@ updated: "2026-08-03"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/2"
 branch: "0002-host-device-wire-protocol"
 related: ["0006", "0007", "0008"]
 tags: ["firmware", "driver", "protocol"]

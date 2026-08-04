@@ -1,14 +1,14 @@
 ---
 id: "0001"
 title: "Add a test harness with CircuitPython hardware mocks"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
 updated: "2026-08-03"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0001-test-harness-circuitpython-mocks"
 related: ["0003", "0004", "0005", "0006", "0007", "0008", "0009"]
 tags: ["firmware", "testing"]
 ---

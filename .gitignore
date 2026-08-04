@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# CircuitPython artifacts
+*.mpy
+boot_out.txt
+.fseventsd/
+.metadata_never_index
+.Trashes
+
+# Generated emoji bitmaps — rebuild with tools/
+assets/generated/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

@@ -1,7 +1,7 @@
 ---
 id: "0014"
 title: "Emulate the composite USB device for driver tests"
-status: "ongoing"
+status: "complete"
 created: "2026-08-04"
 updated: "2026-08-06"
 owner: "kgheacock"
@@ -127,25 +127,25 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `driver/transport` defines a `Transport` interface
+- [x] **DoD-1** — `driver/transport` defines a `Transport` interface
   covering key-state send, event read, and audio-chunk read. **Proof:**
   `driver/transport/transport.go`
-- [ ] **DoD-2** — A key-state message written and read through the emulator
+- [x] **DoD-2** — A key-state message written and read through the emulator
   matches `docs/wire-protocol.md`'s Key state byte layout, including the
   version byte. **Proof:** `go test ./driver/transport/... -run
   TestEmulator_KeyStateRoundTrip`
-- [ ] **DoD-3** — Test code injects a synthetic press event and reads it
+- [x] **DoD-3** — Test code injects a synthetic press event and reads it
   back through `Transport.ReadEvent`, with no board attached. **Proof:**
   `go test ./driver/transport/... -run TestEmulator_InjectPressEvent`
-- [ ] **DoD-4** — Test code injects multiple audio chunks and
+- [x] **DoD-4** — Test code injects multiple audio chunks and
   `Transport.ReadAudioChunk` stops at the final-chunk flag. **Proof:** `go
   test ./driver/transport/... -run TestEmulator_AudioFinalChunk`
-- [ ] **DoD-5** — Sending a key-state message with an unrecognized version
+- [x] **DoD-5** — Sending a key-state message with an unrecognized version
   byte returns a named error instead of a silent mismatch. **Proof:** `go
   test ./driver/transport/... -run TestEmulator_VersionMismatch`
-- [ ] **DoD-6** — `driver/README.md` documents the emulator and the command
+- [x] **DoD-6** — `driver/README.md` documents the emulator and the command
   to run driver tests without hardware. **Proof:** `driver/README.md`
-- [ ] **DoD-7** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-7** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

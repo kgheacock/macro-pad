@@ -7,7 +7,7 @@ updated: "2026-08-06"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/3"
 branch: "0014-usb-device-emulator"
 related: ["0001", "0002", "0008", "0013"]
 tags: ["driver", "testing", "usb"]

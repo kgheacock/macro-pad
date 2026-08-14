@@ -1,14 +1,14 @@
 ---
 id: "0004"
 title: "Add idle-timeout backlight dimming"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/7"
+branch: "0004-idle-timeout-backlight-dimming"
 related: ["0001"]
 tags: ["firmware"]
 ---

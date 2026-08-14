@@ -33,11 +33,12 @@ The firmware runs on the microcontroller only. It does the following:
 - Streams the buffered audio to the host in fixed-size chunks. A 1-byte
   flag on the final chunk marks the end of the recording.
 - Enumerates as a USB-C composite device:
-  - HID, for the primary action.
-  - CDC serial, for state, raw events, and audio.
+  - HID, for the key state message the host sends.
+  - CDC serial (data channel), for raw events and audio the device sends.
 
-See [`docs/wire-protocol.md`](../docs/wire-protocol.md) for the byte layout
-of every message sent or received over these channels.
+`boot.py` configures both interfaces, including the HID report
+descriptor. See [`docs/wire-protocol.md`](../docs/wire-protocol.md) for
+the byte layout of every message sent or received over these channels.
 
 ## Out of scope
 

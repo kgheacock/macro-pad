@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/5"
 branch: "0018-screenkey-breadboard-diagram"
 related: ["0009", "0010"]
 tags: ["hardware", "docs"]
@@ -103,40 +103,57 @@ Pinout table.
 Create `hardware/breadboard-diagram.html`, a self-contained HTML/CSS
 file — no SVG wires, no external assets.
 
-**Legend** — one row per signal, each showing its fill color and a
-two-letter code:
+**Legend** — one row per signal, each showing its fill color and the
+same 3-letter pin name used on every square in the grid below (no
+separate "code" — one name, used everywhere):
 
-| Signal | Color  | Code |
-|---|---|---|
-| KEY  | blue   | Ke |
-| DC   | yellow | Dc |
-| CS   | orange | Cs |
-| CLK  | teal   | Cl |
-| DIN  | gray   | Di |
-| GND  | black  | Gn |
-| VCC  | red    | Vc |
-| PWM  | purple | Pw |
-| RST  | brown  | Rs |
+| Pin name | Color  |
+|---|---|
+| KEY | blue   |
+| DCX | yellow |
+| CSX | orange |
+| CLK | teal   |
+| DIN | gray   |
+| GND | black  |
+| VCC | red    |
+| PWM | purple |
+| RST | brown  |
 
-Signal names and colors come from `docs/0.85inch_ScreenKey_Module.pdf`'s
-`H2` connector schematic and Waveshare's reference wiring photo.
+Colors come from `docs/0.85inch_ScreenKey_Module.pdf`'s `H2` connector
+schematic and Waveshare's reference wiring photo. `DCX` and `CSX` are
+the ST7735 driver's own pin names for the DC and CS lines (the
+ScreenKey Module's LCD driver), not invented abbreviations — the
+other 7 names are already exactly 3 letters as the connector schematic
+names them.
 
-**Pin grid** — one entry per GPIO pin used, from `firmware/pins.py`:
+**Pin grid** — a two-column layout, one row per physical pin position,
+in the same top-to-bottom order as the two 20-pin edges on the
+Pimoroni Pico Plus 2's silkscreen
+(`docs/ppico_plus_2_pinout_diagram.pdf`), with a center spine standing
+in for the board body. This makes the diagram's shape match the real
+board instead of an arbitrary pin listing:
 
 - Shared pins (`SPI_SCK`, `SPI_MOSI`, `DISPLAY_DC`, `DISPLAY_RST`, plus
-  the GND and 3V3 rails) each show 6 squares stacked horizontally, one
-  per key, labeled `1Cl 2Cl 3Cl 4Cl 5Cl 6Cl` and so on.
+  GND and 3V3, wired from the top-right power pins) each show 6
+  squares stacked horizontally at their physical pin position, one per
+  key, labeled `1CLK 2CLK 3CLK 4CLK 5CLK 6CLK` and so on.
 - Per-key pins (`switch_pin`, `display_cs_pin`, `backlight_pin`) each
-  show 1 square, labeled `{key number}{code}` — for example, key 1's
-  `switch_pin` (GP13) shows `1Ke`.
+  show 1 square at their own physical pin position, labeled
+  `{key number}{pin name}` — for example, key 1's `switch_pin` (GP13)
+  shows `1KEY`.
+- Pins the ScreenKey wiring does not use (`GP12`, the I2S mic pins,
+  power/system pins) still occupy their physical row, unlabeled, so
+  the grid keeps the board's proportions.
 
-Each square's fill color matches its signal's legend color; the code
-inside states the signal without depending on that color.
+Each square's fill color matches its legend color; the pin name inside
+states the signal without depending on that color.
 
 Files to change:
 
 - `hardware/breadboard-diagram.html` — new
 - `hardware/README.md` — link to the new diagram from the Pinout section
+- `docs/ppico_plus_2_pinout_diagram.pdf` — new, source for the board's
+  physical pin layout
 
 ## Definition of done
 
@@ -144,7 +161,7 @@ Files to change:
   and renders with no network request. **Proof:** view-source shows no
   `<script src=`, `<link href=`, or `<img src=` pointing outside the file
 - [ ] **DoD-2** — The legend lists all 9 signals with the colors and
-  codes in the Design table above. **Proof:** the legend block in
+  pin names in the Design table above. **Proof:** the legend block in
   `hardware/breadboard-diagram.html`
 - [ ] **DoD-3** — `SPI_SCK`, `SPI_MOSI`, `DISPLAY_DC`, `DISPLAY_RST`,
   GND, and 3V3 each show 6 stacked squares, one per key. **Proof:**
@@ -175,4 +192,14 @@ An earlier version of this spec used single-letter color codes (for
 example, "B" for blue). Blue (KEY), black (GND), and brown (RST) all
 start with "B", so a label read without its fill color could not tell
 them apart. Two-letter signal codes (Ke, Dc, Cs, Cl, Di, Gn, Vc, Pw, Rs)
-replace them — each label is unique on its own, independent of color.
+replaced them, each unique on its own, independent of color.
+
+The delivered diagram uses three-letter codes instead (KEY, DCX, CSX,
+CLK, DIN, GND, VCC, PWM, RST) — the same uniqueness property, but `DCX`
+and `CSX` also match the ST7735 driver's own pin names, and the
+remaining 7 codes equal their signal name outright.
+
+The delivered diagram also lays pins out in two columns mirroring the
+Pico Plus 2's physical left/right pin edges
+(`docs/ppico_plus_2_pinout_diagram.pdf`), rather than the single
+ordered list this Design section first described.

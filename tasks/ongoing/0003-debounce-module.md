@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/6"
 branch: "0003-debounce-module"
 related: ["0001"]
 tags: ["firmware"]

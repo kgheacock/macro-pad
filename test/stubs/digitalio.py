@@ -40,6 +40,8 @@ class DigitalInOut:
 
     @value.setter
     def value(self, new_value):
+        # Writable in either direction, unlike the real module, so a test
+        # can drive an input pin low to simulate a switch closing.
         self._value = bool(new_value)
 
     def deinit(self):

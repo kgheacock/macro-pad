@@ -15,6 +15,9 @@ boot_out.txt
 # Generated emoji bitmaps — rebuild with tools/
 assets/generated/
 
+# Downloaded CircuitPython UF2 — rebuild with `make firmware-uf2`
+firmware/modules/
+
 # Editors / OS
 .DS_Store
 .vscode/

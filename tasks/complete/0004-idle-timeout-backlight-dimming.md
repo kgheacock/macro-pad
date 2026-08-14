@@ -1,7 +1,7 @@
 ---
 id: "0004"
 title: "Add idle-timeout backlight dimming"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -97,18 +97,18 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `duty_cycle()` returns full brightness before the idle
+- [x] **DoD-1** — `duty_cycle()` returns full brightness before the idle
   window elapses. **Proof:**
   `pytest tests/test_idle_timer.py::test_bright_before_window`
-- [ ] **DoD-2** — `duty_cycle()` returns the dim value once the idle window
+- [x] **DoD-2** — `duty_cycle()` returns the dim value once the idle window
   elapses with no `touch()` call. **Proof:**
   `pytest tests/test_idle_timer.py::test_dim_after_window`
-- [ ] **DoD-3** — Calling `touch()` resets the window. **Proof:**
+- [x] **DoD-3** — Calling `touch()` resets the window. **Proof:**
   `pytest tests/test_idle_timer.py::test_touch_resets`
-- [ ] **DoD-4** — The default idle window is 5 minutes, matching
+- [x] **DoD-4** — The default idle window is 5 minutes, matching
   `firmware/README.md`. **Proof:** `firmware/idle_timer.py`, default
   argument
-- [ ] **DoD-5** — The new tests fail on `main`. **Proof:**
+- [x] **DoD-5** — The new tests fail on `main`. **Proof:**
   `git stash && pytest tests/test_idle_timer.py` fails
-- [ ] **DoD-6** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-6** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field

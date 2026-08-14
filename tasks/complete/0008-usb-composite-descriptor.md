@@ -1,7 +1,7 @@
 ---
 id: "0008"
 title: "Add the USB composite (HID + CDC) descriptor"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -105,16 +105,16 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `boot.py` defines a `usb_hid.Device` report descriptor
+- [x] **DoD-1** — `boot.py` defines a `usb_hid.Device` report descriptor
   with a report size that matches task 0002's HID message layout.
   **Proof:** `firmware/boot.py`
-- [ ] **DoD-2** — `boot.py` enables a CDC data channel
+- [x] **DoD-2** — `boot.py` enables a CDC data channel
   (`usb_cdc.enable(data=True)`). **Proof:** `firmware/boot.py`
-- [ ] **DoD-3** — `firmware/README.md` names both USB interfaces and links
+- [x] **DoD-3** — `firmware/README.md` names both USB interfaces and links
   to `docs/wire-protocol.md`. **Proof:** `firmware/README.md`
-- [ ] **DoD-4** — The file parses without error under CircuitPython's
+- [x] **DoD-4** — The file parses without error under CircuitPython's
   `boot.py` syntax rules. **Proof:** `python -m py_compile firmware/boot.py`
-- [ ] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

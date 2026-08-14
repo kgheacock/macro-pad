@@ -1,14 +1,14 @@
 ---
 id: "0008"
 title: "Add the USB composite (HID + CDC) descriptor"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0008-usb-composite-descriptor"
 related: ["0002"]
 tags: ["firmware", "usb"]
 ---

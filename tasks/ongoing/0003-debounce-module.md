@@ -1,14 +1,14 @@
 ---
 id: "0003"
 title: "Add a debounce module for switch input"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/6"
+branch: "0003-debounce-module"
 related: ["0001"]
 tags: ["firmware"]
 ---

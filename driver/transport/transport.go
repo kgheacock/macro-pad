@@ -42,18 +42,23 @@ type AudioChunk struct {
 	Final    bool
 }
 
+// Message is one decoded device→host message read from ReadMessage. Type
+// says which of Event or AudioChunk is populated.
+type Message struct {
+	Type       MessageType
+	Event      Event
+	AudioChunk AudioChunk
+}
+
 // Transport is the driver's connection to a device, real or emulated. It
-// covers the three wire-protocol exchanges: sending key state, reading
-// press/release events, and reading audio chunks.
+// covers the two wire-protocol exchanges: sending key state, and reading
+// the device→host messages framed per "Framing" in docs/wire-protocol.md.
 type Transport interface {
 	// SendKeyState writes one key-state message to the device over HID.
 	SendKeyState(KeyState) error
 
-	// ReadEvent blocks until one press/release event arrives over CDC
-	// serial, or the transport is closed.
-	ReadEvent() (Event, error)
-
-	// ReadAudioChunk blocks until one audio chunk arrives over CDC serial,
-	// or the transport is closed.
-	ReadAudioChunk() (AudioChunk, error)
+	// ReadMessage blocks until one device→host message arrives over CDC
+	// serial, or the transport is closed. A frame whose type this package
+	// does not know is skipped by its declared length and never returned.
+	ReadMessage() (Message, error)
 }

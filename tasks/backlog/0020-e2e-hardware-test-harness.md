@@ -9,7 +9,7 @@ issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0002", "0010", "0013", "0014", "0019", "0021", "0022", "0023"]
+related: ["0002", "0010", "0013", "0014", "0019", "0021", "0022", "0023", "0024"]
 tags: ["driver", "testing", "hardware", "dx"]
 ---
 
@@ -135,9 +135,11 @@ Three driver changes make that source legal:
 
 1. **A `Key` holds its last sent state**, so `SetColor` resends the digit
    and blink flag the caller did not repeat.
-2. **`Pad` owns one `ReadEvent` loop and fans events out**, so `On` and
-   `ExpectPress` can both wait. Today two callers of `ReadEvent` steal
-   from each other. Task 0013's `UseAction` reuses this dispatcher.
+2. **`Pad` owns one `ReadMessage` loop and fans messages out**, so `On`
+   and `ExpectPress` can both wait. Today two callers of one read method
+   steal from each other. Task 0024 collapses the two read methods into
+   `ReadMessage` and leaves the fan-out here, so this dispatcher is the
+   demultiplexer it defers to. Task 0013's `UseAction` reuses it.
 3. **Named glyph and color constants**, so a scenario writes `Digit(3)`,
    not emoji ID `0xF3`.
 
@@ -153,7 +155,7 @@ Files to change:
 - `driver/e2e/pad_emulator_test.go` — new. The same scenario against
   `transport.Emulator`, no build tag
 - `driver/transport/transport.go` — add `Close() error`; document that
-  `ReadEvent` has one owner
+  `ReadMessage` has one owner
 - `docs/wire-protocol.md` — reserve emoji IDs `0xF1` to `0xF6` for
   digits 1 to 6
 - `Makefile` — add the `e2e` target

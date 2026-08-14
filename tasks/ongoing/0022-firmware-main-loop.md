@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/13"
 branch: "0022-firmware-main-loop"
 related: ["0001", "0002", "0003", "0004", "0006", "0008", "0009", "0010", "0019", "0020", "0023"]
 tags: ["firmware", "integration"]

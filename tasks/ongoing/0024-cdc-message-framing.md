@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/14"
 branch: "0024-cdc-message-framing"
 related: ["0002", "0014", "0020", "0021", "0022", "0025"]
 tags: ["protocol", "driver", "firmware"]

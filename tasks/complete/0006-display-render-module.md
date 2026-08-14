@@ -1,7 +1,7 @@
 ---
 id: "0006"
 title: "Add the display render module"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -120,21 +120,21 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `render_key()` sets the background layer to the key's
+- [x] **DoD-1** — `render_key()` sets the background layer to the key's
   configured color. **Proof:**
   `pytest test/test_display_render.py::test_fill_color`
-- [ ] **DoD-2** — `render_key()` draws the bitmap that matches the key's
+- [x] **DoD-2** — `render_key()` draws the bitmap that matches the key's
   emoji ID. **Proof:**
   `pytest test/test_display_render.py::test_emoji_bitmap`
-- [ ] **DoD-3** — When blink is on, alternating calls to `render_key()`
+- [x] **DoD-3** — When blink is on, alternating calls to `render_key()`
   toggle visibility. **Proof:**
   `pytest test/test_display_render.py::test_blink_toggle`
-- [ ] **DoD-4** — `DisplayLike` lists only methods present on
+- [x] **DoD-4** — `DisplayLike` lists only methods present on
   `adafruit_st7735r.ST7735R`. **Proof:** `firmware/display_render.py`
   docstring cites the driver method names
-- [ ] **DoD-5** — The new tests fail on `main`. **Proof:**
+- [x] **DoD-5** — The new tests fail on `main`. **Proof:**
   `git stash -u && pytest test/test_display_render.py` fails
-- [ ] **DoD-6** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-6** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

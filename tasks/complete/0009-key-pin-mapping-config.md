@@ -1,7 +1,7 @@
 ---
 id: "0009"
 title: "Add a key-to-pin mapping config"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -121,18 +121,18 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `firmware/pins.py` defines exactly 6 `KeyPins` entries,
+- [x] **DoD-1** — `firmware/pins.py` defines exactly 6 `KeyPins` entries,
   one per key. **Proof:** `len(KEYS) == 6` in `tests/test_pins.py`
-- [ ] **DoD-2** — Each entry has distinct, non-empty `switch_pin`,
+- [x] **DoD-2** — Each entry has distinct, non-empty `switch_pin`,
   `display_cs_pin`, and `backlight_pin` values, matching
   `hardware/README.md`'s Pinout table. **Proof:**
   `pytest tests/test_pins.py::test_pins_unique`
-- [ ] **DoD-3** — A comment in `firmware/pins.py` links to
+- [x] **DoD-3** — A comment in `firmware/pins.py` links to
   `hardware/README.md`'s Pinout table. **Proof:** `firmware/pins.py`,
   header comment
-- [ ] **DoD-4** — `hardware/README.md` links back to `firmware/pins.py`.
+- [x] **DoD-4** — `hardware/README.md` links back to `firmware/pins.py`.
   **Proof:** `hardware/README.md`
-- [ ] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

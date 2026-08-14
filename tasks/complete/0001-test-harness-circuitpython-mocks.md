@@ -1,9 +1,9 @@
 ---
 id: "0001"
 title: "Add a test harness with CircuitPython hardware mocks"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -96,17 +96,17 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `pytest` runs with zero collection errors on a machine
+- [x] **DoD-1** — `pytest` runs with zero collection errors on a machine
   with no CircuitPython installed. **Proof:** `pytest --collect-only` exits 0
-- [ ] **DoD-2** — `import board, digitalio, usb_hid, usb_cdc, audiobusio,
+- [x] **DoD-2** — `import board, digitalio, usb_hid, usb_cdc, audiobusio,
   displayio` succeeds in a test file. **Proof:**
   `pytest tests/test_stubs_import.py` passes
-- [ ] **DoD-3** — A sample test that uses a stubbed
+- [x] **DoD-3** — A sample test that uses a stubbed
   `digitalio.DigitalInOut` fails on `main` and passes on this branch.
   **Proof:** `git stash && pytest tests/test_stubs_import.py` fails
-- [ ] **DoD-4** — `test/README.md` names the framework and the stub
+- [x] **DoD-4** — `test/README.md` names the framework and the stub
   location. **Proof:** `test/README.md`
-- [ ] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks
@@ -116,4 +116,4 @@ Files to change:
 
 ## Open questions
 
-- [ ] Should CI run these tests on every push? — repo owner
+- [x] Should CI run these tests on every push? — repo owner

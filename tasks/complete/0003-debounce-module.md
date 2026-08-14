@@ -1,7 +1,7 @@
 ---
 id: "0003"
 title: "Add a debounce module for switch input"
-status: "ongoing"
+status: "complete"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -95,18 +95,18 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `feed()` ignores a second transition inside the
+- [x] **DoD-1** — `feed()` ignores a second transition inside the
   configured window, and accepts one after it. **Proof:**
   `pytest tests/test_debounce.py::test_within_window_ignored`
-- [ ] **DoD-2** — A press, then a release after the window, emits both
+- [x] **DoD-2** — A press, then a release after the window, emits both
   events in order. **Proof:**
   `pytest tests/test_debounce.py::test_press_release_sequence`
-- [ ] **DoD-3** — The window is configurable, and defaults inside 5 ms to
+- [x] **DoD-3** — The window is configurable, and defaults inside 5 ms to
   10 ms, per `firmware/README.md`. **Proof:** `firmware/debounce.py`,
   `Debouncer.__init__` default value
-- [ ] **DoD-4** — The new tests fail on `main`. **Proof:**
+- [x] **DoD-4** — The new tests fail on `main`. **Proof:**
   `git stash && pytest tests/test_debounce.py` fails
-- [ ] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-5** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

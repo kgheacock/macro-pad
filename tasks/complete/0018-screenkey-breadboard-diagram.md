@@ -1,7 +1,7 @@
 ---
 id: "0018"
 title: "Add a breadboard wiring diagram for the ScreenKey Module"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-14"
 owner: "kgheacock"
@@ -157,23 +157,23 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `hardware/breadboard-diagram.html` opens in a browser
+- [x] **DoD-1** — `hardware/breadboard-diagram.html` opens in a browser
   and renders with no network request. **Proof:** view-source shows no
   `<script src=`, `<link href=`, or `<img src=` pointing outside the file
-- [ ] **DoD-2** — The legend lists all 9 signals with the colors and
+- [x] **DoD-2** — The legend lists all 9 signals with the colors and
   pin names in the Design table above. **Proof:** the legend block in
   `hardware/breadboard-diagram.html`
-- [ ] **DoD-3** — `SPI_SCK`, `SPI_MOSI`, `DISPLAY_DC`, `DISPLAY_RST`,
+- [x] **DoD-3** — `SPI_SCK`, `SPI_MOSI`, `DISPLAY_DC`, `DISPLAY_RST`,
   GND, and 3V3 each show 6 stacked squares, one per key. **Proof:**
   count the squares at each of those pins in
   `hardware/breadboard-diagram.html`
-- [ ] **DoD-4** — Each key's `switch_pin`, `display_cs_pin`, and
+- [x] **DoD-4** — Each key's `switch_pin`, `display_cs_pin`, and
   `backlight_pin` shows exactly 1 square, labeled and colored to match
   that key's row in `firmware/pins.py`'s `KEYS` list. **Proof:** compare
   `hardware/breadboard-diagram.html` against `firmware/pins.py`
-- [ ] **DoD-5** — `hardware/README.md` links to the new diagram.
+- [x] **DoD-5** — `hardware/README.md` links to the new diagram.
   **Proof:** `hardware/README.md`, Pinout section
-- [ ] **DoD-6** — The PR body links to this spec. **Proof:** the PR in
+- [x] **DoD-6** — The PR body links to this spec. **Proof:** the PR in
   the `pr` field
 
 ## Risks

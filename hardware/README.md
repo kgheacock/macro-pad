@@ -9,8 +9,8 @@ pad.
 
 | Part | Status |
 |---|---|
-| SparkFun RP2350 (Pro Micro form factor) | In hand |
-| 4× Waveshare 0.85" ScreenKey Module — ST7735 driver, 128×128, 65K color, SPI, integrated mechanical switch | In hand — confirm SKU/variant |
+| Pimoroni Pico Plus 2 (RP2350) | In hand |
+| 6× Waveshare 0.85" ScreenKey Module — ST7735 driver, 128×128, 65K color, SPI, integrated mechanical switch | In hand — confirm SKU/variant |
 | I2S MEMS mic breakout (SPH0645 or ICS-43434) | Needed |
 | Pin headers/sockets, perfboard, hookup wire, USB-C cable | Needed |
 | Custom PCB (KiCad → JLCPCB/PCBWay) | Later — once the design is confirmed on breadboard |

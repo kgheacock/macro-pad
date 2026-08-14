@@ -33,7 +33,7 @@ display, the switch, the mic, and USB enumeration.
 
 ## Non-goals
 
-- Wiring all 4 keys. One key proves the pipeline; wiring the rest is a
+- Wiring all 6 keys. One key proves the pipeline; wiring the rest is a
   follow-up.
 - The custom PCB or the enclosure. `hardware/README.md` marks both "Later
   — once the design is confirmed on breadboard", which this task produces.
@@ -56,23 +56,23 @@ run the software pipeline end-to-end.
 - Bad, because it still waits on parts marked "Needed" in
   `hardware/README.md`, such as the mic breakout and headers.
 
-### Approach B — Bring up all 4 keys directly
+### Approach B — Bring up all 6 keys directly
 
-Wire the full 4-key board on breadboard, and validate the entire device at
+Wire the full 6-key board on breadboard, and validate the entire device at
 once.
 
 - Good, because it catches cross-key interaction bugs, such as SPI bus
-  contention across 4 displays, that one key cannot reveal.
+  contention across 6 displays, that one key cannot reveal.
 - Good, because it needs one bring-up pass instead of two.
-- Bad, because it quadruples the wiring and the parts needed before any
+- Bad, because it multiplies the wiring and the parts needed before any
   validation can start, while `hardware/README.md` shows several parts
   still "Needed".
-- Bad, because a failure is harder to trace to one root cause across 4
+- Bad, because a failure is harder to trace to one root cause across 6
   simultaneous new wiring paths.
 
 ### Approach C — Skip the breadboard, order a custom PCB first
 
-Design and order a 4-key PCB now. Bring up on that instead of a
+Design and order a 6-key PCB now. Bring up on that instead of a
 breadboard.
 
 - Good, because it skips a wiring step and ends closer to the final

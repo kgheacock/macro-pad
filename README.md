@@ -1,6 +1,6 @@
 # macro-pad
 
-Firmware for a custom 4-key emoji macro keyboard.
+Firmware for a custom 6-key emoji macro keyboard.
 
 See [`tasks/`](tasks/) for the task backlog.
 

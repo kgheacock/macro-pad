@@ -1,14 +1,14 @@
 ---
 id: "0006"
 title: "Add the display render module"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0006-display-render-module"
 related: ["0001", "0002", "0009"]
 tags: ["firmware", "display"]
 ---

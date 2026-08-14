@@ -32,9 +32,8 @@ cosmetic and durability upgrade only, not a requirement.
 ## Pinout
 
 Confirmed GPIO assignments on the Pimoroni Pico Plus 2, assuming the
-ScreenKey *Module* variant (dedicated `KEY` pin per module). Task
-[0009](../tasks/backlog/0009-key-pin-mapping-config.md) turns this into
-`firmware/pins.py`.
+ScreenKey *Module* variant (dedicated `KEY` pin per module). Transcribed
+into [`firmware/pins.py`](../firmware/pins.py).
 
 | Function | Pin(s) |
 |---|---|

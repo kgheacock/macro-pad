@@ -9,7 +9,7 @@ issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0001", "0002", "0003", "0005", "0006", "0007", "0008", "0009"]
+related: ["0001", "0002", "0003", "0005", "0006", "0007", "0008", "0009", "0020", "0021", "0022", "0023"]
 tags: ["firmware", "hardware", "bring-up"]
 ---
 

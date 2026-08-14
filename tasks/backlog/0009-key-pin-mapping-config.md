@@ -95,7 +95,7 @@ must stay visibly marked so no one mistakes them for confirmed wiring.
 `firmware/pins.py` exposes `KEYS: list[KeyPins]`, a `NamedTuple` of
 `(switch_pin: str, display_cs_pin: str)`, with a module-level comment that
 links to `hardware/README.md`'s SKU question. Values are placeholders
-(`"GP0"` through `"GP7"`) until hardware confirms wiring.
+(`"GP0"` through `"GP11"`) until hardware confirms wiring.
 
 Files to change:
 
@@ -105,8 +105,8 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `firmware/pins.py` defines exactly 4 `KeyPins` entries,
-  one per key. **Proof:** `len(KEYS) == 4` in `tests/test_pins.py`
+- [ ] **DoD-1** — `firmware/pins.py` defines exactly 6 `KeyPins` entries,
+  one per key. **Proof:** `len(KEYS) == 6` in `tests/test_pins.py`
 - [ ] **DoD-2** — Each entry has distinct, non-empty `switch_pin` and
   `display_cs_pin` values. **Proof:**
   `pytest tests/test_pins.py::test_pins_unique`

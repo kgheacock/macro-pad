@@ -25,6 +25,21 @@ decision behind hand-writing them instead of adopting Adafruit-Blinka.
 When firmware code starts calling a stub method that doesn't exist yet, add
 it to the relevant file in `stubs/`.
 
+## Importing firmware modules
+
+`conftest.py` puts both the repo root and `firmware/` on `sys.path`, so a
+firmware module resolves under two names: `firmware.wire` and `wire`.
+
+Use the flat name (`import wire`) for any module that imports another
+firmware module. Those modules import each other flat, because
+`firmware/`'s contents are copied to the root of the `CIRCUITPY` drive,
+where no `firmware` package exists.
+
+Pick one name per module and keep to it. `wire` and `firmware.wire` are
+two separate module objects with two separate copies of every class, so a
+value built through one name fails an `isinstance` check against the
+other.
+
 ## Adding a test
 
 Put firmware unit tests in `test/`, named `test_*.py`. Import the

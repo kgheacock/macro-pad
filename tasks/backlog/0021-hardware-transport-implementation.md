@@ -9,7 +9,7 @@ issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0002", "0008", "0010", "0013", "0014", "0020"]
+related: ["0002", "0008", "0010", "0013", "0014", "0020", "0024"]
 tags: ["driver", "usb", "hardware"]
 ---
 
@@ -111,9 +111,9 @@ hardware.
   survive the reboot that `make flash` causes.
 - `SendKeyState` writes one output report with `encodeKeyState`, prefixed
   by `boot.py`'s `KEY_STATE_REPORT_ID`.
-- One reader goroutine decodes the CDC stream. Events and audio chunks are
-  distinguished by the first byte, then routed to two channels that
-  `ReadEvent` and `ReadAudioChunk` drain.
+- `ReadMessage` decodes one frame from the CDC stream, using the type and
+  length header that task 0024 adds. `Device` does not route by type. Task
+  0020's facade owns the fan-out to per-type callers.
 - `Close` releases both handles and unblocks both readers with `io.EOF`,
   matching `Emulator`.
 
@@ -124,6 +124,9 @@ Files to change:
   cases against a fake enumerator
 - `driver/transport/transport.go` — add `Close() error` to `Transport`.
   Task 0020 lists the same change; whichever lands first makes it
+
+Task 0024 is a prerequisite. It replaces `ReadEvent` and `ReadAudioChunk`
+with `ReadMessage`, and defines the header this reader needs.
 - `driver/go.mod` — add the hidapi binding and `go.bug.st/serial`
 - `driver/README.md` — document `Open`, the cgo requirement, and the
   macOS-only scope
@@ -147,9 +150,10 @@ An outside reviewer verifies each item without help from the implementer.
 - [ ] **DoD-5** — Discovery calls no volume listing. **Proof:** `grep -rn
       "Volumes\|diskutil\|mount" driver/transport/` returns nothing.
 - [ ] **DoD-6** — A CDC stream carrying one event followed by one audio
-      chunk routes each to the correct reader. **Proof:** `go test
-      ./driver/transport/... -run TestDevice_RoutesMixedStream`
-- [ ] **DoD-7** — `Close` unblocks a pending `ReadEvent` with `io.EOF`.
+      chunk decodes to those two messages, in that order, through
+      `ReadMessage`. **Proof:** `go test
+      ./driver/transport/... -run TestDevice_ReadsMixedStream`
+- [ ] **DoD-7** — `Close` unblocks a pending `ReadMessage` with `io.EOF`.
       **Proof:** `go test ./driver/transport/... -run
       TestDevice_CloseUnblocksReader`
 - [ ] **DoD-8** — `driver/README.md` records the cgo requirement and the

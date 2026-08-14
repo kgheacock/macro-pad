@@ -1,14 +1,14 @@
 ---
 id: "0009"
 title: "Add a key-to-pin mapping config"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
 updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0009-key-pin-mapping-config"
 related: ["0001", "0003", "0006"]
 tags: ["firmware", "hardware"]
 ---

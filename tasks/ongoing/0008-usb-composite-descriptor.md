@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/9"
 branch: "0008-usb-composite-descriptor"
 related: ["0002"]
 tags: ["firmware", "usb"]

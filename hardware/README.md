@@ -33,7 +33,9 @@ cosmetic and durability upgrade only, not a requirement.
 
 Confirmed GPIO assignments on the Pimoroni Pico Plus 2, assuming the
 ScreenKey *Module* variant (dedicated `KEY` pin per module). Transcribed
-into [`firmware/pins.py`](../firmware/pins.py).
+into [`firmware/pins.py`](../firmware/pins.py). See
+[`breadboard-diagram.html`](breadboard-diagram.html) for all 6 keys'
+pin connections in one diagram.
 
 | Function | Pin(s) |
 |---|---|

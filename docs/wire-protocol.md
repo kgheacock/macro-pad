@@ -14,7 +14,39 @@ little-endian, matching the RP2350's native byte order.
 |---|---|---|---|
 | Key state | Host → Device | HID | 6 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
-| Audio chunk | Device → Host | CDC serial | 4 + N bytes |
+| Audio chunk | Device → Host | CDC serial | 2 + N bytes |
+
+Sizes for the two device→host messages are the payload only. Every
+device→host message is wrapped in the 3-byte frame header described in
+[Framing](#framing).
+
+## Framing
+
+Both device→host messages share one CDC data channel. Neither carries a
+field that says which message follows it — byte 0 is a key index in one
+and a stream ID in the other — so a reader cannot tell them apart on its
+own. Every device→host message is prefixed with a 3-byte frame header:
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Type | Identifies the message that follows — see the type registry below |
+| 1 | 2 | Length | Length of the payload that follows, little-endian `uint16` |
+
+The reader reads the header, reads exactly `Length` payload bytes, then
+decodes them if it knows `Type`. A type it does not know is skipped by
+`Length`, not guessed at, so firmware can add a message type that an older
+driver ignores. A stream that ends before `Length` payload bytes arrive is
+a truncated message, not a partial value.
+
+### Type registry
+
+| Type | Message |
+|---|---|
+| 1 | Press/release event |
+| 2 | Audio chunk |
+
+The host→device key-state message is not framed this way. It rides on
+HID, where a report ID and a fixed transfer size already identify it.
 
 ### Key state (HID, host → device)
 
@@ -45,14 +77,15 @@ the driver resolves that from a sequence of these events.
 
 Sent while the firmware streams buffered mic audio for a held key. A
 recording is one or more chunks; the driver reassembles them in order and
-stops at the final-chunk flag.
+stops at the final-chunk flag. This message does not carry its own length
+field — the frame header's `Length` gives the payload size, so the PCM
+payload's length `N` is `Length - 2`.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
 | 0 | 1 | Stream ID | Identifies which recording this chunk belongs to |
-| 1 | 2 | Chunk length | Length `N` of the PCM payload that follows, little-endian `uint16` |
-| 3 | N | PCM payload | Raw audio samples for this chunk |
-| 3 + N | 1 | Final-chunk flag | `0` = more chunks follow, `1` = last chunk in the recording |
+| 1 | N | PCM payload | Raw audio samples for this chunk |
+| 1 + N | 1 | Final-chunk flag | `0` = more chunks follow, `1` = last chunk in the recording |
 
 ## Versioning
 

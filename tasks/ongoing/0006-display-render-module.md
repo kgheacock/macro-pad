@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/8"
 branch: "0006-display-render-module"
 related: ["0001", "0002", "0009"]
 tags: ["firmware", "display"]

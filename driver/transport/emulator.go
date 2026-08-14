@@ -7,44 +7,40 @@ import (
 
 // emulatorQueueSize bounds how many device→host messages the emulator
 // holds before a test reads them. It only needs to cover what a single
-// test injects between ReadEvent/ReadAudioChunk calls.
+// test injects between ReadMessage calls.
 const emulatorQueueSize = 32
 
 // Emulator is an in-memory Transport for driver tests. No board is
-// attached: key-state, press/release, and audio-chunk messages travel over
-// io.Pipe, encoded and decoded exactly as docs/wire-protocol.md specifies.
-// Test code calls InjectEvent or InjectAudioChunk to simulate the device
-// side, and LastKeyState to inspect what the driver sent.
+// attached: key-state and device→host messages travel over io.Pipe,
+// encoded and decoded exactly as docs/wire-protocol.md specifies. Both
+// device→host message types share one pipe, matching how a real CDC
+// stream carries them. Test code calls InjectEvent or InjectAudioChunk to
+// simulate the device side, and LastKeyState to inspect what the driver
+// sent.
 type Emulator struct {
 	keyStateW *io.PipeWriter
-	eventW    *io.PipeWriter
-	audioW    *io.PipeWriter
+	msgW      *io.PipeWriter
 
 	mu           sync.Mutex
 	lastKeyState KeyState
 	haveKeyState bool
 
-	eventQueue chan Event
-	audioQueue chan AudioChunk
+	msgQueue chan Message
 }
 
 // NewEmulator creates an Emulator ready for use. Call Close when done.
 func NewEmulator() *Emulator {
 	ksR, ksW := io.Pipe()
-	evR, evW := io.Pipe()
-	auR, auW := io.Pipe()
+	mR, mW := io.Pipe()
 
 	e := &Emulator{
-		keyStateW:  ksW,
-		eventW:     evW,
-		audioW:     auW,
-		eventQueue: make(chan Event, emulatorQueueSize),
-		audioQueue: make(chan AudioChunk, emulatorQueueSize),
+		keyStateW: ksW,
+		msgW:      mW,
+		msgQueue:  make(chan Message, emulatorQueueSize),
 	}
 
 	go e.receiveKeyStates(ksR)
-	go e.receiveEvents(evR)
-	go e.receiveAudioChunks(auR)
+	go e.receiveMessages(mR)
 
 	return e
 }
@@ -63,27 +59,15 @@ func (e *Emulator) receiveKeyStates(r *io.PipeReader) {
 	}
 }
 
-func (e *Emulator) receiveEvents(r *io.PipeReader) {
+func (e *Emulator) receiveMessages(r *io.PipeReader) {
 	defer r.Close()
-	defer close(e.eventQueue)
+	defer close(e.msgQueue)
 	for {
-		ev, err := decodeEvent(r)
+		msg, err := readMessage(r)
 		if err != nil {
 			return
 		}
-		e.eventQueue <- ev
-	}
-}
-
-func (e *Emulator) receiveAudioChunks(r *io.PipeReader) {
-	defer r.Close()
-	defer close(e.audioQueue)
-	for {
-		c, err := decodeAudioChunk(r)
-		if err != nil {
-			return
-		}
-		e.audioQueue <- c
+		e.msgQueue <- msg
 	}
 }
 
@@ -93,36 +77,26 @@ func (e *Emulator) SendKeyState(ks KeyState) error {
 	return encodeKeyState(e.keyStateW, ks)
 }
 
-// ReadEvent implements Transport. It blocks until a press/release event is
-// injected with InjectEvent, or the emulator is closed.
-func (e *Emulator) ReadEvent() (Event, error) {
-	ev, ok := <-e.eventQueue
+// ReadMessage implements Transport. It blocks until a message is injected
+// with InjectEvent or InjectAudioChunk, or the emulator is closed.
+func (e *Emulator) ReadMessage() (Message, error) {
+	msg, ok := <-e.msgQueue
 	if !ok {
-		return Event{}, io.EOF
+		return Message{}, io.EOF
 	}
-	return ev, nil
-}
-
-// ReadAudioChunk implements Transport. It blocks until an audio chunk is
-// injected with InjectAudioChunk, or the emulator is closed.
-func (e *Emulator) ReadAudioChunk() (AudioChunk, error) {
-	c, ok := <-e.audioQueue
-	if !ok {
-		return AudioChunk{}, io.EOF
-	}
-	return c, nil
+	return msg, nil
 }
 
 // InjectEvent simulates the device emitting a press/release event, for
 // driver tests with no board attached.
 func (e *Emulator) InjectEvent(ev Event) error {
-	return encodeEvent(e.eventW, ev)
+	return writeFrame(e.msgW, MessageTypeEvent, encodeEvent(ev))
 }
 
 // InjectAudioChunk simulates the device emitting one chunk of a buffered
 // recording, for driver tests with no board attached.
 func (e *Emulator) InjectAudioChunk(c AudioChunk) error {
-	return encodeAudioChunk(e.audioW, c)
+	return writeFrame(e.msgW, MessageTypeAudioChunk, encodeAudioChunk(c))
 }
 
 // LastKeyState returns the most recent key-state message the emulator's
@@ -133,12 +107,11 @@ func (e *Emulator) LastKeyState() (KeyState, bool) {
 	return e.lastKeyState, e.haveKeyState
 }
 
-// Close releases the emulator's pipes. Any blocked ReadEvent or
-// ReadAudioChunk call returns io.EOF.
+// Close releases the emulator's pipes. Any blocked ReadMessage call
+// returns io.EOF.
 func (e *Emulator) Close() error {
 	e.keyStateW.Close()
-	e.eventW.Close()
-	e.audioW.Close()
+	e.msgW.Close()
 	return nil
 }
 

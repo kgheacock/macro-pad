@@ -83,6 +83,33 @@ Modules under `firmware/` import each other flat (`import wire`, not
 `from firmware import wire`), because this folder's contents are copied
 to the root of the `CIRCUITPY` drive, where no `firmware` package exists.
 
+## Glyphs
+
+`firmware/glyphs.py` maps a wire-protocol emoji ID to a one-bit glyph
+bitmap. `display_render.render_key` draws through it via the
+`emoji_lookup` callable, so this module never appears in the render loop
+directly. See [`docs/wire-protocol.md`](../docs/wire-protocol.md#emoji-ids)
+for the reserved IDs.
+
+The file is generated, not hand-written. To add or change a glyph:
+
+1. Add or replace a 128×128 PNG in [`../hardware/glyphs/`](../hardware/glyphs/),
+   named after the emoji ID's source, and add its emoji ID to
+   `tools/gen_glyphs.py`'s `SOURCES` dict if it's new.
+2. Install the one build-time dependency this needs (not required to run
+   the test suite otherwise) and regenerate:
+
+   ```bash
+   .venv/bin/pip install pillow
+   .venv/bin/python3 tools/gen_glyphs.py
+   ```
+
+3. Commit both the PNG and the regenerated `firmware/glyphs.py`.
+
+Running the generator again with no source changes must leave
+`firmware/glyphs.py` byte-identical — that's what keeps a hand-edit of
+the generated file visible in review.
+
 ## Loop period
 
 **Not yet measured.** No board is wired up yet. Task

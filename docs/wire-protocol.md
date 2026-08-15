@@ -58,8 +58,26 @@ change. One message covers one key.
 | 0 | 1 | Key index | 0-based index of the target key |
 | 1 | 1 | Version | Protocol version this message was built against — see [Versioning](#versioning) |
 | 2 | 2 | Color | Background color, RGB565, little-endian |
-| 4 | 1 | Emoji ID | Index into the firmware's emoji bitmap table |
+| 4 | 1 | Emoji ID | Index into the firmware's emoji bitmap table — see [Emoji IDs](#emoji-ids) |
 | 5 | 1 | Blink flag | `0` = steady, `1` = blink |
+
+## Emoji IDs
+
+Reserved values for the Key state message's Emoji ID field. Every other
+value is unreserved, for a later task's emoji set.
+
+| ID | Glyph |
+|---|---|
+| `0x00` | Placeholder — a filled box, drawn for any ID this table does not reserve |
+| `0xF1` | Digit 1 |
+| `0xF2` | Digit 2 |
+| `0xF3` | Digit 3 |
+| `0xF4` | Digit 4 |
+| `0xF5` | Digit 5 |
+| `0xF6` | Digit 6 |
+
+`firmware/glyphs.py` maps each ID here to a bitmap; see
+[`firmware/README.md`](../firmware/README.md) for how to add one.
 
 ### Press/release event (CDC, device → host)
 

@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/20"
 branch: "0027-make-ping-pong-connectivity-check"
 related: ["0002", "0008", "0019", "0021", "0022", "0024", "0026"]
 tags: ["firmware", "driver", "protocol", "dx", "bring-up"]

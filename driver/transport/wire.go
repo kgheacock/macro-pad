@@ -19,12 +19,14 @@ const (
 	MessageTypeEvent      MessageType = 1
 	MessageTypeAudioChunk MessageType = 2
 	MessageTypePong       MessageType = 3
+	MessageTypeTrace      MessageType = 4
 )
 
 const (
 	keyStateSize    = 6
 	eventSize       = 10
 	pongSize        = 1
+	traceRecordSize = 12
 	frameHeaderSize = 3 // type + payload length, little-endian uint16
 )
 
@@ -121,6 +123,12 @@ func decodeMessage(t MessageType, payload []byte) (msg Message, ok bool, err err
 			return Message{}, false, err
 		}
 		return Message{Type: t, Pong: p}, true, nil
+	case MessageTypeTrace:
+		tr, err := decodeTraceRecord(payload)
+		if err != nil {
+			return Message{}, false, err
+		}
+		return Message{Type: t, Trace: tr}, true, nil
 	default:
 		return Message{}, false, nil
 	}
@@ -200,4 +208,28 @@ func decodePong(payload []byte) (Pong, error) {
 		return Pong{}, fmt.Errorf("transport: pong payload is %d bytes, want %d", len(payload), pongSize)
 	}
 	return Pong{Nonce: payload[0]}, nil
+}
+
+// encodeTraceRecord builds a Trace record frame's payload: code, key,
+// payload, then the device's monotonic timestamp, matching
+// firmware/trace.py's Tracer.
+func encodeTraceRecord(tr TraceRecord) []byte {
+	buf := make([]byte, traceRecordSize)
+	buf[0] = byte(tr.Code)
+	buf[1] = tr.Key
+	binary.LittleEndian.PutUint16(buf[2:4], tr.Payload)
+	binary.LittleEndian.PutUint64(buf[4:12], tr.Timestamp)
+	return buf
+}
+
+func decodeTraceRecord(payload []byte) (TraceRecord, error) {
+	if len(payload) != traceRecordSize {
+		return TraceRecord{}, fmt.Errorf("transport: trace record payload is %d bytes, want %d", len(payload), traceRecordSize)
+	}
+	return TraceRecord{
+		Code:      TraceCode(payload[0]),
+		Key:       payload[1],
+		Payload:   binary.LittleEndian.Uint16(payload[2:4]),
+		Timestamp: binary.LittleEndian.Uint64(payload[4:12]),
+	}, nil
 }

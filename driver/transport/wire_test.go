@@ -27,3 +27,26 @@ func TestPong_WrongSizeRejected(t *testing.T) {
 		t.Fatal("decodePong with a 2-byte payload returned no error")
 	}
 }
+
+func TestTraceRecord_RoundTrip(t *testing.T) {
+	want := TraceRecord{Code: TraceDebounceVerdict, Key: 3, Payload: 0xFF, Timestamp: 0x0102030405060708}
+
+	var buf bytes.Buffer
+	if err := writeFrame(&buf, MessageTypeTrace, encodeTraceRecord(want)); err != nil {
+		t.Fatalf("writeFrame trace record: %v", err)
+	}
+
+	msg, err := readMessage(&buf)
+	if err != nil {
+		t.Fatalf("readMessage: %v", err)
+	}
+	if msg.Type != MessageTypeTrace || msg.Trace != want {
+		t.Fatalf("readMessage = %+v, want Trace{%+v}", msg, want)
+	}
+}
+
+func TestTraceRecord_WrongSizeRejected(t *testing.T) {
+	if _, err := decodeTraceRecord([]byte{1, 2, 3}); err == nil {
+		t.Fatal("decodeTraceRecord with a 3-byte payload returned no error")
+	}
+}

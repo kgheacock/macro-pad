@@ -19,6 +19,7 @@ RELEASE = 1
 
 MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_PONG = 3  # docs/wire-protocol.md's Framing type registry
+MESSAGE_TYPE_TRACE = 4  # docs/wire-protocol.md's Framing type registry
 
 PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
 

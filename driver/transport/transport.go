@@ -54,13 +54,37 @@ type Pong struct {
 	Nonce byte
 }
 
+// TraceCode identifies which point in the firmware loop a TraceRecord
+// marks. See the trace code registry in "Trace record" in
+// docs/wire-protocol.md.
+type TraceCode byte
+
+const (
+	TraceDropped            TraceCode = 0
+	TraceHostMessageDecoded TraceCode = 1
+	TraceSwitchRead         TraceCode = 2
+	TraceDebounceVerdict    TraceCode = 3
+	TraceEventWritten       TraceCode = 4
+)
+
+// TraceRecord is a device→host message emitted by firmware/trace.py's
+// Tracer, when tracing is enabled. Payload's meaning depends on Code; see
+// "Trace record" in docs/wire-protocol.md.
+type TraceRecord struct {
+	Code      TraceCode
+	Key       byte
+	Payload   uint16
+	Timestamp uint64 // monotonic device time the record was taken, in microseconds
+}
+
 // Message is one decoded device→host message read from ReadMessage. Type
-// says which of Event, AudioChunk, or Pong is populated.
+// says which of Event, AudioChunk, Pong, or Trace is populated.
 type Message struct {
 	Type       MessageType
 	Event      Event
 	AudioChunk AudioChunk
 	Pong       Pong
+	Trace      TraceRecord
 }
 
 // Transport is the driver's connection to a device, real or emulated. It

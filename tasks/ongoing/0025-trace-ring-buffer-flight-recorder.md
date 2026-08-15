@@ -1,14 +1,14 @@
 ---
 id: "0025"
 title: "Record a device trace ring buffer into a host JSONL flight recorder"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/21"
+branch: "0025-trace-ring-buffer-flight-recorder"
 related: ["0002", "0020", "0021", "0022", "0024"]
 tags: ["firmware", "driver", "observability", "dx"]
 ---
@@ -107,11 +107,19 @@ message it receives, so Approach C's value is included in B's host half.
 
 ## Design
 
-`firmware/trace.py` holds `Tracer(capacity, enabled=False)`. It allocates
+`firmware/tracer.py` holds `Tracer(capacity, enabled=False)`. It allocates
 one `bytearray` of `capacity * 12` bytes at construction. `record(code,
 key, payload, now_us)` writes 12 bytes by index: code `uint8`, key
 `uint8`, payload `uint16`, timestamp `uint64` monotonic microseconds. When
 disabled, `record` returns at once.
+
+Named `tracer.py`, not `trace.py` as first planned: CPython ships a
+stdlib `trace.py`, and `test/conftest.py` deliberately keeps `firmware/`
+last on `sys.path` so it never shadows the standard library — see
+[task 0001](../complete/0001-test-harness-circuitpython-mocks.md). That
+ordering means `firmware/trace.py` could never be imported as `trace`
+under pytest, so this task's module and its test file are named
+`tracer.py` and `test_tracer.py` throughout.
 
 A full buffer overwrites the oldest record and increments `dropped`.
 `drain(write)` emits a `TRACE_DROPPED` record carrying that count first,
@@ -134,32 +142,35 @@ and the estimator name.
 
 Files to change:
 
-- `firmware/trace.py` — new. `Tracer`, `record`, `drain`, `dropped`
+- `firmware/tracer.py` — new. `Tracer`, `record`, `drain`, `dropped`
 - `firmware/app.py` — accept a `Tracer`, record at four points
 - `docs/wire-protocol.md` — trace record type in the task 0024 registry,
   plus the trace code registry
 - `driver/transport/wire.go` — encode and decode `TraceRecord`
 - `driver/recorder/recorder.go` — new. JSONL writer and clock estimator
-- `test/test_trace.py`, `driver/recorder/recorder_test.go` — new
+- `test/test_tracer.py`, `driver/recorder/recorder_test.go` — new
 
 ## Definition of done
 
 An outside reviewer verifies each item without help from the implementer.
 
 - [ ] **DoD-1** — `Tracer.record` allocates no memory after construction.
-  **Proof:** `pytest test/test_trace.py::test_record_allocates_nothing`,
-  which compares `tracemalloc` snapshots across 1000 calls
+  **Proof:** `pytest test/test_tracer.py::test_record_allocates_nothing`,
+  which compares `tracemalloc` snapshots across 1000 calls, plus an
+  identity/length check on the underlying `bytearray`
 - [ ] **DoD-2** — A `Tracer` of capacity 4 that takes 6 records holds the
   last 4, reports `dropped == 2`, and emits `TRACE_DROPPED` with payload
   `2` as the first drained record. **Proof:**
-  `pytest test/test_trace.py::test_drop_oldest_counts`
+  `pytest test/test_tracer.py::test_drop_oldest_counts`
 - [ ] **DoD-3** — A disabled `Tracer` drains zero records after 100
-  `record` calls. **Proof:** `pytest test/test_trace.py::test_disabled`
+  `record` calls. **Proof:** `pytest test/test_tracer.py::test_disabled`
 - [ ] **DoD-4** — A press through `MacroPad.step` produces the switch
   read, the debounce verdict, and the event write, in that order.
   **Proof:** `pytest test/test_app.py::test_press_trace_order`
-- [ ] **DoD-5** — The recorder writes one JSON line per message, each with
-  a `device_us` and a `host_time` field. **Proof:**
+- [ ] **DoD-5** — The recorder writes one JSON line per message, every
+  line with a `host_time` field, and a `device_us` field on the message
+  types that carry a device timestamp on the wire (Press/release event,
+  Trace record) — Audio chunk and Pong do not, and omit it. **Proof:**
   `go test ./driver/recorder/ -run TestRecorderJSONL` against a golden file
 - [ ] **DoD-6** — The file's first line names the clock offset, the sample
   count, and the estimator. **Proof:** the golden file in

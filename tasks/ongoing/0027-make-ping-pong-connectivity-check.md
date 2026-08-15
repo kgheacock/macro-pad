@@ -193,29 +193,41 @@ An outside reviewer verifies each item without help from the implementer.
 - The board's vendor and product ID are still unknown, per task 0021's
   open question → finding them, from `system_profiler SPUSBDataType`,
   is this task's first live step, and `driver/cmd/pingpong` takes them
-  as flags, so the value lands in one place.
+  as flags, so the value lands in one place. **Resolved:** `ioreg -p
+  IOUSB -l` with the board attached shows `idVendor = 11914` (`0x2E8A`)
+  and `idProduct = 4259` (`0x10A3`). Both `Makefile`'s
+  `PINGPONG_VENDOR_ID`/`PINGPONG_PRODUCT_ID` and `driver/README.md`'s
+  example now use these values.
 - `app.py`'s `_scan_switches` writes an Event with no frame header,
-  found while reading the code for this spec → this task's image writes
-  its own framed Pong and shares no code with that path, but the
-  mismatch stays live in `app.py` until a follow-up task fixes it.
+  found while reading the code for this spec → task 0021's PR #19 fixed
+  this directly (`_scan_switches` now calls `wire.write_frame`), ahead
+  of this task landing. This task's `firmware/wire.py` changes rebase
+  onto that fix and reuse `write_frame` for the Pong reply too.
 - A soft reload after the image write can outlast a short timeout →
-  `transport.Open` already retries until its context expires, per task
-  0021's design, and the host command reuses that call.
+  confirmed live: a ping sent immediately after `make ping-pong` writes
+  `code.py` can be silently dropped mid-reload (the HID report buffer
+  resets), leaving `transport.Open`'s successful connection waiting on
+  a reply to a ping that was already discarded. `driver/cmd/pingpong`'s
+  `ping` now resends the Key state message every 500ms until a reply
+  arrives, which survives the race without needing a longer timeout.
 
 ## Open questions
 
-- [ ] Which vendor and product ID does the board enumerate with? —
-      implementer, from `system_profiler SPUSBDataType`, at the start
-      of this task.
-- [ ] Does a wrong flag value for the vendor or product ID need an
-      error distinct from "no device attached"? — implementer, while
-      writing `driver/cmd/pingpong`.
+- [x] Which vendor and product ID does the board enumerate with? —
+      resolved: `0x2E8A` / `0x10A3`, from `ioreg -p IOUSB -l` with the
+      board attached.
+- [x] Does a wrong flag value for the vendor or product ID need an
+      error distinct from "no device attached"? — resolved: no. Both
+      cases return the same "no device found" error from
+      `transport.Open`, and a genuinely unplugged board fails even
+      earlier, at `make ping-pong`'s `check-circuitpy` prerequisite
+      (the `CIRCUITPY` volume disappears with the board), well under
+      5 s.
 
 ## Notes
 
-Found while reading `firmware/app.py` for this spec: `_scan_switches`
-writes `wire.encode_event`'s raw bytes straight to `usb_cdc.data`, with
-no type-and-length header. `transport.Device`'s `ReadMessage`, built in
-task 0021, expects every device→host message wrapped in that header. A
-real key press today desyncs that reader. This is worth its own
-follow-up task.
+`firmware/app.py`'s `_scan_switches` used to write `wire.encode_event`'s
+raw bytes straight to `usb_cdc.data`, with no type-and-length header,
+found while reading the code for this spec. Task 0021's PR #19 fixed it
+before this task's PR landed, so the follow-up this note originally
+called for is no longer needed.

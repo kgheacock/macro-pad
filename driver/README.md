@@ -39,11 +39,10 @@ interfaces directly:
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 dev, err := transport.Open(ctx, transport.Options{
-	// VendorID and ProductID are not filled in above: task 0021's open
-	// questions leave them for the hardware owner to confirm at bring-up,
-	// from `system_profiler SPUSBDataType`.
-	VendorID:  0x0000,
-	ProductID: 0x0000,
+	// Confirmed at bring-up (task 0021's open question) from
+	// `ioreg -p IOUSB -l` with the board attached, running CircuitPython.
+	VendorID:  0x2E8A,
+	ProductID: 0x10A3,
 })
 ```
 

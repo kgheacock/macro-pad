@@ -66,6 +66,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// pingResendInterval paces ping's resends while it waits for a reply. A
+// ping sent right as CircuitPython's auto-reload restarts code.py can be
+// silently dropped — the HID report buffer resets mid-reload — so a
+// single send-and-wait can hang until ctx expires even though the device
+// is present and about to be ready. Resending periodically survives that
+// race without guessing how long the reload itself takes.
+const pingResendInterval = 500 * time.Millisecond
+
 // pingResult carries one ReadMessage outcome back to ping's select, so a
 // blocked read can't stop ping from returning once ctx is done.
 type pingResult struct {
@@ -74,16 +82,22 @@ type pingResult struct {
 }
 
 // ping sends a Key state message with transport.PingKeyIndex and nonce,
-// then waits for a Pong to come back. It reports PASS to out and returns
-// true only when the pong's nonce matches; any other outcome — a wrong
-// nonce, a non-Pong message, a read error, or ctx expiring — reports FAIL
-// and returns false.
+// resending every pingResendInterval until a message arrives, then
+// decides on that first message: it reports PASS to out and returns true
+// only when the pong's nonce matches; any other outcome — a wrong nonce,
+// a non-Pong message, a read error, or ctx expiring with nothing ever
+// arriving — reports FAIL and returns false. A mismatched reply is
+// treated as decisive, not resent past, so a real wrong-nonce pong is
+// never mistaken for one more dropped-ping retry.
 func ping(ctx context.Context, t transport.Transport, nonce byte, out io.Writer) (bool, error) {
-	if err := t.SendKeyState(transport.KeyState{
-		KeyIndex: transport.PingKeyIndex,
-		Version:  transport.ProtocolVersion,
-		EmojiID:  nonce,
-	}); err != nil {
+	send := func() error {
+		return t.SendKeyState(transport.KeyState{
+			KeyIndex: transport.PingKeyIndex,
+			Version:  transport.ProtocolVersion,
+			EmojiID:  nonce,
+		})
+	}
+	if err := send(); err != nil {
 		return false, fmt.Errorf("send ping: %w", err)
 	}
 
@@ -93,21 +107,31 @@ func ping(ctx context.Context, t transport.Transport, nonce byte, out io.Writer)
 		resCh <- pingResult{msg: msg, err: err}
 	}()
 
-	select {
-	case <-ctx.Done():
-		fmt.Fprintln(out, "FAIL")
-		return false, ctx.Err()
-	case res := <-resCh:
-		if res.err != nil {
+	resend := time.NewTicker(pingResendInterval)
+	defer resend.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
 			fmt.Fprintln(out, "FAIL")
-			return false, fmt.Errorf("read pong: %w", res.err)
+			return false, ctx.Err()
+		case res := <-resCh:
+			if res.err != nil {
+				fmt.Fprintln(out, "FAIL")
+				return false, fmt.Errorf("read pong: %w", res.err)
+			}
+			if res.msg.Type != transport.MessageTypePong || res.msg.Pong.Nonce != nonce {
+				fmt.Fprintln(out, "FAIL")
+				return false, nil
+			}
+			fmt.Fprintln(out, "PASS")
+			return true, nil
+		case <-resend.C:
+			if err := send(); err != nil {
+				fmt.Fprintln(out, "FAIL")
+				return false, fmt.Errorf("resend ping: %w", err)
+			}
 		}
-		if res.msg.Type != transport.MessageTypePong || res.msg.Pong.Nonce != nonce {
-			fmt.Fprintln(out, "FAIL")
-			return false, nil
-		}
-		fmt.Fprintln(out, "PASS")
-		return true, nil
 	}
 }
 

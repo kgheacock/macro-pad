@@ -22,4 +22,5 @@ flash:
 		(echo "error: CIRCUITPY volume not found at $(CIRCUITPY_VOLUME)" >&2; exit 1)
 	rsync -rc --delete \
 		--exclude=modules/ --exclude=__pycache__/ --exclude=README.md \
+		--exclude=.Trashes --exclude=.Spotlight-V100 --exclude=.fseventsd --exclude=.DS_Store \
 		firmware/ $(CIRCUITPY_VOLUME)/

@@ -61,4 +61,8 @@ type Transport interface {
 	// serial, or the transport is closed. A frame whose type this package
 	// does not know is skipped by its declared length and never returned.
 	ReadMessage() (Message, error)
+
+	// Close releases the transport's underlying handles. A ReadMessage
+	// call blocked when Close runs returns io.EOF.
+	Close() error
 }

@@ -44,7 +44,7 @@ def answer_ping(hid_device, serial):
     if message.key_index != wire.PING_KEY_INDEX:
         return False
 
-    serial.write(wire.encode_pong(message.emoji_id))
+    wire.write_frame(serial, wire.MESSAGE_TYPE_PONG, wire.encode_pong(message.emoji_id))
     return True
 
 

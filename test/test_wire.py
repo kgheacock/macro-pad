@@ -4,6 +4,17 @@ import pytest
 import wire
 
 
+class FakeWriter:
+    """Recorder standing in for a CDC serial endpoint."""
+
+    def __init__(self):
+        self.written = bytearray()
+
+    def write(self, data):
+        self.written.extend(data)
+        return len(data)
+
+
 def _key_state_bytes(
     key_index=0, version=wire.PROTOCOL_VERSION, color=0x0000, emoji_id=0, blink=False
 ):
@@ -60,3 +71,17 @@ def test_encode_event_release():
 def test_encode_event_rejects_unknown_type():
     with pytest.raises(ValueError):
         wire.encode_event(0, 2, 0)
+
+
+def test_write_frame_prefixes_type_and_length():
+    writer = FakeWriter()
+    payload = wire.encode_event(2, wire.PRESS, 0)
+
+    wire.write_frame(writer, wire.MESSAGE_TYPE_EVENT, payload)
+
+    assert len(writer.written) == wire.FRAME_HEADER_SIZE + wire.EVENT_SIZE
+    header = writer.written[: wire.FRAME_HEADER_SIZE]
+    # Type byte, then payload length as a little-endian uint16, matching
+    # driver/transport/wire.go's writeFrame.
+    assert header == bytes((wire.MESSAGE_TYPE_EVENT, wire.EVENT_SIZE, 0))
+    assert writer.written[wire.FRAME_HEADER_SIZE :] == payload

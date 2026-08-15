@@ -111,6 +111,13 @@ def _background_color(display):
     return list(display.shown_groups[-1])[0].pixel_shader[0]
 
 
+def _framed_event(key_index, event_type, timestamp_us):
+    writer = FakeSerial()
+    payload = wire.encode_event(key_index, event_type, timestamp_us)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_EVENT, payload)
+    return bytes(writer.written)
+
+
 def test_key_state_applies_to_one_key():
     pad, _, displays, _, hid_device, _, emoji_lookup = _build_pad()
 
@@ -182,8 +189,8 @@ def test_press_writes_event():
     switches[0].value = False  # pull-up: closed switch reads low
     pad.step(DEBOUNCE_WINDOW_US * 2)
 
-    assert len(serial.written) == wire.EVENT_SIZE
-    assert bytes(serial.written) == wire.encode_event(
+    assert len(serial.written) == wire.FRAME_HEADER_SIZE + wire.EVENT_SIZE
+    assert bytes(serial.written) == _framed_event(
         0, wire.PRESS, DEBOUNCE_WINDOW_US * 2
     )
 
@@ -197,8 +204,9 @@ def test_release_writes_event():
     switches[2].value = True
     pad.step(DEBOUNCE_WINDOW_US * 4)
 
-    assert len(serial.written) == wire.EVENT_SIZE * 2
-    assert bytes(serial.written[wire.EVENT_SIZE :]) == wire.encode_event(
+    frame_size = wire.FRAME_HEADER_SIZE + wire.EVENT_SIZE
+    assert len(serial.written) == frame_size * 2
+    assert bytes(serial.written[frame_size:]) == _framed_event(
         2, wire.RELEASE, DEBOUNCE_WINDOW_US * 4
     )
 
@@ -213,8 +221,8 @@ def test_bounce_writes_one_event():
         switches[1].value = bounce % 2 == 1  # low, high, low, high, low
         pad.step(100 + bounce * 100)
 
-    assert len(serial.written) == wire.EVENT_SIZE
-    assert bytes(serial.written) == wire.encode_event(1, wire.PRESS, 100)
+    assert len(serial.written) == wire.FRAME_HEADER_SIZE + wire.EVENT_SIZE
+    assert bytes(serial.written) == _framed_event(1, wire.PRESS, 100)
 
 
 def test_idle_dims_backlight():

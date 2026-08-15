@@ -12,9 +12,12 @@ PROTOCOL_VERSION = 1
 
 KEY_STATE_SIZE = 6  # docs/wire-protocol.md's Key state message
 EVENT_SIZE = 10  # docs/wire-protocol.md's Press/release event
+FRAME_HEADER_SIZE = 3  # docs/wire-protocol.md's Framing: type + length
 
 PRESS = 0
 RELEASE = 1
+
+MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
 
 
 class UnsupportedVersionError(ValueError):
@@ -86,3 +89,16 @@ def encode_event(key_index, event_type, timestamp_us):
     buffer[1] = event_type
     buffer[2:EVENT_SIZE] = timestamp_us.to_bytes(8, "little")
     return bytes(buffer)
+
+
+def write_frame(writer, message_type, payload):
+    """Write one device→host frame: a type byte, a little-endian uint16
+    payload length, then the payload itself, to `writer`.
+
+    Mirrors `driver/transport/wire.go`'s `writeFrame`, so `Device.ReadMessage`
+    on the host side can decode what this writes. See "Framing" in
+    docs/wire-protocol.md.
+    """
+    header = bytes((message_type, len(payload) & 0xFF, (len(payload) >> 8) & 0xFF))
+    writer.write(header)
+    writer.write(payload)

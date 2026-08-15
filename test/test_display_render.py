@@ -1,5 +1,6 @@
 import displayio
 
+from firmware import glyphs
 from firmware.display_render import KeyState, render_key
 
 
@@ -50,6 +51,20 @@ def test_emoji_bitmap():
 
     emoji_layer = list(display.shown_groups[-1])[1]
     assert emoji_layer.bitmap is expected_bitmap
+
+
+def test_renders_digit():
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id=0xF3, color=0x000000)
+
+    def emoji_lookup(emoji_id):
+        return glyphs.lookup(emoji_id, foreground=0xFFFFFF, background=0x000000)
+
+    render_key(display, key_state, emoji_lookup)
+
+    emoji_layer = list(display.shown_groups[-1])[1]
+    expected = glyphs.lookup(0xF3, foreground=0xFFFFFF, background=0x000000)
+    assert emoji_layer.bitmap is expected.bitmap
 
 
 def test_blink_toggle():

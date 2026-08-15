@@ -1,14 +1,14 @@
 ---
 id: "0023"
 title: "Add the glyph table and the digit glyphs 1 to 6"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/18"
+branch: "0023-glyph-table-and-digits"
 related: ["0002", "0006", "0013", "0020", "0022"]
 tags: ["firmware", "display", "assets"]
 ---

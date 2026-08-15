@@ -146,6 +146,27 @@ Total memory for queued-but-undelivered messages therefore never exceeds
 long press — see tasks 0011–0013), binary audio streaming to a client, and
 auth beyond the `localhost` bind and the client cap.
 
+### Recording a trace alongside the plugin API
+
+`transport.Device.ReadMessage` supports exactly one caller — it drains
+one internal channel, not a broadcast. `macropadd` needs two, once task
+0025's flight recorder is turned on: `plugin.Server` for its clients, and
+`driver/recorder.Recorder` for the JSONL file. `transport.Fanout`
+(`transport/fanout.go`) is the one caller of `ReadMessage` in that case;
+it hands each of them their own subscription — itself a `Transport` — so
+neither one calling `ReadMessage` starves the other. Pass `--trace-file`
+to turn recording on:
+
+```bash
+go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 \
+  --trace-file=/tmp/macropad-trace.jsonl
+```
+
+`--trace-file` is empty, and recording off, by default — the recorder
+buffers every line in memory until the daemon stops, per task 0025's
+design, so leaving it on for a long session is a deliberate choice, not
+a default.
+
 ## Scope
 
 Language: Go.

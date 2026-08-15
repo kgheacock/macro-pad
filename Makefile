@@ -16,11 +16,25 @@ firmware/modules/$(CIRCUITPYTHON_UF2):
 	curl -fL -o $@ $(CIRCUITPYTHON_URL)
 	echo "$(CIRCUITPYTHON_SHA256)  $@" | shasum -a 256 -c - || (rm -f $@; exit 1)
 
-.PHONY: flash
-flash:
+.PHONY: check-circuitpy
+check-circuitpy:
 	diskutil info $(CIRCUITPY_VOLUME) 2>/dev/null | grep -q '^ *Volume Name: *CIRCUITPY$$' || \
 		(echo "error: CIRCUITPY volume not found at $(CIRCUITPY_VOLUME)" >&2; exit 1)
+
+.PHONY: flash
+flash: check-circuitpy
 	rsync -rc --delete \
 		--exclude=modules/ --exclude=__pycache__/ --exclude=README.md \
 		--exclude=.Trashes --exclude=.Spotlight-V100 --exclude=.fseventsd --exclude=.DS_Store \
 		firmware/ $(CIRCUITPY_VOLUME)/
+
+.PHONY: debug
+debug: check-circuitpy
+	sed 's/console=False/console=True/' firmware/boot.py > $(CIRCUITPY_VOLUME)/boot.py
+	if diff -q firmware/boot.py $(CIRCUITPY_VOLUME)/boot.py >/dev/null; then \
+		echo "error: console=False not found in firmware/boot.py; boot.py on device left unchanged" >&2; \
+		exit 1; \
+	fi
+	@echo "boot.py written to $(CIRCUITPY_VOLUME) with console=True."
+	@echo "Find the console port and run: screen \"\$$(ls /dev/cu.usbmodem*)\" 115200"
+	@echo "Run 'make flash' afterward to restore console=False."

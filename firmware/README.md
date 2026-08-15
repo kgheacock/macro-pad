@@ -89,10 +89,13 @@ to the root of the `CIRCUITPY` drive, where no `firmware` package exists.
 [`0010`](../tasks/backlog/0010-hardware-bring-up-single-key.md) records
 the figure with the displays attached.
 
-To measure it, temporarily re-enable the serial console by changing the
-last line of `boot.py` to `usb_cdc.enable(console=True, data=True)`, then
-copy this file to the `CIRCUITPY` drive as `code.py` in place of the real
-one:
+To measure it, temporarily re-enable the serial console by running `make
+debug` from the repo root. This writes a `boot.py` to the `CIRCUITPY`
+drive with `console=True`; the tracked `firmware/boot.py` stays
+unchanged. Find the console port yourself — the port that existed
+before the board reset becomes the console port; the new port that
+appears is the data port. Then copy this file to the `CIRCUITPY` drive
+as `code.py` in place of the real one:
 
 ```python
 import time
@@ -147,6 +150,10 @@ This measures the loop with the displays absent, which is the floor. A
 real SPI refresh across six panels adds to it — that is the cost the
 task [`0022`](../tasks/ongoing/0022-firmware-main-loop.md) decision
 accepted, and the number task 0010 must check.
+
+Run `make flash` afterward to put the real `code.py` and a
+`console=False` `boot.py` back on the board. There is no separate
+"undo" command — `make flash` is the exit path from debug mode.
 
 Record the result here as a line of the form:
 

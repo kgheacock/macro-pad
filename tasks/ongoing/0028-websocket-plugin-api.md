@@ -85,9 +85,8 @@ already chose for its inbound signal server.
 
 ### Approach C — In-process Go handler registration, no IPC
 
-A "plugin" becomes a Go function compiled into the daemon and
-registered with task 0013's planned `UseAction`, instead of a separate
-process.
+A "plugin" becomes a Go function compiled into and registered with the
+daemon itself, instead of a separate process.
 
 - Good, because there is no queue, no serialization, and no
   memory-growth question. The handler runs in the daemon's own

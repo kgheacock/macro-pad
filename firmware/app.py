@@ -23,6 +23,7 @@ import digitalio
 import displayio
 
 import display_render
+import tracer as tracer_module
 import wire
 from debounce import Debouncer
 from idle_timer import IdleTimer
@@ -96,6 +97,7 @@ class MacroPad:
         emoji_lookup,
         debounce_window_ms=7.5,
         idle_timer=None,
+        tracer=None,
     ):
         self._switches = switches
         self._displays = displays
@@ -103,8 +105,13 @@ class MacroPad:
         self._hid_device = hid_device
         self._serial = serial
         self._emoji_lookup = emoji_lookup
+        self._tracer = tracer
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
+        # The switch's own initial reading, not a sentinel, so the first
+        # `step` traces nothing for a switch that has not moved — a trace
+        # marks an edge on the pin, not the fact that it was read at all.
+        self._last_raw = [not switch.value for switch in switches]
         self._idle_timer = idle_timer if idle_timer is not None else IdleTimer()
         self.key_states = [
             display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
@@ -117,7 +124,7 @@ class MacroPad:
 
     def step(self, now_us):
         """Run one iteration of the loop."""
-        host_message = self._apply_host_report()
+        host_message = self._apply_host_report(now_us)
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys()
@@ -126,12 +133,18 @@ class MacroPad:
             self._idle_timer.touch(now_us)
         self._apply_backlight(now_us)
 
+        if self._tracer is not None:
+            self._tracer.drain(self._write_trace_record)
+
+    def _write_trace_record(self, record_bytes):
+        wire.write_frame(self._serial, wire.MESSAGE_TYPE_TRACE, record_bytes)
+
     def run(self):
         """Loop forever. `code.py` calls this and never returns."""
         while True:
             self.step(time.monotonic_ns() // 1000)
 
-    def _apply_host_report(self):
+    def _apply_host_report(self, now_us):
         """Decode one HID output report and update the key it names.
 
         Returns True when a key's state changed. A report that cannot be
@@ -146,6 +159,14 @@ class MacroPad:
             message = wire.decode_key_state(self._strip_report_id(report))
         except ValueError:
             return False
+
+        if self._tracer is not None:
+            self._tracer.record(
+                tracer_module.HOST_MESSAGE_DECODED,
+                message.key_index,
+                message.emoji_id,
+                now_us,
+            )
 
         if message.key_index >= len(self.key_states):
             return False
@@ -181,13 +202,35 @@ class MacroPad:
             # The switches are wired to ground with the pull-up enabled,
             # so a closed switch reads low.
             pressed = not switch.value
+            edge = pressed != self._last_raw[index]
+            self._last_raw[index] = pressed
+
             transition = self._debouncers[index].feed(pressed, now_us)
+
+            if self._tracer is not None and edge:
+                self._tracer.record(
+                    tracer_module.SWITCH_READ, index, int(pressed), now_us
+                )
+                if transition == "press":
+                    verdict = wire.PRESS
+                elif transition == "release":
+                    verdict = wire.RELEASE
+                else:
+                    verdict = 0xFF  # rejected as a bounce
+                self._tracer.record(
+                    tracer_module.DEBOUNCE_VERDICT, index, verdict, now_us
+                )
+
             if transition is None:
                 continue
 
             event_type = wire.PRESS if transition == "press" else wire.RELEASE
             payload = wire.encode_event(index, event_type, now_us)
             wire.write_frame(self._serial, wire.MESSAGE_TYPE_EVENT, payload)
+            if self._tracer is not None:
+                self._tracer.record(
+                    tracer_module.EVENT_WRITTEN, index, event_type, now_us
+                )
             wrote_event = True
 
         return wrote_event

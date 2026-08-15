@@ -18,11 +18,13 @@ type MessageType byte
 const (
 	MessageTypeEvent      MessageType = 1
 	MessageTypeAudioChunk MessageType = 2
+	MessageTypePong       MessageType = 3
 )
 
 const (
 	keyStateSize    = 6
 	eventSize       = 10
+	pongSize        = 1
 	frameHeaderSize = 3 // type + payload length, little-endian uint16
 )
 
@@ -113,6 +115,12 @@ func decodeMessage(t MessageType, payload []byte) (msg Message, ok bool, err err
 			return Message{}, false, err
 		}
 		return Message{Type: t, AudioChunk: c}, true, nil
+	case MessageTypePong:
+		p, err := decodePong(payload)
+		if err != nil {
+			return Message{}, false, err
+		}
+		return Message{Type: t, Pong: p}, true, nil
 	default:
 		return Message{}, false, nil
 	}
@@ -179,4 +187,17 @@ func decodeAudioChunk(payload []byte) (AudioChunk, error) {
 		PCM:      payload[1 : len(payload)-1],
 		Final:    payload[len(payload)-1] != 0,
 	}, nil
+}
+
+// encodePong builds a Pong frame's payload: the nonce, unchanged from the
+// ping that carried it.
+func encodePong(nonce byte) []byte {
+	return []byte{nonce}
+}
+
+func decodePong(payload []byte) (Pong, error) {
+	if len(payload) != pongSize {
+		return Pong{}, fmt.Errorf("transport: pong payload is %d bytes, want %d", len(payload), pongSize)
+	}
+	return Pong{Nonce: payload[0]}, nil
 }

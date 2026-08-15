@@ -18,6 +18,9 @@ PRESS = 0
 RELEASE = 1
 
 MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
+MESSAGE_TYPE_PONG = 3  # docs/wire-protocol.md's Framing type registry
+
+PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
 
 
 class UnsupportedVersionError(ValueError):
@@ -102,3 +105,13 @@ def write_frame(writer, message_type, payload):
     header = bytes((message_type, len(payload) & 0xFF, (len(payload) >> 8) & 0xFF))
     writer.write(header)
     writer.write(payload)
+
+
+def encode_pong(nonce):
+    """Build a Pong reply's payload: `nonce`, unchanged.
+
+    Pass this to `write_frame` with `MESSAGE_TYPE_PONG` to write the
+    framed reply a caller reads back with `driver/transport`'s Pong
+    decoder.
+    """
+    return bytes((nonce,))

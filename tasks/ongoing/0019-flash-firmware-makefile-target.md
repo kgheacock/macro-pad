@@ -1,9 +1,9 @@
 ---
 id: "0019"
 title: "Add a make flash target that copies firmware onto the connected board"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null

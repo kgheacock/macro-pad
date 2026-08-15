@@ -67,6 +67,19 @@ its class drivers to the composite device task 0008 describes; the other
 platforms hidapi and go.bug.st/serial support are untested here and out of
 scope for this project.
 
+## Connectivity check
+
+`driver/cmd/pingpong` sends a ping — a Key state message with the
+reserved index `255` and a random nonce in the Emoji ID byte — over
+`transport.Device`, then waits for the matching pong and prints `PASS` or
+`FAIL`, exiting with a matching code. Run it with `make ping-pong` from
+the repo root, next to `make debug`; that target flashes the minimal
+firmware image in `firmware/ping_pong.py` first, so no board setup beyond
+having `CIRCUITPY` mounted is needed. See
+[`docs/wire-protocol.md`](../docs/wire-protocol.md#ping) for the Ping and
+Pong message layout, and [`firmware/README.md`](../firmware/README.md)
+for the firmware side of the check.
+
 ## Scope
 
 Language: Go.

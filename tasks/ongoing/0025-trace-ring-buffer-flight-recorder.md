@@ -1,14 +1,14 @@
 ---
 id: "0025"
 title: "Record a device trace ring buffer into a host JSONL flight recorder"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0025-trace-ring-buffer-flight-recorder"
 related: ["0002", "0020", "0021", "0022", "0024"]
 tags: ["firmware", "driver", "observability", "dx"]
 ---

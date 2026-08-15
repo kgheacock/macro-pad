@@ -1,14 +1,14 @@
 ---
 id: "0028"
 title: "Add a local WebSocket API for third-party macro-pad plugins"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-15"
 updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0028-websocket-plugin-api"
 related: ["0002", "0011", "0012", "0013", "0021"]
 tags: ["driver", "plugin", "api"]
 ---

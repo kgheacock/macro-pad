@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/21"
 branch: "0025-trace-ring-buffer-flight-recorder"
 related: ["0002", "0020", "0021", "0022", "0024"]
 tags: ["firmware", "driver", "observability", "dx"]

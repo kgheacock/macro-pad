@@ -7,8 +7,8 @@ See [`docs/wire-protocol.md`](../docs/wire-protocol.md) for the byte layout
 of every message sent or received over these channels.
 
 **Status: in progress.** [`transport/`](transport/) defines the `Transport`
-interface and an in-memory emulator for driver tests. No other driver code
-exists yet.
+interface, an in-memory emulator for driver tests, and `Device`, the
+hardware implementation. No other driver code exists yet.
 
 ## Testing without hardware
 
@@ -27,8 +27,45 @@ Run the driver tests from the repository root:
 go test ./driver/transport/...
 ```
 
-A later task wires `Transport` to a real HID/CDC implementation. Task 0010
-checks that implementation against real hardware.
+Task 0010 checks `transport.Device`, below, against real hardware.
+
+## Connecting to a real board
+
+`transport.Device` implements `Transport` over a real macro pad, using the
+operating system's own HID and CDC class drivers instead of claiming USB
+interfaces directly:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+dev, err := transport.Open(ctx, transport.Options{
+	// VendorID and ProductID are not filled in above: task 0021's open
+	// questions leave them for the hardware owner to confirm at bring-up,
+	// from `system_profiler SPUSBDataType`.
+	VendorID:  0x0000,
+	ProductID: 0x0000,
+})
+```
+
+`Open` matches `Options.VendorID` and `Options.ProductID` against attached
+HID devices, reads the match's USB serial number, then opens the CDC
+serial port carrying the same serial number — never by listing mounted
+volumes. It retries until `ctx` is done, so a caller can hold `Open`
+across the reboot that flashing new firmware causes. If more than one
+matching device is attached, set `Options.SerialNumber` to pick one;
+otherwise `Open` returns `ErrAmbiguousDevice`.
+
+**cgo requirement.** `Device` binds `github.com/sstallion/go-hid`, a cgo
+wrapper around hidapi, to reach the HID output report. Building or testing
+any package that imports `transport` therefore requires `CGO_ENABLED=1`
+and a C toolchain (Xcode Command Line Tools on macOS). `go.bug.st/serial`,
+which carries the CDC channel, is pure Go and does not add this
+requirement on its own.
+
+**macOS only.** `Open`'s HID/CDC device-matching relies on macOS binding
+its class drivers to the composite device task 0008 describes; the other
+platforms hidapi and go.bug.st/serial support are untested here and out of
+scope for this project.
 
 ## Scope
 

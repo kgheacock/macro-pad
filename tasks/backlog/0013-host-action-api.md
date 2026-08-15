@@ -3,13 +3,13 @@ id: "0013"
 title: "Host action API — setEmoji, setState, useAction"
 status: "backlog"
 created: "2026-08-04"
-updated: "2026-08-06"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0002", "0011", "0012", "0015", "0016"]
+related: ["0002", "0011", "0012", "0015", "0016", "0028"]
 tags: ["driver", "api", "protocol"]
 ---
 
@@ -91,15 +91,37 @@ a plain HTTP call, or a hook can call `curl` directly.
 - Bad, because it needs port-conflict handling that a fixed-path socket
   avoids.
 
+### Approach D — Reuse task 0028's plugin WebSocket server, add a `signal` kind
+
+Task 0028 already runs `plugin.Server`, bound to `127.0.0.1`, with a
+tested client cap and bounded per-client queues. `macrodriver signal`
+becomes a WebSocket client that sends a new `signal` message kind; the
+server routes it to a `UseAction` handler instead of relaying it as an
+`event`.
+
+- Good, because the daemon then runs one local server, not two. This
+  matches task 0028's own open question about merging the two.
+- Good, because the client cap, the `localhost` bind, and the bounded
+  queues already exist and are tested — `signal` adds no new bounding
+  logic.
+- Bad, because 0013 cannot start before 0028 reaches `main` — an
+  ordering constraint none of the first three approaches carry.
+- Bad, because a WebSocket client is heavier than a Unix-socket dial for
+  a one-shot CLI call from a hook script.
+
 ## Decision
 
-Chosen: **Approach A — Unix socket server, with `signal` as its client**.
+Chosen: **Approach D — reuse task 0028's plugin WebSocket server.**
 
-It keeps mutable state in the one driver process that already owns tasks
-0011 and 0012's registries, and avoids opening a network port for a
-local, single-user integration. This choice accepts that a signal fired
-while the driver is not running is dropped — acceptable, since a Claude
-Code session normally starts after `macrodriver own`.
+Approach A's Unix socket and task 0028's WebSocket server both solve the
+same problem: an external process reaching the one daemon that owns the
+device. Running both would leave the daemon with two local IPC
+mechanisms to secure and test, for one problem. Approach D retires
+Approach A instead, and folds `signal` into 0028's protocol. This choice
+accepts Approach D's ordering cost, and that a hook's `signal` call
+needs a small WebSocket client instead of a two-line Unix-socket dial.
+Approach A's dropped-signal-while-down risk, below, still applies
+unchanged.
 
 ## Design
 
@@ -109,17 +131,24 @@ such as `"Alert"` into a color, blink, and emoji, then send the Key state
 HID message from task 0002. `UseAction(key int, mask EventMask, handler
 func(Event))` registers a handler; `EventMask` extends existing event
 types with `PROCESS_WAITING`, `PROCESS_DONE`, and `PROCESS_EXITED`.
-`driver/signal/server.go` runs the Unix socket server; `macrodriver
-signal` is its client. `driver/README.md` gains a worked Claude Code
-`settings.json` hook example.
+`driver/plugin/protocol.go` gains a third `MessageKind`, `signal`,
+carrying a key index and an event name such as `"stop"` or
+`"notification"`. `driver/plugin/server.go`'s `readPump` routes a
+`signal` message to the key's registered `UseAction` handler instead of
+broadcasting it. `macrodriver signal` opens a short-lived connection
+using 0028's protocol, sends one `signal` message, and exits.
+`driver/README.md` gains a worked Claude Code `settings.json` hook
+example.
 
 Files to change:
 
 - `driver/api/state.go` — new, `SetEmoji`, `SetState`
 - `driver/api/action.go` — new, `UseAction`, `EventMask`
-- `driver/signal/server.go` — new, Unix socket server
-- `driver/cmd/signal.go` — new, `signal` subcommand
-- `driver/README.md` — document the API, the signal endpoint, and the
+- `driver/plugin/protocol.go` — add the `signal` message kind
+- `driver/plugin/server.go` — route a `signal` message to its key's
+  `UseAction` handler
+- `driver/cmd/signal.go` — new, `signal` subcommand, a WebSocket client
+- `driver/README.md` — document the API, the `signal` message, and the
   hook example
 
 ## Definition of done
@@ -129,11 +158,11 @@ Files to change:
   **Proof:** `go test ./driver/api/... -run TestSetState_Alert`
 - [ ] **DoD-2** — A `UseAction` handler for `PROCESS_DONE` on key 0 runs
   when `macrodriver signal --key 0 --event stop` reaches a running
-  driver. **Proof:** `go test ./driver/signal/... -run
-  TestSignal_TriggersHandler`
+  driver. **Proof:** `go test ./driver/plugin/... -run
+  TestServer_SignalTriggersHandler`
 - [ ] **DoD-3** — A signal for a key with no registered handler does not
-  error the driver process. **Proof:** `go test ./driver/signal/... -run
-  TestSignal_NoHandler`
+  error the driver process. **Proof:** `go test ./driver/plugin/... -run
+  TestServer_SignalNoHandler`
 - [ ] **DoD-4** — The documented Claude Code hook example, run against a
   real `claude` session owned through tasks 0011 and 0012, raises
   `PROCESS_WAITING` on a permission prompt. **Proof:** manual run, logged

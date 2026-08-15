@@ -177,9 +177,11 @@ implementer.
 
 ## Open questions
 
-- [ ] Does this WebSocket server merge with task 0013's Unix-socket
-      signal server into one process, one IPC mechanism? —
-      implementer, before task 0013 starts.
+- [x] Does this WebSocket server merge with task 0013's Unix-socket
+      signal server into one process, one IPC mechanism? — Yes,
+      decided 2026-08-15. Task 0013's spec now reuses this server: it
+      adds a `signal` message kind instead of a separate Unix socket.
+      See task 0013's Approach D.
 - [ ] Does a plugin need task 0025's device trace records? — deferred,
       no clear demand yet.
 

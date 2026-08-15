@@ -3,7 +3,7 @@ id: "0012"
 title: "Send resolved key events into an owned session"
 status: "backlog"
 created: "2026-08-04"
-updated: "2026-08-06"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -32,8 +32,8 @@ owned session cannot yet receive a single keystroke from a key press.
 
 ## Non-goals
 
-- A general API for host code to subscribe to events, such as
-  `UseAction`. Task 0013 covers that.
+- A general API for host code to subscribe to events. Task 0013's plugin
+  `signal` broadcast covers that.
 - Choosing what to send based on process output or state. This task's
   bindings are fixed at config time.
 - Session creation or lifecycle. Task 0011 covers that.
@@ -52,7 +52,8 @@ dispatcher calls `tmux send-keys -t <session> <keys>`.
 - Bad, because tmux's send-keys syntax mixes literal text and named keys
   (`Escape`, `Enter`) — a wrong config sends the wrong bytes.
 - Bad, because it does not scale to logic that depends on process state;
-  that need still routes through task 0013's API.
+  that need still routes through a plugin subscribed to task 0013's
+  `signal` broadcast.
 
 ### Approach B — Embed a scripting language for key actions
 
@@ -86,7 +87,8 @@ Chosen: **Approach A — static per-key config through tmux send-keys**.
 
 It proves that a resolved press event can drive an owned session, using
 only task 0011's registry. This choice accepts that actions are fixed at
-config time; task 0013's API is where conditional logic belongs.
+config time; a plugin reacting to task 0013's `signal` broadcast is
+where conditional logic belongs.
 
 ## Design
 

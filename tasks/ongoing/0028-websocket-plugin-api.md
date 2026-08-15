@@ -1,15 +1,15 @@
 ---
 id: "0028"
 title: "Add a local WebSocket API for third-party macro-pad plugins"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-15"
 updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
-related: ["0002", "0011", "0012", "0013", "0021"]
+pr: "https://github.com/kgheacock/macro-pad/pull/23"
+branch: "0028-websocket-plugin-api"
+related: ["0002", "0011", "0012", "0013", "0020", "0021", "0025"]
 tags: ["driver", "plugin", "api"]
 ---
 
@@ -85,9 +85,8 @@ already chose for its inbound signal server.
 
 ### Approach C — In-process Go handler registration, no IPC
 
-A "plugin" becomes a Go function compiled into the daemon and
-registered with task 0013's planned `UseAction`, instead of a separate
-process.
+A "plugin" becomes a Go function compiled into and registered with the
+daemon itself, instead of a separate process.
 
 - Good, because there is no queue, no serialization, and no
   memory-growth question. The handler runs in the daemon's own
@@ -123,6 +122,18 @@ goes from device to client and wraps a decoded `transport.Event`.
 `setKeyState` goes from client to device and becomes one
 `SendKeyState` call.
 
+Task 0025 landed after this task's design was written, and added a
+second consumer of `transport.Device.ReadMessage`:
+`driver/recorder.Recorder`. `ReadMessage` supports exactly one caller —
+it drains one internal channel — so `plugin.Server` and `Recorder`
+running against the same `Device` at once would silently split the
+message stream between them. `driver/transport/fanout.go` adds
+`Fanout`, the one `ReadMessage` caller `macropadd` now uses; it hands
+`plugin.Server` and, when `--trace-file` turns recording on, `Recorder`
+each their own subscription — itself a `Transport`, so neither package's
+own public API changed. This is the shared demultiplexer task 0020's
+Design section already named as `plugin.Server`'s dependency.
+
 Files to change:
 
 - `driver/go.mod` — add a WebSocket library
@@ -132,9 +143,15 @@ Files to change:
   JSON schema
 - `driver/plugin/server_test.go` — new, drop, disconnect, and
   `maxClients` tests
-- `driver/cmd/macropadd/main.go` — new, the daemon entry point
-- `driver/README.md` — document the daemon, the protocol, and the
-  memory bound
+- `driver/transport/fanout.go` — new, `Fanout`, so `plugin.Server` and
+  task 0025's `Recorder` can each read every device message
+- `driver/transport/fanout_test.go` — new, delivery, slow-subscriber,
+  and close tests
+- `driver/cmd/macropadd/main.go` — new, the daemon entry point; wires
+  `Fanout`, `plugin.Server`, and an optional `Recorder` behind
+  `--trace-file`
+- `driver/README.md` — document the daemon, the protocol, the memory
+  bound, and `--trace-file`
 
 ## Definition of done
 
@@ -174,12 +191,23 @@ implementer.
 - This overlaps task 0013's Unix-socket signal server, so the daemon
   holds two local IPC mechanisms → not resolved here. See the open
   question below.
+- Task 0025's `Recorder` and `plugin.Server` both call
+  `transport.Device.ReadMessage`, which supports only one caller, so
+  running both against `macropadd`'s one `Device` would silently split
+  the message stream between them → `transport.Fanout` makes `macropadd`
+  the one caller and hands each of them their own subscription instead.
+  `MessageTypeTrace` still only reaches the recorder's JSONL file, not a
+  plugin — no `signal` broadcasts a trace record today. That gap is
+  unresolved; a future task can extend the `signal` vocabulary (see task
+  0013) with a trace-derived name if a plugin author needs it.
 
 ## Open questions
 
-- [ ] Does this WebSocket server merge with task 0013's Unix-socket
-      signal server into one process, one IPC mechanism? —
-      implementer, before task 0013 starts.
+- [x] Does this WebSocket server merge with task 0013's Unix-socket
+      signal server into one process, one IPC mechanism? — Yes,
+      decided 2026-08-15. Task 0013's spec now reuses this server: it
+      adds a `signal` message kind instead of a separate Unix socket.
+      See task 0013's Approach D.
 - [ ] Does a plugin need task 0025's device trace records? — deferred,
       no clear demand yet.
 

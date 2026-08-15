@@ -3,13 +3,13 @@ id: "0015"
 title: "Attach a key to an existing iTerm2 session over its WebSocket API"
 status: "backlog"
 created: "2026-08-06"
-updated: "2026-08-06"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0011", "0013", "0016"]
+related: ["0011", "0013", "0016", "0028"]
 tags: ["driver", "iterm2", "terminal"]
 ---
 
@@ -29,10 +29,9 @@ permission prompt.
   iTerm2's session ID, not one the driver spawned.
 - Text sent to that key reaches the session through iTerm2's
   `async_send_text`, not tmux.
-- iTerm2's shell-integration notifications map to task 0013's and 0016's
-  `EventMask`: prompt shown to `PROCESS_WAITING`, command start to
-  `PROCESS_RUNNING`, command finish to `PROCESS_DONE` or
-  `PROCESS_EXITED`.
+- iTerm2's shell-integration notifications map to task 0013's `signal`
+  vocabulary: prompt shown to `processWaiting`, command start to
+  `processRunning`, command finish to `processDone` or `processExited`.
 - A disabled iTerm2 Python API toggle produces a named error, not a hang.
 
 ## Non-goals
@@ -83,7 +82,7 @@ Terminal.app.
 - Bad, because it needs per-app Automation permission, the exact TCC
   friction iTerm2's native API avoids.
 - Bad, because it has no event push — AppleScript can only poll
-  `contents`, so `PROCESS_WAITING` and `PROCESS_DONE` would need
+  `contents`, so `processWaiting` and `processDone` would need
   pane-scraping instead of the notifications this task wants.
 
 ## Decision
@@ -103,11 +102,11 @@ Python runtime dependency and a second local IPC hop.
 iTerm2, resolve a session by ID, expose `send_text`, and forward
 shell-integration notifications as JSON lines over stdout.
 `driver/session/iterm2.go` launches and talks to that helper, and
-translates its notifications into task 0013's and 0016's `EventMask`
-values, dispatched through the same `UseAction` path used by the tmux
-path. A shared `driver/session/interface.go` extracts the `Own` /
-`SendKeys`-shaped interface so tmux (task 0011) and this backend both
-satisfy it.
+translates its notifications into task 0013's `signal` names, broadcast
+through `plugin.Server.Broadcast` — the same path the tmux/OSC 133 path
+(task 0016) uses. A shared `driver/session/interface.go` extracts the
+`Own` / `SendKeys`-shaped interface so tmux (task 0011) and this backend
+both satisfy it.
 
 Files to change:
 
@@ -124,15 +123,16 @@ Files to change:
   sending `"y\n"` delivers that text into the target tab. **Proof:**
   `go test ./driver/session/... -run TestITerm2_SendText` against a mock
   bridge
-- [ ] **DoD-2** — A prompt-shown notification on the bound session raises
-  `PROCESS_WAITING`. **Proof:** `go test ./driver/session/... -run
-  TestITerm2_PromptRaisesWaiting`
-- [ ] **DoD-3** — A command-start notification raises `PROCESS_RUNNING`.
+- [ ] **DoD-2** — A prompt-shown notification on the bound session
+  broadcasts a `signal` named `processWaiting`. **Proof:** `go test
+  ./driver/session/... -run TestITerm2_PromptBroadcastsWaiting`
+- [ ] **DoD-3** — A command-start notification broadcasts a `signal`
+  named `processRunning`. **Proof:** `go test ./driver/session/... -run
+  TestITerm2_CommandStartBroadcastsRunning`
+- [ ] **DoD-4** — A command-finished notification broadcasts
+  `processDone` on exit 0 and `processExited` on a nonzero exit.
   **Proof:** `go test ./driver/session/... -run
-  TestITerm2_CommandStartRaisesRunning`
-- [ ] **DoD-4** — A command-finished notification maps to `PROCESS_DONE`
-  on exit 0 and `PROCESS_EXITED` on a nonzero exit. **Proof:** `go test
-  ./driver/session/... -run TestITerm2_CommandFinishedMapsExitCode`
+  TestITerm2_CommandFinishedMapsExitCode`
 - [ ] **DoD-5** — With iTerm2's Python API toggle off, binding a key
   returns a named error identifying the missing toggle. **Proof:** `go
   test ./driver/session/... -run TestITerm2_APIDisabled`

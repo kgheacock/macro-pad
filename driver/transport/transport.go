@@ -42,12 +42,25 @@ type AudioChunk struct {
 	Final    bool
 }
 
+// PingKeyIndex is the reserved Key state index that signals a ping,
+// answered with a Pong. No real key uses it — the six keys are indexed 0
+// through 5. See "Ping" in docs/wire-protocol.md.
+const PingKeyIndex = 255
+
+// Pong is a device→host message answering a ping. Nonce echoes back the
+// value the ping's Key state message carried in its Emoji ID byte. See
+// "Ping" in docs/wire-protocol.md.
+type Pong struct {
+	Nonce byte
+}
+
 // Message is one decoded device→host message read from ReadMessage. Type
-// says which of Event or AudioChunk is populated.
+// says which of Event, AudioChunk, or Pong is populated.
 type Message struct {
 	Type       MessageType
 	Event      Event
 	AudioChunk AudioChunk
+	Pong       Pong
 }
 
 // Transport is the driver's connection to a device, real or emulated. It

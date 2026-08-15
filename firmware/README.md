@@ -110,6 +110,20 @@ Running the generator again with no source changes must leave
 `firmware/glyphs.py` byte-identical — that's what keeps a hand-edit of
 the generated file visible in review.
 
+## Connectivity check
+
+`make ping-pong`, run from the repo root, proves the HID and CDC channels
+task 0008's composite descriptor carries actually move data, with no
+displays, mic, or switches involved and no console needed. It writes
+`firmware/boot.py` and `firmware/ping_pong.py` to the `CIRCUITPY` drive as
+`boot.py` and `code.py`, then runs a host command that sends a ping and
+waits for the matching pong, printing `PASS` or `FAIL` and exiting with a
+matching code. `firmware/code.py` and `firmware/boot.py` stay unchanged on
+disk; run `make flash` afterward to put the real `code.py` back on the
+board. See [`docs/wire-protocol.md`](../docs/wire-protocol.md#ping) for
+the Ping and Pong message layout, and
+[`driver/README.md`](../driver/README.md) for the host side of the check.
+
 ## Loop period
 
 **Not yet measured.** No board is wired up yet. Task

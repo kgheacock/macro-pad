@@ -6,9 +6,13 @@ Test suites for the macro pad.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pytest
+.venv/bin/pip install pytest pillow
 .venv/bin/pytest
 ```
+
+`pillow` is only there for `test_glyphs.py`, which loads the source PNGs
+in [`../hardware/glyphs/`](../hardware/glyphs/) to check them against the
+decoded glyph table.
 
 ## CircuitPython hardware mocks
 

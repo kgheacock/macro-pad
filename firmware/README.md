@@ -16,7 +16,7 @@ make firmware-uf2
 This downloads the pinned CircuitPython 10.2.1 build for board id
 `pimoroni_pico_plus2` into `firmware/modules/` (gitignored — re-run the
 target any time it's missing). Hold `BOOTSEL` while plugging in the
-board, drag the UF2 onto the `RPI-RP2` drive that appears, then wait for
+board, drag the UF2 onto the `RP2350` drive that appears, then wait for
 it to reboot as `CIRCUITPY`.
 
 With `CIRCUITPY` mounted, run:

@@ -15,8 +15,9 @@ little-endian, matching the RP2350's native byte order.
 | Key state | Host → Device | HID | 6 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
+| Pong | Device → Host | CDC serial | 1 byte |
 
-Sizes for the two device→host messages are the payload only. Every
+Sizes for the three device→host messages are the payload only. Every
 device→host message is wrapped in the 3-byte frame header described in
 [Framing](#framing).
 
@@ -44,6 +45,7 @@ a truncated message, not a partial value.
 |---|---|
 | 1 | Press/release event |
 | 2 | Audio chunk |
+| 3 | Pong |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -104,6 +106,32 @@ payload's length `N` is `Length - 2`.
 | 0 | 1 | Stream ID | Identifies which recording this chunk belongs to |
 | 1 | N | PCM payload | Raw audio samples for this chunk |
 | 1 + N | 1 | Final-chunk flag | `0` = more chunks follow, `1` = last chunk in the recording |
+
+## Ping
+
+`make ping-pong` uses a Ping and a Pong to prove the HID and CDC channels
+carry data, with no key, display, or protocol change of its own. See
+[`firmware/README.md`](../firmware/README.md) and
+[`driver/README.md`](../driver/README.md) for the command.
+
+A ping is an ordinary Key state message with Key index `255`, a value no
+real key ever uses — the six keys are indexed `0` through `5`. The caller
+picks a nonce and writes it into the Emoji ID byte; Color and the Blink
+flag are ignored. The Version byte still must match
+[Versioning](#versioning): a ping built against a version the firmware
+does not recognize is dropped, exactly like any other Key state message.
+
+### Pong (CDC, device → host)
+
+Sent once, in answer to a ping, on the same CDC data channel as every
+other device→host message, framed per [Framing](#framing) as type `3`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Nonce | The Emoji ID byte the ping carried, echoed back unchanged |
+
+A Pong whose nonce does not match the one just sent belongs to another
+exchange, not this one, and is not treated as a match.
 
 ## Versioning
 

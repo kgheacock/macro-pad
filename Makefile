@@ -8,6 +8,14 @@ CIRCUITPYTHON_SHA256  := 1079dcaa14617613507993bb186b427da5d4e18af23cf61df672b41
 
 CIRCUITPY_VOLUME      := /Volumes/CIRCUITPY
 
+# PINGPONG_VENDOR_ID and PINGPONG_PRODUCT_ID identify the macro pad's USB
+# device descriptor for `make ping-pong`. Read from `ioreg -p IOUSB -l`
+# with the Pimoroni Pico Plus 2 attached, running CircuitPython; override
+# on the command line if a different board reports different values. See
+# driver/README.md.
+PINGPONG_VENDOR_ID    := 0x2E8A
+PINGPONG_PRODUCT_ID   := 0x10A3
+
 .PHONY: firmware-uf2
 firmware-uf2: firmware/modules/$(CIRCUITPYTHON_UF2)
 
@@ -38,3 +46,11 @@ debug: check-circuitpy
 	@echo "boot.py written to $(CIRCUITPY_VOLUME) with console=True."
 	@echo "Find the console port and run: screen \"\$$(ls /dev/cu.usbmodem*)\" 115200"
 	@echo "Run 'make flash' afterward to restore console=False."
+
+.PHONY: ping-pong
+ping-pong: check-circuitpy
+	cp firmware/boot.py $(CIRCUITPY_VOLUME)/boot.py
+	cp firmware/wire.py $(CIRCUITPY_VOLUME)/wire.py
+	cp firmware/ping_pong.py $(CIRCUITPY_VOLUME)/code.py
+	cd driver && go run ./cmd/pingpong --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID)
+	@echo "Run 'make flash' to restore the real code.py and wire.py."

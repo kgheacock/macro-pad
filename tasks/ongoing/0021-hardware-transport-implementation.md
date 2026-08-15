@@ -3,7 +3,7 @@ id: "0021"
 title: "Implement the hardware Transport over real HID and CDC serial"
 status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -160,6 +160,11 @@ An outside reviewer verifies each item without help from the implementer.
       macOS-only scope. **Proof:** `driver/README.md`
 - [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
       PR body
+- [ ] **DoD-10** — Reopened 2026-08-15: `firmware/app.py`'s `_scan_switches`
+      wraps every event in task 0024's 3-byte frame header before writing
+      it to the CDC stream, so `Device.ReadMessage` does not desync on a
+      real key press. **Proof:** `python3 -m pytest test/test_app.py -k
+      writes_event`
 
 ## Risks
 
@@ -171,6 +176,13 @@ An outside reviewer verifies each item without help from the implementer.
 - A second CircuitPython board attached at the same time matches the same
   vendor and product ID → `Options` accepts an optional serial number, and
   `Open` errors when two devices match and none is named.
+- PR #15 shipped `Device.ReadMessage` decoding task 0024's frame header,
+  but task 0022's `firmware/app.py` shipped in PR #13 without it — the two
+  sides were never exercised against each other, so `_scan_switches` wrote
+  a bare `wire.encode_event` payload straight to the CDC stream. A real
+  key press would have desynced `ReadMessage`'s header read on the first
+  byte. Found while writing task 0023's spec; fixed here as DoD-10, since
+  this task owns the reader half of the contract this breaks.
 
 ## Open questions
 

@@ -3,13 +3,13 @@ id: "0016"
 title: "Parse OSC 133 shell-integration sequences for command lifecycle events"
 status: "backlog"
 created: "2026-08-06"
-updated: "2026-08-06"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0011", "0013"]
+related: ["0011", "0013", "0028"]
 tags: ["driver", "protocol", "terminal"]
 ---
 
@@ -27,9 +27,9 @@ fish, or starship — a tool-agnostic signal the driver does not read yet.
 
 - A parser reads a byte stream and recognizes OSC 133 prompt, command-
   start, and command-finished sequences.
-- Recognized events extend task 0013's `EventMask`: prompt shown raises
-  `PROCESS_WAITING`, command start raises a new `PROCESS_RUNNING`,
-  command finish raises `PROCESS_DONE` (exit 0) or `PROCESS_EXITED`
+- Recognized events extend task 0013's `signal` vocabulary: prompt shown
+  broadcasts `processWaiting`, command start broadcasts `processRunning`,
+  command finish broadcasts `processDone` (exit 0) or `processExited`
   (nonzero).
 - The parser reads task 0011's tmux `pipe-pane` output, so an owned
   session gets status with no per-tool hook config.
@@ -106,18 +106,21 @@ from-scratch scanner needs.
 A new `driver/osc133` package implements `NewScanner(io.Reader) *Scanner`
 with `Scan() (Event, bool)`, returning `PromptShown`, `CommandStarted`, or
 `CommandFinished{ExitCode int}`. `driver/session/tmux.go` (task 0011)
-feeds `pipe-pane` output through the scanner. `driver/api/action.go`
-(task 0013) gains `PROCESS_RUNNING` in `EventMask`, and scanner events map
-to `PROCESS_WAITING`, `PROCESS_RUNNING`, and `PROCESS_DONE` /
-`PROCESS_EXITED`, dispatched through the existing `UseAction` path.
+feeds `pipe-pane` output through the scanner, and maps each scanner event
+to a `processWaiting`, `processRunning`, `processDone`, or
+`processExited` name, broadcast through `plugin.Server.Broadcast` (task
+0013's `signal` message kind). `processRunning` joins task 0013's
+recognized names; it needs no code change there, since `signal` carries
+an open string, not a fixed Go enum.
 
 Files to change:
 
 - `driver/osc133/scanner.go` — new, the OSC 133 state machine
 - `driver/osc133/scanner_test.go` — new
 - `driver/session/tmux.go` — wire `pipe-pane` output through the scanner
-- `driver/api/action.go` — add `PROCESS_RUNNING` to `EventMask`
-- `driver/README.md` — document OSC 133 as the tmux path's status source
+  and broadcast each event as a `signal`
+- `driver/README.md` — document OSC 133 as the tmux path's status
+  source, and `processRunning` in the recognized `signal` names
 
 ## Definition of done
 
@@ -132,10 +135,10 @@ Files to change:
 - [ ] **DoD-4** — A stream with no OSC 133 sequences produces zero
   events, not an error. **Proof:** `go test ./driver/osc133/... -run
   TestScanner_NoIntegration`
-- [ ] **DoD-5** — A `UseAction(key, PROCESS_RUNNING, handler)` on a
-  tmux-owned session (task 0011) fires on a command-start sequence.
-  **Proof:** `go test ./driver/session/... -run
-  TestTmux_OSC133TriggersRunning`
+- [ ] **DoD-5** — A command-start sequence on a tmux-owned session (task
+  0011) broadcasts a `signal` named `processRunning` for that key, seen
+  by a connected test client. **Proof:** `go test ./driver/session/...
+  -run TestTmux_OSC133BroadcastsRunning`
 - [ ] **DoD-6** — `driver/README.md` documents OSC 133 as the tmux path's
   status source and how to check shell integration is active. **Proof:**
   `driver/README.md`

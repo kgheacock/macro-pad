@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/23"
 branch: "0028-websocket-plugin-api"
 related: ["0002", "0011", "0012", "0013", "0021"]
 tags: ["driver", "plugin", "api"]

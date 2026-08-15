@@ -99,6 +99,18 @@ func (e *Emulator) InjectAudioChunk(c AudioChunk) error {
 	return writeFrame(e.msgW, MessageTypeAudioChunk, encodeAudioChunk(c))
 }
 
+// InjectTraceRecord simulates the device emitting one trace record, for
+// driver tests with no board attached.
+func (e *Emulator) InjectTraceRecord(tr TraceRecord) error {
+	return writeFrame(e.msgW, MessageTypeTrace, encodeTraceRecord(tr))
+}
+
+// InjectPong simulates the device answering a ping, for driver tests with
+// no board attached.
+func (e *Emulator) InjectPong(nonce byte) error {
+	return writeFrame(e.msgW, MessageTypePong, encodePong(nonce))
+}
+
 // LastKeyState returns the most recent key-state message the emulator's
 // device side received, and whether one has arrived yet.
 func (e *Emulator) LastKeyState() (KeyState, bool) {

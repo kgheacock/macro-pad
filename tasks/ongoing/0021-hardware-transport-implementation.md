@@ -7,7 +7,7 @@ updated: "2026-08-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/15"
 branch: "0021-hardware-transport-implementation"
 related: ["0002", "0008", "0010", "0013", "0014", "0020", "0024"]
 tags: ["driver", "usb", "hardware"]

@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/18"
 branch: "0023-glyph-table-and-digits"
 related: ["0002", "0006", "0013", "0020", "0022"]
 tags: ["firmware", "display", "assets"]

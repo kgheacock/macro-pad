@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/17"
 branch: "0026-make-debug-console-target"
 related: ["0008", "0019"]
 tags: ["firmware", "dx", "makefile"]

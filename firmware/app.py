@@ -186,7 +186,8 @@ class MacroPad:
                 continue
 
             event_type = wire.PRESS if transition == "press" else wire.RELEASE
-            self._serial.write(wire.encode_event(index, event_type, now_us))
+            payload = wire.encode_event(index, event_type, now_us)
+            wire.write_frame(self._serial, wire.MESSAGE_TYPE_EVENT, payload)
             wrote_event = True
 
         return wrote_event

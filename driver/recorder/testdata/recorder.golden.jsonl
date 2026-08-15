@@ -1,0 +1,4 @@
+{"offset_us":1786795199000000,"samples":2,"estimator":"min_one_way_delay"}
+{"type":"event","host_time":"2026-08-15T12:00:00Z","device_us":1000000,"key_index":2,"event":"press"}
+{"type":"trace","host_time":"2026-08-15T12:00:00.001Z","device_us":1000500,"key_index":2,"code":3,"payload":255}
+{"type":"pong","host_time":"2026-08-15T12:00:00.002Z","nonce":90}

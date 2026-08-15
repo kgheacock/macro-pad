@@ -3,6 +3,7 @@ import displayio
 
 # Imported flat, under the names the board uses. See conftest.py.
 import pins
+import tracer as tracer_module
 import wire
 from app import DEFAULT_COLOR, DEFAULT_EMOJI_ID, Backlight, MacroPad, make_switch
 from idle_timer import IdleTimer
@@ -72,7 +73,7 @@ class RecordingEmojiLookup:
         return displayio.TileGrid(displayio.Bitmap(1, 1, 1), pixel_shader=palette)
 
 
-def _build_pad(idle_timer=None):
+def _build_pad(idle_timer=None, tracer=None):
     switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
     displays = [FakeDisplay() for _ in pins.KEYS]
     backlights = [FakeBacklight() for _ in pins.KEYS]
@@ -88,6 +89,7 @@ def _build_pad(idle_timer=None):
         serial=serial,
         emoji_lookup=emoji_lookup,
         idle_timer=idle_timer,
+        tracer=tracer,
     )
     return pad, switches, displays, backlights, hid_device, serial, emoji_lookup
 
@@ -116,6 +118,27 @@ def _framed_event(key_index, event_type, timestamp_us):
     payload = wire.encode_event(key_index, event_type, timestamp_us)
     wire.write_frame(writer, wire.MESSAGE_TYPE_EVENT, payload)
     return bytes(writer.written)
+
+
+def _parse_frames(data):
+    """Split a raw CDC byte stream into (message_type, payload) frames."""
+    frames = []
+    i = 0
+    while i < len(data):
+        message_type = data[i]
+        length = data[i + 1] | (data[i + 2] << 8)
+        payload = data[i + 3 : i + 3 + length]
+        frames.append((message_type, payload))
+        i += wire.FRAME_HEADER_SIZE + length
+    return frames
+
+
+def _decode_trace_record(payload):
+    code = payload[0]
+    key = payload[1]
+    trace_payload = payload[2] | (payload[3] << 8)
+    timestamp = int.from_bytes(payload[4:12], "little")
+    return code, key, trace_payload, timestamp
 
 
 def test_key_state_applies_to_one_key():
@@ -193,6 +216,32 @@ def test_press_writes_event():
     assert bytes(serial.written) == _framed_event(
         0, wire.PRESS, DEBOUNCE_WINDOW_US * 2
     )
+
+
+def test_press_trace_order():
+    tr = tracer_module.Tracer(capacity=32, enabled=True)
+    pad, switches, _, _, _, serial, _ = _build_pad(tracer=tr)
+
+    pad.step(0)  # power-on: every switch's initial reading, not an edge
+    assert serial.written == b""
+    serial.written = bytearray()
+
+    switches[0].value = False  # pull-up: closed switch reads low
+    pad.step(DEBOUNCE_WINDOW_US * 2)
+
+    frames = _parse_frames(bytes(serial.written))
+    trace_records = [
+        _decode_trace_record(payload)
+        for message_type, payload in frames
+        if message_type == wire.MESSAGE_TYPE_TRACE
+    ]
+    key0_codes = [code for code, key, _, _ in trace_records if key == 0]
+
+    assert key0_codes == [
+        tracer_module.SWITCH_READ,
+        tracer_module.DEBOUNCE_VERDICT,
+        tracer_module.EVENT_WRITTEN,
+    ]
 
 
 def test_release_writes_event():

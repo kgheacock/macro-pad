@@ -16,6 +16,7 @@ little-endian, matching the RP2350's native byte order.
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
+| Trace record | Device → Host | CDC serial | 12 bytes |
 
 Sizes for the three device→host messages are the payload only. Every
 device→host message is wrapped in the 3-byte frame header described in
@@ -46,6 +47,7 @@ a truncated message, not a partial value.
 | 1 | Press/release event |
 | 2 | Audio chunk |
 | 3 | Pong |
+| 4 | Trace record |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -132,6 +134,43 @@ other device→host message, framed per [Framing](#framing) as type `3`.
 
 A Pong whose nonce does not match the one just sent belongs to another
 exchange, not this one, and is not treated as a match.
+
+## Trace record
+
+Sent by `firmware/trace.py`'s `Tracer` when tracing is enabled — off by
+default, and never sent otherwise. Each record marks one point in
+`MacroPad.step`, so a person debugging the board can see what the
+firmware saw at a point that otherwise never crosses the wire, such as a
+rejected bounce. `driver/recorder` writes each one, plus its host
+arrival time, to a JSONL flight-recorder file. See
+[task 0025](../tasks/ongoing/0025-trace-ring-buffer-flight-recorder.md)
+for the design decision.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Code | Which point in the loop this record marks — see the trace code registry below |
+| 1 | 1 | Key | 0-based key index the record concerns, or `0` when the code carries no key |
+| 2 | 2 | Payload | Meaning depends on Code — see below, little-endian `uint16` |
+| 4 | 8 | Timestamp | Monotonic device time the record was taken, in microseconds, little-endian `uint64` |
+
+### Trace code registry
+
+| Code | Name | Payload |
+|---|---|---|
+| 0 | `TRACE_DROPPED` | Number of records overwritten in the ring buffer since the last drain, before this one |
+| 1 | `HOST_MESSAGE_DECODED` | The decoded Key state message's Emoji ID |
+| 2 | `SWITCH_READ` | `1` if the pin read pressed, `0` if released |
+| 3 | `DEBOUNCE_VERDICT` | `0` = accepted press, `1` = accepted release, `0xFF` = rejected as a bounce |
+| 4 | `EVENT_WRITTEN` | The Press/release event's Event type byte: `0` = press, `1` = release |
+
+`TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
+its Timestamp is always `0` — it marks drops counted since the last
+drain, not one point in time — and it always precedes the records it
+was counted alongside. `SWITCH_READ` and
+`DEBOUNCE_VERDICT` are recorded together, only when a switch's raw pin
+reading changes from the previous `step` — not on every `step` for every
+switch — so a rejected bounce leaves the same pair of records a press
+does, distinguished by `DEBOUNCE_VERDICT`'s payload.
 
 ## Versioning
 

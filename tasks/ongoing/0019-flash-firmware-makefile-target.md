@@ -1,13 +1,13 @@
 ---
 id: "0019"
 title: "Add a make flash target that copies firmware onto the connected board"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/16"
 branch: "0019-flash-firmware-makefile-target"
 related: []
 tags: []

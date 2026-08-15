@@ -1,7 +1,8 @@
 # firmware
 
-CircuitPython firmware for the Pimoroni Pico Plus 2 (RP2350). Copy the
-contents of this folder to the `CIRCUITPY` drive to flash the device.
+CircuitPython firmware for the Pimoroni Pico Plus 2 (RP2350). Run `make
+flash` from the repo root to copy this folder onto the `CIRCUITPY`
+drive.
 
 ## Setup
 
@@ -15,8 +16,20 @@ make firmware-uf2
 This downloads the pinned CircuitPython 10.2.1 build for board id
 `pimoroni_pico_plus2` into `firmware/modules/` (gitignored — re-run the
 target any time it's missing). Hold `BOOTSEL` while plugging in the
-board, drag the UF2 onto the `RPI-RP2` drive that appears, then wait for
+board, drag the UF2 onto the `RP2350` drive that appears, then wait for
 it to reboot as `CIRCUITPY`.
+
+With `CIRCUITPY` mounted, run:
+
+```bash
+make flash
+```
+
+This copies `firmware/` onto the `CIRCUITPY` drive with `rsync --delete`,
+apart from `modules/`, `__pycache__/`, and this `README.md`. `--delete`
+means any file on the drive that isn't in `firmware/` is removed,
+including test data or logs a developer added on the board directly. The
+target fails with a clear error if `CIRCUITPY` isn't mounted.
 
 ## Scope
 

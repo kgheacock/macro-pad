@@ -1,7 +1,7 @@
 ---
 id: "0019"
 title: "Add a make flash target that copies firmware onto the connected board"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -115,22 +115,22 @@ Add a `flash` target to `Makefile`, next to `firmware-uf2`.
 
 ## Definition of done
 
-- [ ] **DoD-1** — With `CIRCUITPY` mounted, `make flash` copies every
+- [x] **DoD-1** — With `CIRCUITPY` mounted, `make flash` copies every
       `.py` file from `firmware/` onto it. **Proof:** run `make
       flash`, then `diff` the two directory listings.
-- [ ] **DoD-2** — With `CIRCUITPY` not mounted, `make flash` exits
+- [x] **DoD-2** — With `CIRCUITPY` not mounted, `make flash` exits
       non-zero and names the missing volume. **Proof:** run `make
       flash` with the board disconnected; check the exit code and the
       message.
-- [ ] **DoD-3** — The volume lookup uses `diskutil`, not `mount` or a
+- [x] **DoD-3** — The volume lookup uses `diskutil`, not `mount` or a
       listing of `/Volumes`. **Proof:** read the `flash` recipe in
       `Makefile`.
-- [ ] **DoD-4** — `firmware/modules/` is not copied onto the board.
+- [x] **DoD-4** — `firmware/modules/` is not copied onto the board.
       **Proof:** run `make flash` with `firmware/modules/` present
       locally; confirm it is absent from `CIRCUITPY` afterward.
-- [ ] **DoD-5** — `firmware/README.md` documents `make flash` as the
+- [x] **DoD-5** — `firmware/README.md` documents `make flash` as the
       copy step. **Proof:** read the file.
-- [ ] **DoD-6** — The PR in the `pr` field links to this spec.
+- [x] **DoD-6** — The PR in the `pr` field links to this spec.
       **Proof:** PR body.
 
 ## Risks

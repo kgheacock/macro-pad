@@ -1,7 +1,7 @@
 ---
 id: "0021"
 title: "Implement the hardware Transport over real HID and CDC serial"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -135,32 +135,32 @@ with `ReadMessage`, and defines the header this reader needs.
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — `var _ Transport = (*Device)(nil)` compiles, so `Device`
+- [x] **DoD-1** — `var _ Transport = (*Device)(nil)` compiles, so `Device`
       satisfies the interface the emulator satisfies. **Proof:** `go build
       ./driver/...`
-- [ ] **DoD-2** — With no matching device present, `Open` returns an error
+- [x] **DoD-2** — With no matching device present, `Open` returns an error
       naming the vendor and product ID it looked for. **Proof:** `go test
       ./driver/transport/... -run TestOpen_NoDevice`
-- [ ] **DoD-3** — `Open` returns within 200 ms of its context deadline
+- [x] **DoD-3** — `Open` returns within 200 ms of its context deadline
       when no device appears. **Proof:** `go test ./driver/transport/...
       -run TestOpen_RespectsDeadline`
-- [ ] **DoD-4** — A device that appears on the third enumeration attempt
+- [x] **DoD-4** — A device that appears on the third enumeration attempt
       is opened, not skipped. **Proof:** `go test ./driver/transport/...
       -run TestOpen_RetriesUntilPresent`
-- [ ] **DoD-5** — Discovery calls no volume listing. **Proof:** `grep -rn
+- [x] **DoD-5** — Discovery calls no volume listing. **Proof:** `grep -rn
       "Volumes\|diskutil\|mount" driver/transport/` returns nothing.
-- [ ] **DoD-6** — A CDC stream carrying one event followed by one audio
+- [x] **DoD-6** — A CDC stream carrying one event followed by one audio
       chunk decodes to those two messages, in that order, through
       `ReadMessage`. **Proof:** `go test
       ./driver/transport/... -run TestDevice_ReadsMixedStream`
-- [ ] **DoD-7** — `Close` unblocks a pending `ReadMessage` with `io.EOF`.
+- [x] **DoD-7** — `Close` unblocks a pending `ReadMessage` with `io.EOF`.
       **Proof:** `go test ./driver/transport/... -run
       TestDevice_CloseUnblocksReader`
-- [ ] **DoD-8** — `driver/README.md` records the cgo requirement and the
+- [x] **DoD-8** — `driver/README.md` records the cgo requirement and the
       macOS-only scope. **Proof:** `driver/README.md`
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
       PR body
-- [ ] **DoD-10** — Reopened 2026-08-15: `firmware/app.py`'s `_scan_switches`
+- [x] **DoD-10** — Reopened 2026-08-15: `firmware/app.py`'s `_scan_switches`
       wraps every event in task 0024's 3-byte frame header before writing
       it to the CDC stream, so `Device.ReadMessage` does not desync on a
       real key press. **Proof:** `python3 -m pytest test/test_app.py -k

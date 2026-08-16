@@ -1,7 +1,7 @@
 ---
 id: "0025"
 title: "Record a device trace ring buffer into a host JSONL flight recorder"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -154,33 +154,33 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — `Tracer.record` allocates no memory after construction.
+- [x] **DoD-1** — `Tracer.record` allocates no memory after construction.
   **Proof:** `pytest test/test_tracer.py::test_record_allocates_nothing`,
   which compares `tracemalloc` snapshots across 1000 calls, plus an
   identity/length check on the underlying `bytearray`
-- [ ] **DoD-2** — A `Tracer` of capacity 4 that takes 6 records holds the
+- [x] **DoD-2** — A `Tracer` of capacity 4 that takes 6 records holds the
   last 4, reports `dropped == 2`, and emits `TRACE_DROPPED` with payload
   `2` as the first drained record. **Proof:**
   `pytest test/test_tracer.py::test_drop_oldest_counts`
-- [ ] **DoD-3** — A disabled `Tracer` drains zero records after 100
+- [x] **DoD-3** — A disabled `Tracer` drains zero records after 100
   `record` calls. **Proof:** `pytest test/test_tracer.py::test_disabled`
-- [ ] **DoD-4** — A press through `MacroPad.step` produces the switch
+- [x] **DoD-4** — A press through `MacroPad.step` produces the switch
   read, the debounce verdict, and the event write, in that order.
   **Proof:** `pytest test/test_app.py::test_press_trace_order`
-- [ ] **DoD-5** — The recorder writes one JSON line per message, every
+- [x] **DoD-5** — The recorder writes one JSON line per message, every
   line with a `host_time` field, and a `device_us` field on the message
   types that carry a device timestamp on the wire (Press/release event,
   Trace record) — Audio chunk and Pong do not, and omit it. **Proof:**
   `go test ./driver/recorder/ -run TestRecorderJSONL` against a golden file
-- [ ] **DoD-6** — The file's first line names the clock offset, the sample
+- [x] **DoD-6** — The file's first line names the clock offset, the sample
   count, and the estimator. **Proof:** the golden file in
   `driver/recorder/testdata/`
-- [ ] **DoD-7** — The new tests fail on `main`. **Proof:**
+- [x] **DoD-7** — The new tests fail on `main`. **Proof:**
   `git stash && pytest test/ && go test ./driver/...` fails
-- [ ] **DoD-8** — `docs/wire-protocol.md` states the 12-byte record layout
+- [x] **DoD-8** — `docs/wire-protocol.md` states the 12-byte record layout
   and the trace code registry. **Proof:** `docs/wire-protocol.md`, section
   "Trace record"
-- [ ] **DoD-9** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-9** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

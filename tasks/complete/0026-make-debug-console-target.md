@@ -1,7 +1,7 @@
 ---
 id: "0026"
 title: "Add a make debug target that enables the serial console without touching boot.py"
-status: "ongoing"
+status: "complete"
 created: "2026-08-15"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -120,23 +120,23 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — With `CIRCUITPY` mounted, `make debug` writes a
+- [x] **DoD-1** — With `CIRCUITPY` mounted, `make debug` writes a
       `boot.py` file to the board with `console=True`, and
       `firmware/boot.py` in the repo stays unchanged. **Proof:** run
       `make debug`; `git status --porcelain firmware/boot.py` prints
       nothing; `grep console=True /Volumes/CIRCUITPY/boot.py` matches.
-- [ ] **DoD-2** — With `CIRCUITPY` not mounted, `make debug` exits
+- [x] **DoD-2** — With `CIRCUITPY` not mounted, `make debug` exits
       non-zero and names the missing volume. **Proof:** run `make
       debug` with the board disconnected; check the exit code and the
       message.
-- [ ] **DoD-3** — If a developer runs `make flash` after `make debug`,
+- [x] **DoD-3** — If a developer runs `make flash` after `make debug`,
       `console=False` returns in the device's `boot.py`. **Proof:** run
       `make debug`, then `make flash`; `grep console=False
       /Volumes/CIRCUITPY/boot.py` matches.
-- [ ] **DoD-4** — `firmware/README.md` documents `make debug` as the
+- [x] **DoD-4** — `firmware/README.md` documents `make debug` as the
       way to enable the console, in place of the manual edit
       instructions. **Proof:** read the file.
-- [ ] **DoD-5** — The PR in the `pr` field links to this spec.
+- [x] **DoD-5** — The PR in the `pr` field links to this spec.
       **Proof:** PR body.
 
 ## Risks

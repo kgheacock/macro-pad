@@ -1,14 +1,14 @@
 ---
 id: "0005"
 title: "Add the audio ring buffer and chunking logic"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/26"
+branch: "0005-audio-ring-buffer-chunking"
 related: ["0001", "0002"]
 tags: ["firmware", "audio"]
 ---
@@ -88,29 +88,38 @@ to drain the buffer loses the oldest unread audio.
 
 `firmware/audio_buffer.py` exposes `RingBuffer(capacity_bytes)` with
 `write(bytes)`, `read_chunk(chunk_size) -> bytes`, and an `is_empty`
-property. A helper, `chunk_stream(buffer, chunk_size, released)`, yields
-`(chunk, is_final)` pairs that match the audio-chunk format from task
-0002.
+property. A helper, `chunk_stream(buffer, released, chunk_size=DEFAULT_CHUNK_SIZE)`,
+yields `(chunk, is_final)` pairs that match the audio-chunk format from
+task 0002. `DEFAULT_CHUNK_SIZE` is a module constant, sized against the
+2-byte `Length` field in `docs/wire-protocol.md`'s frame header — see
+DoD-4.
 
 Files to change:
 
 - `firmware/audio_buffer.py` — new
-- `tests/test_audio_buffer.py` — new
+- `test/test_audio_buffer.py` — new, following this repo's existing
+  `test/` convention (`pyproject.toml`'s `testpaths`), not a new `tests/`
+  directory
 
 ## Definition of done
 
 - [ ] **DoD-1** — `read_chunk()` returns exactly `chunk_size` bytes when
   enough data is buffered. **Proof:**
-  `pytest tests/test_audio_buffer.py::test_full_chunk`
+  `pytest test/test_audio_buffer.py::test_full_chunk`
 - [ ] **DoD-2** — The last chunk of a drained buffer carries the final
-  flag. **Proof:** `pytest tests/test_audio_buffer.py::test_final_chunk_flag`
+  flag. **Proof:** `pytest test/test_audio_buffer.py::test_final_chunk_flag`
 - [ ] **DoD-3** — Writing past capacity overwrites the oldest unread bytes,
   not the newest. **Proof:**
-  `pytest tests/test_audio_buffer.py::test_overwrite_oldest`
-- [ ] **DoD-4** — The default chunk size matches the audio-chunk length
-  field in task 0002's `docs/wire-protocol.md`. **Proof:**
-  `firmware/audio_buffer.py` default matches `docs/wire-protocol.md`
+  `pytest test/test_audio_buffer.py::test_overwrite_oldest`
+- [ ] **DoD-4** — `DEFAULT_CHUNK_SIZE` is wired in as `chunk_stream`'s
+  actual default, and stays under the payload ceiling that
+  `docs/wire-protocol.md`'s 2-byte frame `Length` field allows once the
+  1-byte stream ID and 1-byte final-chunk flag are subtracted (65535 - 2
+  = 65533 bytes). **Proof:** `firmware/audio_buffer.py`'s
+  `DEFAULT_CHUNK_SIZE` is `chunk_stream`'s default `chunk_size` value,
+  and is ≤ 65533; `pytest
+  test/test_audio_buffer.py::test_chunk_stream_defaults_to_default_chunk_size`
 - [ ] **DoD-5** — The new tests fail on `main`. **Proof:**
-  `git stash && pytest tests/test_audio_buffer.py` fails
+  `git stash -u && pytest test/test_audio_buffer.py` fails
 - [ ] **DoD-6** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field

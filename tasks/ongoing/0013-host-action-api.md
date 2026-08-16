@@ -1,14 +1,14 @@
 ---
 id: "0013"
 title: "Host action API — setEmoji, setState, and a signal broadcast"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-04"
 updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/29"
+branch: "0013-host-action-api"
 related: ["0002", "0011", "0012", "0015", "0016", "0028"]
 tags: ["driver", "api", "protocol"]
 ---

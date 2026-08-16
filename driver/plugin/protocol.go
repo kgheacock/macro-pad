@@ -31,6 +31,25 @@ const (
 	// rebroadcasts it to every connected client, itself included,
 	// matching KindSetKeyState's rebroadcast. See task 0030.
 	KindSetCustomGlyph MessageKind = "setCustomGlyph"
+	// KindSignal is a client→server message the server rebroadcasts to
+	// every connected client verbatim, itself included — no
+	// transport.Transport call results from it. A raw press/release
+	// pair the server resolves into a click pattern, and a
+	// `macrodriver signal` invocation, both arrive this way. See task
+	// 0013 and the signal vocabulary in driver/README.md.
+	KindSignal MessageKind = "signal"
+)
+
+// Signal names the server itself broadcasts once it resolves a raw
+// press/release pair into a click pattern (KindSignal, below). A hook
+// integration such as `macrodriver signal` broadcasts SignalProcessWaiting
+// and SignalProcessDone; nothing in this package emits them on its own.
+const (
+	SignalSinglePress    = "singlePress"
+	SignalDoublePress    = "doublePress"
+	SignalLongPress      = "longPress"
+	SignalProcessWaiting = "processWaiting"
+	SignalProcessDone    = "processDone"
 )
 
 // Message is the JSON envelope every message on the connection uses. Kind
@@ -42,6 +61,7 @@ type Message struct {
 	SetKeyState    *SetKeyStatePayload    `json:"setKeyState,omitempty"`
 	InjectEvent    *InjectEventPayload    `json:"injectEvent,omitempty"`
 	SetCustomGlyph *SetCustomGlyphPayload `json:"setCustomGlyph,omitempty"`
+	Signal         *SignalPayload         `json:"signal,omitempty"`
 }
 
 // EventPayload is transport.Event as JSON. Type is "press" or "release",
@@ -83,6 +103,17 @@ type SetCustomGlyphPayload struct {
 	Image    []byte `json:"image"`
 }
 
+// SignalPayload names a host-defined event for one key: a resolved click
+// pattern (SignalSinglePress, SignalDoublePress, SignalLongPress) or a
+// hook-driven status (SignalProcessWaiting, SignalProcessDone). Name is
+// not restricted to those constants — a plugin may broadcast its own
+// vocabulary — but only the constants in this package carry a documented
+// meaning. See task 0013.
+type SignalPayload struct {
+	KeyIndex byte   `json:"keyIndex"`
+	Name     string `json:"name"`
+}
+
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a
 // setKeyState message carries no payload to convert.
 var errMissingPayload = errors.New("plugin: setKeyState message carries no payload")
@@ -110,6 +141,16 @@ func eventMessage(ev transport.Event) Message {
 			Type:      evType,
 			Timestamp: ev.Timestamp,
 		},
+	}
+}
+
+// signalMessage builds the client-facing Message that broadcasts name for
+// keyIndex. The server's click resolver calls this to emit
+// SignalSinglePress, SignalDoublePress, and SignalLongPress.
+func signalMessage(keyIndex byte, name string) Message {
+	return Message{
+		Kind:   KindSignal,
+		Signal: &SignalPayload{KeyIndex: keyIndex, Name: name},
 	}
 }
 

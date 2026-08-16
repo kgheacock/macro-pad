@@ -52,6 +52,44 @@ func TestEmulator_KeyStateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEmulator_SendCustomGlyph(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+
+	pixels := bytes.Repeat([]byte{0x12, 0x34}, CustomGlyphPixelsSize/2)
+	if err := e.SendCustomGlyph(5, pixels); err != nil {
+		t.Fatalf("SendCustomGlyph: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		if got, ok := e.LastCustomGlyph(); ok {
+			if got.KeyIndex != 5 || !bytes.Equal(got.Pixels, pixels) {
+				t.Fatalf("LastCustomGlyph = %+v, want KeyIndex 5 and matching pixels", got)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for emulator to receive the custom glyph")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func TestEmulator_SendCustomGlyphRejectsWrongSize(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+
+	err := e.SendCustomGlyph(0, []byte{1, 2, 3})
+	if !errors.Is(err, ErrInvalidGlyphSize) {
+		t.Fatalf("SendCustomGlyph with a short pixel buffer = %v, want errors.Is(err, ErrInvalidGlyphSize)", err)
+	}
+	if _, ok := e.LastCustomGlyph(); ok {
+		t.Fatal("emulator recorded a custom glyph despite the size error")
+	}
+}
+
 func TestEmulator_InjectPressEvent(t *testing.T) {
 	e := NewEmulator()
 	defer e.Close()

@@ -24,6 +24,10 @@ func (f *fakeTransport) SendKeyState(ks transport.KeyState) error {
 	return nil
 }
 
+func (f *fakeTransport) SendCustomGlyph(keyIndex byte, pixels []byte) error {
+	return nil
+}
+
 func (f *fakeTransport) ReadMessage() (transport.Message, error) {
 	return f.readMsg, f.readErr
 }

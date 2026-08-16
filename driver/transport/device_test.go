@@ -39,7 +39,7 @@ func (f *fakeHIDBackend) open(vid, pid uint16, serialNumber string) (io.WriteClo
 // fakeHIDBackend.
 type fakeSerialBackend struct {
 	findPortFunc func(serialNumber string) (string, error)
-	openFunc     func(portName string) (io.ReadCloser, error)
+	openFunc     func(portName string) (io.ReadWriteCloser, error)
 }
 
 func (f *fakeSerialBackend) findPort(serialNumber string) (string, error) {
@@ -49,11 +49,34 @@ func (f *fakeSerialBackend) findPort(serialNumber string) (string, error) {
 	return "/dev/cu.usbmodemFAKE", nil
 }
 
-func (f *fakeSerialBackend) open(portName string) (io.ReadCloser, error) {
+func (f *fakeSerialBackend) open(portName string) (io.ReadWriteCloser, error) {
 	if f.openFunc != nil {
 		return f.openFunc(portName)
 	}
-	return io.NopCloser(bytes.NewReader(nil)), nil
+	return &fakeSerialConn{Reader: bytes.NewReader(nil)}, nil
+}
+
+// fakeSerialConn composes a reader with a captured-write buffer, so a
+// test can hand Device.serial something satisfying io.ReadWriteCloser
+// with no real CDC port attached.
+type fakeSerialConn struct {
+	io.Reader
+	written []byte
+}
+
+func (f *fakeSerialConn) Write(p []byte) (int, error) {
+	f.written = append(f.written, p...)
+	return len(p), nil
+}
+
+func (f *fakeSerialConn) Close() error {
+	// Unblock a Read pending on the underlying reader, the same way a
+	// real CDC port's Close does — tests that check ReadMessage unblocks
+	// on Close rely on this reaching the *io.PipeReader they gave us.
+	if closer, ok := f.Reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func TestOpen_NoDevice(t *testing.T) {
@@ -152,7 +175,7 @@ func TestDevice_ReadsMixedStream(t *testing.T) {
 		t.Fatalf("writeFrame audio chunk: %v", err)
 	}
 
-	d := newDevice(nopWriteCloser{}, io.NopCloser(&buf))
+	d := newDevice(nopWriteCloser{}, &fakeSerialConn{Reader: &buf})
 	defer d.Close()
 
 	got1, err := d.ReadMessage()
@@ -175,7 +198,7 @@ func TestDevice_ReadsMixedStream(t *testing.T) {
 
 func TestDevice_CloseUnblocksReader(t *testing.T) {
 	r, _ := io.Pipe()
-	d := newDevice(nopWriteCloser{}, r)
+	d := newDevice(nopWriteCloser{}, &fakeSerialConn{Reader: r})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -205,7 +228,7 @@ func TestDevice_CloseUnblocksReader(t *testing.T) {
 func TestDevice_SendKeyState(t *testing.T) {
 	var written []byte
 	hid := &captureWriteCloser{}
-	d := newDevice(hid, io.NopCloser(bytes.NewReader(nil)))
+	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
 	defer d.Close()
 
 	ks := KeyState{KeyIndex: 2, Version: ProtocolVersion, Color: 0xF800, EmojiID: 7, Blink: true}
@@ -217,6 +240,35 @@ func TestDevice_SendKeyState(t *testing.T) {
 	want := []byte{keyStateReportID, 2, ProtocolVersion, 0x00, 0xF8, 7, 1}
 	if !bytes.Equal(written, want) {
 		t.Fatalf("HID write = % x, want % x", written, want)
+	}
+}
+
+func TestDevice_SendCustomGlyph(t *testing.T) {
+	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(nopWriteCloser{}, serialConn)
+	defer d.Close()
+
+	pixels := bytes.Repeat([]byte{0xAB}, CustomGlyphPixelsSize)
+	if err := d.SendCustomGlyph(3, pixels); err != nil {
+		t.Fatalf("SendCustomGlyph: %v", err)
+	}
+
+	want := append([]byte{byte(MessageTypeSetCustomGlyph), 0x01, 0x80, 3}, pixels...)
+	if !bytes.Equal(serialConn.written, want) {
+		t.Fatalf("CDC write header+key = % x, want % x", serialConn.written[:4], want[:4])
+	}
+}
+
+func TestDevice_SendCustomGlyphRejectsWrongSize(t *testing.T) {
+	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(nopWriteCloser{}, serialConn)
+	defer d.Close()
+
+	if err := d.SendCustomGlyph(0, []byte{1, 2, 3}); !errors.Is(err, ErrInvalidGlyphSize) {
+		t.Fatalf("SendCustomGlyph with a short pixel buffer = %v, want errors.Is(err, ErrInvalidGlyphSize)", err)
+	}
+	if len(serialConn.written) != 0 {
+		t.Fatal("SendCustomGlyph wrote to the wire despite the size error")
 	}
 }
 

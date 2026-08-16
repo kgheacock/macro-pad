@@ -79,8 +79,10 @@ type serialBackend interface {
 	// findPort returns the name of the CDC port carrying serialNumber,
 	// or errNoDevice if none is attached yet.
 	findPort(serialNumber string) (string, error)
-	// open opens the named CDC port for reading device→host frames.
-	open(portName string) (io.ReadCloser, error)
+	// open opens the named CDC port for reading device→host frames and
+	// writing host→device ones — see "Set custom glyph" in
+	// docs/wire-protocol.md.
+	open(portName string) (io.ReadWriteCloser, error)
 }
 
 type hidapiBackend struct{}
@@ -116,7 +118,7 @@ func (serialPortBackend) findPort(serialNumber string) (string, error) {
 	return "", errNoDevice
 }
 
-func (serialPortBackend) open(portName string) (io.ReadCloser, error) {
+func (serialPortBackend) open(portName string) (io.ReadWriteCloser, error) {
 	// CDC ACM ignores the requested baud rate, but go.bug.st/serial
 	// rejects a Mode with no DataBits set.
 	return serial.Open(portName, &serial.Mode{BaudRate: 115200, DataBits: 8})
@@ -128,7 +130,7 @@ func (serialPortBackend) open(portName string) (io.ReadCloser, error) {
 // and writes.
 type Device struct {
 	hid    io.WriteCloser
-	serial io.ReadCloser
+	serial io.ReadWriteCloser
 
 	msgQueue chan Message
 }
@@ -221,7 +223,7 @@ func matchOne(candidates []hidCandidate, want string) (string, error) {
 	}
 }
 
-func newDevice(hidConn io.WriteCloser, serialConn io.ReadCloser) *Device {
+func newDevice(hidConn io.WriteCloser, serialConn io.ReadWriteCloser) *Device {
 	d := &Device{
 		hid:      hidConn,
 		serial:   serialConn,
@@ -257,6 +259,18 @@ func (d *Device) SendKeyState(ks KeyState) error {
 	}
 	_, err := d.hid.Write(buf.Bytes())
 	return err
+}
+
+// SendCustomGlyph implements Transport. It writes a framed Set custom
+// glyph message to the device over the same CDC connection ReadMessage
+// reads from — the two directions are independent byte streams on one
+// full-duplex serial port, so a concurrent ReadMessage is unaffected.
+func (d *Device) SendCustomGlyph(keyIndex byte, pixels []byte) error {
+	payload, err := encodeCustomGlyph(keyIndex, pixels)
+	if err != nil {
+		return err
+	}
+	return writeFrame(d.serial, MessageTypeSetCustomGlyph, payload)
 }
 
 // ReadMessage implements Transport. It decodes one frame from the CDC

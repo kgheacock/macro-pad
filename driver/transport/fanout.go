@@ -111,6 +111,10 @@ func (r *fanoutReader) SendKeyState(ks KeyState) error {
 	return r.t.SendKeyState(ks)
 }
 
+func (r *fanoutReader) SendCustomGlyph(keyIndex byte, pixels []byte) error {
+	return r.t.SendCustomGlyph(keyIndex, pixels)
+}
+
 func (r *fanoutReader) ReadMessage() (Message, error) {
 	msg, ok := <-r.sub.ch
 	if !ok {

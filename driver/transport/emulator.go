@@ -18,12 +18,15 @@ const emulatorQueueSize = 32
 // simulate the device side, and LastKeyState to inspect what the driver
 // sent.
 type Emulator struct {
-	keyStateW *io.PipeWriter
-	msgW      *io.PipeWriter
+	keyStateW    *io.PipeWriter
+	customGlyphW *io.PipeWriter
+	msgW         *io.PipeWriter
 
-	mu           sync.Mutex
-	lastKeyState KeyState
-	haveKeyState bool
+	mu              sync.Mutex
+	lastKeyState    KeyState
+	haveKeyState    bool
+	lastCustomGlyph CustomGlyph
+	haveCustomGlyph bool
 
 	msgQueue chan Message
 }
@@ -31,15 +34,18 @@ type Emulator struct {
 // NewEmulator creates an Emulator ready for use. Call Close when done.
 func NewEmulator() *Emulator {
 	ksR, ksW := io.Pipe()
+	cgR, cgW := io.Pipe()
 	mR, mW := io.Pipe()
 
 	e := &Emulator{
-		keyStateW: ksW,
-		msgW:      mW,
-		msgQueue:  make(chan Message, emulatorQueueSize),
+		keyStateW:    ksW,
+		customGlyphW: cgW,
+		msgW:         mW,
+		msgQueue:     make(chan Message, emulatorQueueSize),
 	}
 
 	go e.receiveKeyStates(ksR)
+	go e.receiveCustomGlyphs(cgR)
 	go e.receiveMessages(mR)
 
 	return e
@@ -55,6 +61,27 @@ func (e *Emulator) receiveKeyStates(r *io.PipeReader) {
 		e.mu.Lock()
 		e.lastKeyState = ks
 		e.haveKeyState = true
+		e.mu.Unlock()
+	}
+}
+
+func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
+	defer r.Close()
+	for {
+		t, payload, err := readFrame(r)
+		if err != nil {
+			return
+		}
+		if t != MessageTypeSetCustomGlyph {
+			continue
+		}
+		cg, err := decodeCustomGlyph(payload)
+		if err != nil {
+			continue
+		}
+		e.mu.Lock()
+		e.lastCustomGlyph = cg
+		e.haveCustomGlyph = true
 		e.mu.Unlock()
 	}
 }
@@ -75,6 +102,25 @@ func (e *Emulator) receiveMessages(r *io.PipeReader) {
 // docs/wire-protocol.md and delivers it to the emulator's device side.
 func (e *Emulator) SendKeyState(ks KeyState) error {
 	return encodeKeyState(e.keyStateW, ks)
+}
+
+// SendCustomGlyph implements Transport. It encodes a Set custom glyph
+// message per docs/wire-protocol.md and delivers it to the emulator's
+// device side.
+func (e *Emulator) SendCustomGlyph(keyIndex byte, pixels []byte) error {
+	payload, err := encodeCustomGlyph(keyIndex, pixels)
+	if err != nil {
+		return err
+	}
+	return writeFrame(e.customGlyphW, MessageTypeSetCustomGlyph, payload)
+}
+
+// LastCustomGlyph returns the most recent Set custom glyph message the
+// emulator's device side received, and whether one has arrived yet.
+func (e *Emulator) LastCustomGlyph() (CustomGlyph, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastCustomGlyph, e.haveCustomGlyph
 }
 
 // ReadMessage implements Transport. It blocks until a message is injected
@@ -123,6 +169,7 @@ func (e *Emulator) LastKeyState() (KeyState, bool) {
 // returns io.EOF.
 func (e *Emulator) Close() error {
 	e.keyStateW.Close()
+	e.customGlyphW.Close()
 	e.msgW.Close()
 	return nil
 }

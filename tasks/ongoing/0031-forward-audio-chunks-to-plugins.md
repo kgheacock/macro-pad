@@ -7,7 +7,7 @@ updated: "2026-08-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/31"
 branch: "0031-forward-audio-chunks-to-plugins"
 related: ["0002", "0005", "0007", "0013", "0028"]
 tags: ["driver", "plugin", "audio"]

@@ -54,3 +54,8 @@ ping-pong: check-circuitpy
 	cp firmware/ping_pong.py $(CIRCUITPY_VOLUME)/code.py
 	cd driver && go run ./cmd/pingpong --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID)
 	@echo "Run 'make flash' to restore the real code.py and wire.py."
+
+.PHONY: e2e
+e2e: flash
+	cd driver && MACROPAD_VENDOR_ID=$(PINGPONG_VENDOR_ID) MACROPAD_PRODUCT_ID=$(PINGPONG_PRODUCT_ID) \
+		go test -tags hardware -count=1 ./e2e/...

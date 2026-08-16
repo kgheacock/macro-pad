@@ -18,6 +18,9 @@ assets/generated/
 # Downloaded CircuitPython UF2 — rebuild with `make firmware-uf2`
 firmware/modules/
 
+# driver/e2e scenario run logs — see driver/e2e/operator.go
+driver/e2e/runs/*.jsonl
+
 # Editors / OS
 .DS_Store
 .vscode/

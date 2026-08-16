@@ -1,7 +1,7 @@
 ---
 id: "0028"
 title: "Add a local WebSocket API for third-party macro-pad plugins"
-status: "ongoing"
+status: "complete"
 created: "2026-08-15"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -158,26 +158,26 @@ Files to change:
 An outside reviewer verifies each item without help from the
 implementer.
 
-- [ ] **DoD-1** — A connected client receives a JSON `event` message
+- [x] **DoD-1** — A connected client receives a JSON `event` message
       that matches a decoded `Event`. The message arrives within 1 s
       of the device sending it. **Proof:** `go test
       ./driver/plugin/... -run TestServer_DeliversEvent`
-- [ ] **DoD-2** — A `setKeyState` JSON message produces one
+- [x] **DoD-2** — A `setKeyState` JSON message produces one
       `SendKeyState` call with the same key, color, emoji, and blink.
       **Proof:** `go test ./driver/plugin/... -run TestServer_SetKeyState`
-- [ ] **DoD-3** — A client that never reads its queue does not block
+- [x] **DoD-3** — A client that never reads its queue does not block
       delivery to a second, healthy client. **Proof:** `go test
       ./driver/plugin/... -run TestServer_SlowClientDoesNotBlockOthers`
-- [ ] **DoD-4** — A client whose queue overflows 8 times loses its
+- [x] **DoD-4** — A client whose queue overflows 8 times loses its
       connection. The daemon keeps running. **Proof:** `go test
       ./driver/plugin/... -run TestServer_DisconnectsStalledClient`
-- [ ] **DoD-5** — The server rejects a connection past `maxClients`,
+- [x] **DoD-5** — The server rejects a connection past `maxClients`,
       with a clear close reason, not a crash. **Proof:** `go test
       ./driver/plugin/... -run TestServer_RejectsOverCap`
-- [ ] **DoD-6** — `driver/README.md` documents the daemon, the two
+- [x] **DoD-6** — `driver/README.md` documents the daemon, the two
       message kinds, and the 16-client, 32-message, 8-drop bounds.
       **Proof:** `driver/README.md`
-- [ ] **DoD-7** — The PR body links to this spec. **Proof:** the PR in
+- [x] **DoD-7** — The PR body links to this spec. **Proof:** the PR in
       the `pr` field
 
 ## Risks

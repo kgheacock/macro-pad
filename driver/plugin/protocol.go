@@ -38,6 +38,15 @@ const (
 	// `macrodriver signal` invocation, both arrive this way. See task
 	// 0013 and the signal vocabulary in driver/README.md.
 	KindSignal MessageKind = "signal"
+	// KindSubscribeAudio is a client→server message with no payload
+	// that starts delivery of every transport.MessageTypeAudioChunk the
+	// daemon reads to this client, as a binary WebSocket frame on its
+	// own bounded queue. See task 0031.
+	KindSubscribeAudio MessageKind = "subscribeAudio"
+	// KindUnsubscribeAudio is a client→server message with no payload
+	// that stops the audio delivery a prior KindSubscribeAudio started.
+	// See task 0031.
+	KindUnsubscribeAudio MessageKind = "unsubscribeAudio"
 )
 
 // Signal names the server itself broadcasts once it resolves a raw

@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/28"
 branch: "0030-custom-glyph-upload-and-persistence"
 related: ["0023", "0022", "0029"]
 tags: ["firmware", "driver", "display", "storage"]

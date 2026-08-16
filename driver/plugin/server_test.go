@@ -134,7 +134,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 func TestServer_DeliversEvent(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()
-	s := NewServer(dev)
+	s := NewServer(dev, dev)
 
 	conn := newFakeConn()
 	if s.addClient(conn) == nil {
@@ -158,7 +158,7 @@ func TestServer_DeliversEvent(t *testing.T) {
 func TestServer_SetKeyState(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()
-	s := NewServer(dev)
+	s := NewServer(dev, dev)
 
 	conn := newFakeConn()
 	if s.addClient(conn) == nil {
@@ -193,10 +193,126 @@ func TestServer_SetKeyState(t *testing.T) {
 	}
 }
 
+func TestServer_InjectEvent_AppliesToInjector(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	conn.send(t, Message{
+		Kind:        KindInjectEvent,
+		InjectEvent: &InjectEventPayload{KeyIndex: 4, Type: "release"},
+	})
+
+	waitForCondition(t, time.Second, func() bool { return len(conn.rawMessages()) > 0 })
+
+	got := conn.messages(t)[0]
+	if got.Kind != KindEvent || got.Event == nil {
+		t.Fatalf("got message %+v, want a decoded event message", got)
+	}
+	if got.Event.KeyIndex != 4 || got.Event.Type != "release" {
+		t.Fatalf("got event %+v, want keyIndex 4 release", got.Event)
+	}
+}
+
+func TestServer_InjectEvent_NilInjector(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, nil)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	conn.send(t, Message{
+		Kind:        KindInjectEvent,
+		InjectEvent: &InjectEventPayload{KeyIndex: 2, Type: "press"},
+	})
+
+	// A nil Injector drops the injectEvent message above instead of
+	// applying it. Prove that by injecting a distinguishable event
+	// straight through dev, and checking it is the only message this
+	// client ever receives.
+	sentinel := transport.Event{KeyIndex: 5, Type: transport.EventPress, Timestamp: 999}
+	if err := dev.InjectEvent(sentinel); err != nil {
+		t.Fatalf("InjectEvent: %v", err)
+	}
+
+	waitForCondition(t, time.Second, func() bool { return len(conn.rawMessages()) > 0 })
+
+	msgs := conn.messages(t)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1 (a nil Injector must drop injectEvent, not apply it)", len(msgs))
+	}
+	if msgs[0].Event == nil || msgs[0].Event.KeyIndex != sentinel.KeyIndex {
+		t.Fatalf("got %+v, want only the sentinel event", msgs[0])
+	}
+}
+
+func TestInjectEventPayload_ToEvent(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload *InjectEventPayload
+		want    transport.EventType
+		wantErr bool
+	}{
+		{name: "press", payload: &InjectEventPayload{KeyIndex: 1, Type: "press"}, want: transport.EventPress},
+		{name: "release", payload: &InjectEventPayload{KeyIndex: 1, Type: "release"}, want: transport.EventRelease},
+		{name: "nil payload", payload: nil, wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ev, err := c.payload.toEvent()
+			if c.wantErr {
+				if err == nil {
+					t.Fatal("got nil error, want one")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("toEvent: %v", err)
+			}
+			if ev.KeyIndex != c.payload.KeyIndex || ev.Type != c.want {
+				t.Fatalf("got %+v, want KeyIndex %d Type %v", ev, c.payload.KeyIndex, c.want)
+			}
+		})
+	}
+}
+
+func TestServer_SetKeyState_BroadcastsToOtherClients(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	sender := newFakeConn()
+	if s.addClient(sender) == nil {
+		t.Fatal("addClient rejected the sending client")
+	}
+	observer := newFakeConn()
+	if s.addClient(observer) == nil {
+		t.Fatal("addClient rejected the observing client")
+	}
+
+	want := SetKeyStatePayload{KeyIndex: 5, Color: 0x07E0, EmojiID: 3, Blink: true}
+	sender.send(t, Message{Kind: KindSetKeyState, SetKeyState: &want})
+
+	waitForCondition(t, time.Second, func() bool { return len(observer.rawMessages()) > 0 })
+
+	got := observer.messages(t)[0]
+	if got.Kind != KindSetKeyState || got.SetKeyState == nil || *got.SetKeyState != want {
+		t.Fatalf("observer got %+v, want the sender's setKeyState rebroadcast", got)
+	}
+}
+
 func TestServer_SlowClientDoesNotBlockOthers(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()
-	s := NewServer(dev)
+	s := NewServer(dev, dev)
 
 	slow := newFakeConn()
 	slow.writeBlock = make(chan struct{}) // never closed: every write to slow parks here
@@ -226,7 +342,7 @@ func TestServer_SlowClientDoesNotBlockOthers(t *testing.T) {
 func TestServer_DisconnectsStalledClient(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()
-	s := NewServer(dev)
+	s := NewServer(dev, dev)
 
 	stalled := newFakeConn()
 	stalled.writeBlock = make(chan struct{})
@@ -267,7 +383,7 @@ func TestServer_DisconnectsStalledClient(t *testing.T) {
 func TestServer_RejectsOverCap(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()
-	s := NewServer(dev)
+	s := NewServer(dev, dev)
 
 	for i := 0; i < maxClients; i++ {
 		if s.addClient(newFakeConn()) == nil {

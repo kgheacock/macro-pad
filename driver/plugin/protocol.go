@@ -15,16 +15,27 @@ const (
 	// transport.Event.
 	KindEvent MessageKind = "event"
 	// KindSetKeyState is a client→device message that becomes one
-	// transport.Transport.SendKeyState call.
+	// transport.Transport.SendKeyState call. The server also rebroadcasts
+	// it to every connected client, itself included, so any observer —
+	// for example the virtual pad in driver/plugin/web/virtualpad.html —
+	// sees the resulting key state without reading it back off the
+	// device.
 	KindSetKeyState MessageKind = "setKeyState"
+	// KindInjectEvent is a client→device message that becomes one
+	// Injector.InjectEvent call, simulating a press or release with no
+	// board attached. A Server with a nil Injector drops it. See task
+	// 0029.
+	KindInjectEvent MessageKind = "injectEvent"
 )
 
 // Message is the JSON envelope every message on the connection uses. Kind
-// says which of Event or SetKeyState is populated; the other is left nil.
+// says which of Event, SetKeyState, or InjectEvent is populated; the
+// others are left nil.
 type Message struct {
 	Kind        MessageKind         `json:"kind"`
 	Event       *EventPayload       `json:"event,omitempty"`
 	SetKeyState *SetKeyStatePayload `json:"setKeyState,omitempty"`
+	InjectEvent *InjectEventPayload `json:"injectEvent,omitempty"`
 }
 
 // EventPayload is transport.Event as JSON. Type is "press" or "release",
@@ -46,9 +57,22 @@ type SetKeyStatePayload struct {
 	Blink    bool   `json:"blink"`
 }
 
+// InjectEventPayload is transport.Event as JSON, minus Timestamp: the
+// server fills it in from its own clock when the message is applied, so
+// an injecting client never has to track the wire protocol's timestamp
+// units.
+type InjectEventPayload struct {
+	KeyIndex byte   `json:"keyIndex"`
+	Type     string `json:"type"`
+}
+
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a
 // setKeyState message carries no payload to convert.
 var errMissingPayload = errors.New("plugin: setKeyState message carries no payload")
+
+// errMissingInjectPayload is returned by InjectEventPayload.toEvent when
+// an injectEvent message carries no payload to convert.
+var errMissingInjectPayload = errors.New("plugin: injectEvent message carries no payload")
 
 // eventMessage wraps a decoded transport.Event as the JSON message a
 // client receives.
@@ -79,5 +103,22 @@ func (p *SetKeyStatePayload) toKeyState() (transport.KeyState, error) {
 		Color:    p.Color,
 		EmojiID:  p.EmojiID,
 		Blink:    p.Blink,
+	}, nil
+}
+
+// toEvent turns an injectEvent message's payload into the transport.Event
+// an Injector expects. Timestamp is left zero; the server fills it in
+// from its own clock before calling Injector.InjectEvent.
+func (p *InjectEventPayload) toEvent() (transport.Event, error) {
+	if p == nil {
+		return transport.Event{}, errMissingInjectPayload
+	}
+	evType := transport.EventPress
+	if p.Type == "release" {
+		evType = transport.EventRelease
+	}
+	return transport.Event{
+		KeyIndex: p.KeyIndex,
+		Type:     evType,
 	}, nil
 }

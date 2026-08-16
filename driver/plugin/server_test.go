@@ -461,6 +461,174 @@ func TestServer_DisconnectsStalledClient(t *testing.T) {
 	waitForCondition(t, time.Second, func() bool { return len(healthy.rawMessages()) > 0 })
 }
 
+func TestServer_ResolvesLongPress(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	press := transport.Event{KeyIndex: 0, Type: transport.EventPress, Timestamp: 0}
+	release := transport.Event{KeyIndex: 0, Type: transport.EventRelease, Timestamp: 600_000} // 600ms later
+	if err := dev.InjectEvent(press); err != nil {
+		t.Fatalf("InjectEvent press: %v", err)
+	}
+	if err := dev.InjectEvent(release); err != nil {
+		t.Fatalf("InjectEvent release: %v", err)
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSignal {
+				return true
+			}
+		}
+		return false
+	})
+
+	var got *SignalPayload
+	for _, m := range conn.messages(t) {
+		if m.Kind == KindSignal {
+			got = m.Signal
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("no signal message observed")
+	}
+	if got.KeyIndex != 0 || got.Name != SignalLongPress {
+		t.Fatalf("got signal %+v, want {KeyIndex: 0, Name: %q}", got, SignalLongPress)
+	}
+}
+
+func TestServer_ResolvesSinglePress(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	press := transport.Event{KeyIndex: 1, Type: transport.EventPress, Timestamp: 0}
+	release := transport.Event{KeyIndex: 1, Type: transport.EventRelease, Timestamp: 50_000} // 50ms hold
+	if err := dev.InjectEvent(press); err != nil {
+		t.Fatalf("InjectEvent press: %v", err)
+	}
+	if err := dev.InjectEvent(release); err != nil {
+		t.Fatalf("InjectEvent release: %v", err)
+	}
+
+	// No second press follows, so the doublePressWindow timer must fire
+	// and resolve this as a single press.
+	waitForCondition(t, 2*time.Second, func() bool {
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSignal {
+				return true
+			}
+		}
+		return false
+	})
+
+	var got *SignalPayload
+	for _, m := range conn.messages(t) {
+		if m.Kind == KindSignal {
+			got = m.Signal
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("no signal message observed")
+	}
+	if got.KeyIndex != 1 || got.Name != SignalSinglePress {
+		t.Fatalf("got signal %+v, want {KeyIndex: 1, Name: %q}", got, SignalSinglePress)
+	}
+}
+
+func TestServer_ResolvesDoublePress(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	events := []transport.Event{
+		{KeyIndex: 2, Type: transport.EventPress, Timestamp: 0},
+		{KeyIndex: 2, Type: transport.EventRelease, Timestamp: 50_000},
+		{KeyIndex: 2, Type: transport.EventPress, Timestamp: 100_000},
+		{KeyIndex: 2, Type: transport.EventRelease, Timestamp: 150_000},
+	}
+	for _, ev := range events {
+		if err := dev.InjectEvent(ev); err != nil {
+			t.Fatalf("InjectEvent %+v: %v", ev, err)
+		}
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSignal {
+				return true
+			}
+		}
+		return false
+	})
+
+	var got *SignalPayload
+	for _, m := range conn.messages(t) {
+		if m.Kind == KindSignal {
+			got = m.Signal
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("no signal message observed")
+	}
+	if got.KeyIndex != 2 || got.Name != SignalDoublePress {
+		t.Fatalf("got signal %+v, want {KeyIndex: 2, Name: %q}", got, SignalDoublePress)
+	}
+}
+
+func TestServer_SignalBroadcast(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	sender := newFakeConn()
+	if s.addClient(sender) == nil {
+		t.Fatal("addClient rejected the sending client")
+	}
+	observer := newFakeConn()
+	if s.addClient(observer) == nil {
+		t.Fatal("addClient rejected the observing client")
+	}
+
+	want := SignalPayload{KeyIndex: 0, Name: SignalProcessDone}
+	sender.send(t, Message{Kind: KindSignal, Signal: &want})
+
+	waitForCondition(t, time.Second, func() bool { return len(observer.rawMessages()) > 0 })
+
+	got := observer.messages(t)[0]
+	if got.Kind != KindSignal || got.Signal == nil || *got.Signal != want {
+		t.Fatalf("observer got %+v, want the sender's signal rebroadcast %+v", got, want)
+	}
+}
+
+func TestServer_SignalNoListener(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	// No client is connected. Broadcasting must not error or panic.
+	s.Broadcast(signalMessage(0, SignalProcessDone))
+}
+
 func TestServer_RejectsOverCap(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()

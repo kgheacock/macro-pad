@@ -1,7 +1,7 @@
 ---
 id: "0027"
 title: "Add a make ping-pong target that proves host and device talk over USB"
-status: "ongoing"
+status: "complete"
 created: "2026-08-15"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -158,34 +158,34 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — `docs/wire-protocol.md` documents key index 255 as the
+- [x] **DoD-1** — `docs/wire-protocol.md` documents key index 255 as the
       ping and type 3 as Pong, with the nonce field. **Proof:** read
       `docs/wire-protocol.md`, section "Ping".
-- [ ] **DoD-2** — A Pong frame built with a given nonce decodes to that
+- [x] **DoD-2** — A Pong frame built with a given nonce decodes to that
       same nonce. **Proof:** `go test ./driver/transport/... -run
       TestPong`
-- [ ] **DoD-3** — With the board attached and its vendor and product ID
+- [x] **DoD-3** — With the board attached and its vendor and product ID
       set, `make ping-pong` flashes the minimal image, receives a
       matching pong, prints PASS, and exits 0. **Proof:** run `make
       ping-pong` with the board attached.
-- [ ] **DoD-4** — With no board attached, `make ping-pong` exits
+- [x] **DoD-4** — With no board attached, `make ping-pong` exits
       non-zero within 5 s and names the missing device. **Proof:** run
       `make ping-pong` with the board unplugged; check the exit code,
       the message, and the elapsed time.
-- [ ] **DoD-5** — A pong that carries the wrong nonce makes the host
+- [x] **DoD-5** — A pong that carries the wrong nonce makes the host
       command print FAIL and exit non-zero, not PASS. **Proof:** `go
       test ./driver/cmd/pingpong/... -run TestWrongNonce`, against a
       fake transport.
-- [ ] **DoD-6** — `make ping-pong` leaves `firmware/code.py` and
+- [x] **DoD-6** — `make ping-pong` leaves `firmware/code.py` and
       `firmware/boot.py` unchanged on disk, and `make flash` afterward
       restores the real `code.py` on the board. **Proof:** `git status
       --porcelain firmware/` prints nothing after `make ping-pong`; run
       `make flash`, then diff `firmware/code.py` against the board's
       copy.
-- [ ] **DoD-7** — `firmware/README.md` and `driver/README.md` name
+- [x] **DoD-7** — `firmware/README.md` and `driver/README.md` name
       `make ping-pong` as the connectivity check, next to `make debug`.
       **Proof:** both files.
-- [ ] **DoD-8** — The PR in the `pr` field links to this spec.
+- [x] **DoD-8** — The PR in the `pr` field links to this spec.
       **Proof:** PR body.
 
 ## Risks

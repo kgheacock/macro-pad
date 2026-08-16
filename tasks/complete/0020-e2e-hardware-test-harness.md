@@ -1,7 +1,7 @@
 ---
 id: "0020"
 title: "Add a single-command end-to-end test harness driven through the driver API"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -165,33 +165,33 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — The digit scenario runs end to end against
+- [x] **DoD-1** — The digit scenario runs end to end against
       `transport.Emulator` with a scripted operator, and asserts the
       pressed key's key-state message keeps emoji ID `0xF3` while its
       color changes to `Amber`. **Proof:** `go test ./driver/e2e/... -run
       TestDigitsAndPressColor_Emulator -v`
-- [ ] **DoD-2** — `k.SetColor(...)` alone resends the key's current emoji
+- [x] **DoD-2** — `k.SetColor(...)` alone resends the key's current emoji
       ID and blink flag. **Proof:** `go test ./driver/e2e/... -run
       TestKey_SetColorKeepsGlyph`
-- [ ] **DoD-3** — Two waiters on the same key both receive one press.
+- [x] **DoD-3** — Two waiters on the same key both receive one press.
       **Proof:** `go test ./driver/e2e/... -run TestPad_FanOutTwoWaiters`
-- [ ] **DoD-4** — `ExpectPress` fails with a message naming the key index
+- [x] **DoD-4** — `ExpectPress` fails with a message naming the key index
       and the timeout when no press arrives. **Proof:** `go test
       ./driver/e2e/... -run TestExpectPress_Timeout`
-- [ ] **DoD-5** — With no board attached, `make e2e` exits non-zero and
+- [x] **DoD-5** — With no board attached, `make e2e` exits non-zero and
       names the missing device. It never hangs longer than 30 s. **Proof:**
       run `time make e2e` with the board unplugged; check exit code,
       message, and elapsed time.
-- [ ] **DoD-6** — `make e2e` runs `make flash` before the tests. **Proof:**
+- [x] **DoD-6** — `make e2e` runs `make flash` before the tests. **Proof:**
       read the `e2e` recipe in `Makefile`.
-- [ ] **DoD-7** — Every scenario run writes a log of each prompt and each
+- [x] **DoD-7** — Every scenario run writes a log of each prompt and each
       operator verdict. **Proof:** a file under `driver/e2e/runs/` after
       DoD-1.
-- [ ] **DoD-8** — `docs/wire-protocol.md` reserves emoji IDs `0xF1` to
+- [x] **DoD-8** — `docs/wire-protocol.md` reserves emoji IDs `0xF1` to
       `0xF6` for digits 1 to 6. **Proof:** `docs/wire-protocol.md`.
-- [ ] **DoD-9** — `driver/README.md` shows the digit scenario and the
+- [x] **DoD-9** — `driver/README.md` shows the digit scenario and the
       `make e2e` command. **Proof:** `driver/README.md`.
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:**
       PR body.
 
 ## Risks

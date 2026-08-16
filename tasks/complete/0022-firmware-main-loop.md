@@ -1,9 +1,9 @@
 ---
 id: "0022"
 title: "Add the firmware main loop that wires the modules together"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -131,30 +131,30 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — A key-state message for key 3 sets key 3's rendered
+- [x] **DoD-1** — A key-state message for key 3 sets key 3's rendered
       color and emoji ID, and leaves the other five keys unchanged.
       **Proof:** `.venv/bin/pytest test/test_app.py -k key_state_applies`
-- [ ] **DoD-2** — A switch pin held low for longer than the debounce
+- [x] **DoD-2** — A switch pin held low for longer than the debounce
       window writes exactly 10 bytes to `usb_cdc.data`, matching
       `docs/wire-protocol.md`'s press layout. **Proof:**
       `.venv/bin/pytest test/test_app.py -k press_writes_event`
-- [ ] **DoD-3** — Bouncing a pin five times inside the debounce window
+- [x] **DoD-3** — Bouncing a pin five times inside the debounce window
       writes one event, not five. **Proof:** `.venv/bin/pytest
       test/test_app.py -k bounce_writes_one_event`
-- [ ] **DoD-4** — A key-state message with a version byte other than 1 is
+- [x] **DoD-4** — A key-state message with a version byte other than 1 is
       dropped, and the key keeps its previous state. **Proof:**
       `.venv/bin/pytest test/test_wire.py -k rejects_version`
-- [ ] **DoD-5** — After the idle window with no message and no key event,
+- [x] **DoD-5** — After the idle window with no message and no key event,
       every backlight duty cycle reads 0.1. **Proof:**
       `.venv/bin/pytest test/test_app.py -k idle_dims_backlight`
-- [ ] **DoD-6** — `firmware/README.md` records the measured loop period on
+- [x] **DoD-6** — `firmware/README.md` records the measured loop period on
       the board, in milliseconds, with the command used to measure it.
       **Proof:** `firmware/README.md`, section "Loop period"
-- [ ] **DoD-7** — `code.py` contains no logic beyond object construction
+- [x] **DoD-7** — `code.py` contains no logic beyond object construction
       and one `run()` call. **Proof:** read `firmware/code.py`
-- [ ] **DoD-8** — `firmware/README.md` names `code.py` as the entry point
+- [x] **DoD-8** — `firmware/README.md` names `code.py` as the entry point
       that CircuitPython runs. **Proof:** `firmware/README.md`
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
       PR body
 
 ## Risks

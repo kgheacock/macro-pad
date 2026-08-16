@@ -26,16 +26,22 @@ const (
 	// board attached. A Server with a nil Injector drops it. See task
 	// 0029.
 	KindInjectEvent MessageKind = "injectEvent"
+	// KindSetCustomGlyph is a client→device message that becomes one
+	// transport.Transport.SendCustomGlyph call. The server also
+	// rebroadcasts it to every connected client, itself included,
+	// matching KindSetKeyState's rebroadcast. See task 0030.
+	KindSetCustomGlyph MessageKind = "setCustomGlyph"
 )
 
 // Message is the JSON envelope every message on the connection uses. Kind
 // says which of Event, SetKeyState, or InjectEvent is populated; the
 // others are left nil.
 type Message struct {
-	Kind        MessageKind         `json:"kind"`
-	Event       *EventPayload       `json:"event,omitempty"`
-	SetKeyState *SetKeyStatePayload `json:"setKeyState,omitempty"`
-	InjectEvent *InjectEventPayload `json:"injectEvent,omitempty"`
+	Kind           MessageKind            `json:"kind"`
+	Event          *EventPayload          `json:"event,omitempty"`
+	SetKeyState    *SetKeyStatePayload    `json:"setKeyState,omitempty"`
+	InjectEvent    *InjectEventPayload    `json:"injectEvent,omitempty"`
+	SetCustomGlyph *SetCustomGlyphPayload `json:"setCustomGlyph,omitempty"`
 }
 
 // EventPayload is transport.Event as JSON. Type is "press" or "release",
@@ -66,6 +72,17 @@ type InjectEventPayload struct {
 	Type     string `json:"type"`
 }
 
+// SetCustomGlyphPayload lets a plugin set an arbitrary 128x128 image for
+// one key. Image is a PNG file's raw bytes — Go's encoding/json
+// base64-encodes and decodes a []byte field automatically, so a plugin
+// author supplies ordinary PNG bytes with no wire-specific pixel format
+// to learn. The server decodes and converts it with
+// transport.DecodePNGToRGB565. See task 0030.
+type SetCustomGlyphPayload struct {
+	KeyIndex byte   `json:"keyIndex"`
+	Image    []byte `json:"image"`
+}
+
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a
 // setKeyState message carries no payload to convert.
 var errMissingPayload = errors.New("plugin: setKeyState message carries no payload")
@@ -73,6 +90,11 @@ var errMissingPayload = errors.New("plugin: setKeyState message carries no paylo
 // errMissingInjectPayload is returned by InjectEventPayload.toEvent when
 // an injectEvent message carries no payload to convert.
 var errMissingInjectPayload = errors.New("plugin: injectEvent message carries no payload")
+
+// errMissingCustomGlyphPayload is returned by
+// SetCustomGlyphPayload.toPixels when a setCustomGlyph message carries no
+// payload to convert.
+var errMissingCustomGlyphPayload = errors.New("plugin: setCustomGlyph message carries no payload")
 
 // eventMessage wraps a decoded transport.Event as the JSON message a
 // client receives.
@@ -121,4 +143,22 @@ func (p *InjectEventPayload) toEvent() (transport.Event, error) {
 		KeyIndex: p.KeyIndex,
 		Type:     evType,
 	}, nil
+}
+
+// toPixels decodes a setCustomGlyph message's PNG image into the
+// key index and raw RGB565 pixel buffer
+// transport.Transport.SendCustomGlyph expects. Returns
+// errMissingCustomGlyphPayload when p is nil, or whatever error
+// transport.DecodePNGToRGB565 returns for an unreadable or wrong-sized
+// image — including transport.ErrInvalidGlyphSize, checked before any
+// bytes reach the wire.
+func (p *SetCustomGlyphPayload) toPixels() (keyIndex byte, pixels []byte, err error) {
+	if p == nil {
+		return 0, nil, errMissingCustomGlyphPayload
+	}
+	pixels, err = transport.DecodePNGToRGB565(p.Image)
+	if err != nil {
+		return 0, nil, err
+	}
+	return p.KeyIndex, pixels, nil
 }

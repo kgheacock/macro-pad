@@ -214,6 +214,13 @@ func (s *Server) readPump(c *client) {
 			}
 			s.dev.SendKeyState(ks)
 			s.broadcast(msg)
+		case KindSetCustomGlyph:
+			keyIndex, pixels, err := msg.SetCustomGlyph.toPixels()
+			if err != nil {
+				continue
+			}
+			s.dev.SendCustomGlyph(keyIndex, pixels)
+			s.broadcast(msg)
 		case KindInjectEvent:
 			if s.injector == nil {
 				continue

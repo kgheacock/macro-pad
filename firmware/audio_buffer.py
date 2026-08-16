@@ -68,7 +68,7 @@ class RingBuffer:
         return bytes(result)
 
 
-def chunk_stream(buffer, chunk_size, released):
+def chunk_stream(buffer, released, chunk_size=DEFAULT_CHUNK_SIZE):
     """Yield `(chunk, is_final)` pairs draining `buffer` in `chunk_size`
     pieces, matching the audio-chunk format from task 0002.
 

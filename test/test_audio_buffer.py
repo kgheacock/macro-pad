@@ -1,4 +1,4 @@
-from firmware.audio_buffer import RingBuffer, chunk_stream
+from firmware.audio_buffer import DEFAULT_CHUNK_SIZE, RingBuffer, chunk_stream
 
 
 def test_full_chunk():
@@ -30,6 +30,15 @@ def test_chunk_stream_waits_for_full_chunk_until_released():
     assert len(buffer) == 2
 
     assert list(chunk_stream(buffer, chunk_size=4, released=True)) == [(bytes([9, 9]), True)]
+
+
+def test_chunk_stream_defaults_to_default_chunk_size():
+    buffer = RingBuffer(capacity_bytes=DEFAULT_CHUNK_SIZE * 2)
+    buffer.write(bytes(DEFAULT_CHUNK_SIZE))
+
+    chunks = list(chunk_stream(buffer, released=False))
+
+    assert [len(c) for c, _ in chunks] == [DEFAULT_CHUNK_SIZE]
 
 
 def test_overwrite_oldest():

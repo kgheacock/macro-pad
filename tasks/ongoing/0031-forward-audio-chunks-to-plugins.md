@@ -1,14 +1,14 @@
 ---
 id: "0031"
 title: "Forward mic audio chunks to plugin clients"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-15"
-updated: "2026-08-15"
+updated: "2026-08-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0031-forward-audio-chunks-to-plugins"
 related: ["0002", "0005", "0007", "0013", "0028"]
 tags: ["driver", "plugin", "audio"]
 ---

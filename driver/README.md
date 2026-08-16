@@ -10,7 +10,8 @@ of every message sent or received over these channels.
 interface, an in-memory emulator for driver tests, and `Device`, the
 hardware implementation. [`plugin/`](plugin/) implements the local
 WebSocket API described below, served by the
-[`macropadd`](cmd/macropadd/) daemon.
+[`macropadd`](cmd/macropadd/) daemon. [`e2e/`](e2e/) is the end-to-end
+scenario harness described below, run with `make e2e`.
 
 ## Testing without hardware
 
@@ -166,6 +167,65 @@ go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 \
 buffers every line in memory until the daemon stops, per task 0025's
 design, so leaving it on for a long session is a deliberate choice, not
 a default.
+
+## End-to-end scenarios
+
+[`driver/e2e`](e2e/) is a `Pad` facade over `transport.Transport`: a
+scenario names a key and a glyph instead of building a `transport.KeyState`
+by hand, and waits for a press without hand-rolling a read loop. The same
+scenario source runs two ways — against a real board, and against
+`transport.Emulator` with no board attached — so a scenario is also a check
+on the driver API itself: friction in a scenario is evidence the API needs
+to change. See
+[task 0020](../tasks/ongoing/0020-e2e-hardware-test-harness.md) for the
+design decision.
+
+```go
+pad := e2e.Attach(t)               // opens the device, waits out re-enumeration
+defer pad.Close()
+
+for _, k := range pad.Keys() {     // 6 keys light one at a time
+	k.Set(e2e.Digit(k.Index()+1), e2e.Slate)
+	k.On(e2e.Press, func() { k.SetColor(e2e.Amber) })
+	k.On(e2e.Release, func() { k.SetColor(e2e.Slate) })
+}
+
+pad.Ask("Press each key once, left to right.")
+for _, k := range pad.Keys() {
+	k.ExpectPress(t, 10*time.Second)
+}
+pad.Confirm(t, "Did every key keep its number while the background turned amber?")
+```
+
+`Pad.Ask` prints its prompt and returns immediately; a scenario's own
+`Key.ExpectPress` and `Pad.Confirm` calls do the actual waiting, so they are
+already watching before a person has time to act on the prompt.
+`Pad.Confirm` ends the scenario in a person's verdict — every hardware
+scenario does, since nothing yet checks the picture on the key's display
+itself — and every prompt and verdict is appended to a JSON-lines file
+under [`driver/e2e/runs/`](e2e/runs/), so a reviewer can see exactly what
+was asked.
+
+Run every scenario against the attached board with:
+
+```bash
+make e2e
+```
+
+This flashes the current firmware first, then runs
+`go test -tags hardware ./driver/e2e/...`. It needs a person at the
+terminal for `Pad.Confirm`, so it never runs unattended in CI. With no
+board attached, it fails fast: `make flash`'s `check-circuitpy`
+prerequisite finds no `CIRCUITPY` volume and exits non-zero naming the
+missing device, well under 30 seconds.
+
+The same scenario runs with no board attached, driven by a
+`ScriptedOperator` instead of a person, wherever the emulator-backed test
+file for a scenario lives (see `driver/e2e/pad_emulator_test.go`):
+
+```bash
+go test ./driver/e2e/...
+```
 
 ## Scope
 

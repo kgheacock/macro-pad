@@ -65,6 +65,15 @@ func (c gorillaConn) WriteClose(code int, reason string) error {
 	return c.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), deadline)
 }
 
+// Injector lets a Server apply a client's injectEvent message to the
+// underlying transport, simulating a press or release with no board
+// attached. Only *transport.Emulator implements it — transport.Device
+// does not — so a real-hardware Server can never be misconfigured to
+// accept one at compile time. See task 0029.
+type Injector interface {
+	InjectEvent(transport.Event) error
+}
+
 // client is one connected plugin.
 type client struct {
 	conn wsConn
@@ -83,7 +92,8 @@ type client struct {
 // client as JSON, and turns each client's setKeyState message into one
 // transport.Transport.SendKeyState call.
 type Server struct {
-	dev transport.Transport
+	dev      transport.Transport
+	injector Injector
 
 	upgrader websocket.Upgrader
 
@@ -94,10 +104,16 @@ type Server struct {
 // NewServer creates a Server bridging dev, and starts the goroutine that
 // dispatches dev's events to connected clients. Call Run to accept
 // connections.
-func NewServer(dev transport.Transport) *Server {
+//
+// injector, when not nil, lets a client's injectEvent message simulate a
+// press or release with no board attached — see task 0029. A
+// real-hardware Server passes nil, so it drops any injectEvent message it
+// receives.
+func NewServer(dev transport.Transport, injector Injector) *Server {
 	s := &Server{
-		dev:     dev,
-		clients: make(map[*client]struct{}),
+		dev:      dev,
+		injector: injector,
+		clients:  make(map[*client]struct{}),
 		upgrader: websocket.Upgrader{
 			// The localhost bind and maxClients are this server's only
 			// access control (see the task spec's Non-goals); a browser
@@ -179,7 +195,10 @@ func (s *Server) removeClient(c *client) {
 }
 
 // readPump decodes JSON messages from c until its connection errors or
-// closes, turning each setKeyState message into one SendKeyState call.
+// closes, turning each setKeyState message into one SendKeyState call
+// (and rebroadcasting it to every client, so an observer sees it without
+// reading it back off the device) and each injectEvent message into one
+// Injector.InjectEvent call.
 func (s *Server) readPump(c *client) {
 	defer s.removeClient(c)
 	for {
@@ -187,14 +206,25 @@ func (s *Server) readPump(c *client) {
 		if err := c.conn.ReadJSON(&msg); err != nil {
 			return
 		}
-		if msg.Kind != KindSetKeyState {
-			continue
+		switch msg.Kind {
+		case KindSetKeyState:
+			ks, err := msg.SetKeyState.toKeyState()
+			if err != nil {
+				continue
+			}
+			s.dev.SendKeyState(ks)
+			s.broadcast(msg)
+		case KindInjectEvent:
+			if s.injector == nil {
+				continue
+			}
+			ev, err := msg.InjectEvent.toEvent()
+			if err != nil {
+				continue
+			}
+			ev.Timestamp = uint64(time.Now().UnixMicro())
+			s.injector.InjectEvent(ev)
 		}
-		ks, err := msg.SetKeyState.toKeyState()
-		if err != nil {
-			continue
-		}
-		s.dev.SendKeyState(ks)
 	}
 }
 

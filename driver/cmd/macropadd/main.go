@@ -28,6 +28,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
+	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -35,14 +36,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	dev, err := transport.Open(ctx, transport.Options{
-		VendorID:     uint16(*vendorID),
-		ProductID:    uint16(*productID),
-		SerialNumber: *serialNumber,
-	})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	var dev transport.Transport
+	var injector plugin.Injector
+	if *emulate {
+		emu := transport.NewEmulator()
+		dev, injector = emu, emu
+	} else {
+		d, err := transport.Open(ctx, transport.Options{
+			VendorID:     uint16(*vendorID),
+			ProductID:    uint16(*productID),
+			SerialNumber: *serialNumber,
+		})
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		dev = d
 	}
 
 	// dev.ReadMessage supports exactly one caller. plugin.Server and, when
@@ -83,7 +92,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "macropadd: listening on 127.0.0.1:%d\n", *port)
 
-	srv := plugin.NewServer(fan.Subscribe())
+	srv := plugin.NewServer(fan.Subscribe(), injector)
 	runErr := srv.Run(ctx, *port)
 
 	dev.Close()

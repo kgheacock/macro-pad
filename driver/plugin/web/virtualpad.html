@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Virtual macro pad</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --panel: #1d2027;
+    --border: #2c313c;
+    --text: #e6e8eb;
+    --dim: #8b93a1;
+    --accent: #ffa500;
+    --ok: #3ddc84;
+    --bad: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: var(--dim); margin: 0 0 20px; }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .bar input {
+    flex: 0 0 260px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  .bar button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .bar button:hover { border-color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--bad);
+  }
+  .dot.connected { background: var(--ok); }
+
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(3, 140px);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .key {
+    position: relative;
+    height: 100px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #333945;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    user-select: none;
+    transition: transform 0.05s ease, box-shadow 0.15s ease;
+  }
+  .key:active { transform: scale(0.96); }
+  .key.pressed { box-shadow: 0 0 0 2px var(--accent) inset; }
+  .key .index { font-size: 11px; color: rgba(255,255,255,0.65); position: absolute; top: 6px; left: 8px; }
+  .key .glyph { font-size: 13px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+  .key .last { font-size: 10px; color: rgba(255,255,255,0.75); }
+  .key .blink-badge {
+    position: absolute; top: 6px; right: 8px;
+    font-size: 9px; color: var(--accent);
+    display: none;
+  }
+  .key.blink .blink-badge { display: block; }
+
+  h2 { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
+
+  .editor {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .editor label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .editor select, .editor input[type="number"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 6px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  .editor input[type="number"] { width: 64px; }
+  .editor input[type="color"] {
+    width: 32px; height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    padding: 0;
+  }
+  .editor button {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .editor button:hover { background: var(--accent); color: #1a1a1a; }
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    height: 220px;
+    overflow-y: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--dim);
+    white-space: pre-wrap;
+  }
+  #log div.event { color: var(--ok); }
+  #log div.setKeyState { color: var(--accent); }
+</style>
+</head>
+<body>
+  <h1>Virtual macro pad</h1>
+  <p class="sub">
+    A WebSocket client of <code>driver/plugin</code>. Click a tile to send
+    <code>injectEvent</code> (press, then release); requires
+    <code>macropadd --emulate</code>. See "Plugin API" in
+    <code>driver/README.md</code>.
+  </p>
+
+  <div class="bar">
+    <input id="url" value="ws://127.0.0.1:8765" spellcheck="false">
+    <button id="connectBtn">Connect</button>
+    <span class="status"><span id="dot" class="dot"></span><span id="statusText">disconnected</span></span>
+  </div>
+
+  <div class="keys" id="keys"></div>
+
+  <h2>Set key state</h2>
+  <div class="editor">
+    <label>Key <select id="editKey"></select></label>
+    <label>Color <input type="color" id="editColor" value="#333945"></label>
+    <label>Emoji ID <input type="number" id="editEmoji" min="0" max="255" value="0"></label>
+    <label><input type="checkbox" id="editBlink"> Blink</label>
+    <button id="editSend">Send setKeyState</button>
+  </div>
+
+  <h2>Message log</h2>
+  <div id="log"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const KEY_COUNT = 6;
+  const keysEl = document.getElementById("keys");
+  const logEl = document.getElementById("log");
+  const urlEl = document.getElementById("url");
+  const connectBtn = document.getElementById("connectBtn");
+  const dotEl = document.getElementById("dot");
+  const statusEl = document.getElementById("statusText");
+
+  // The release that follows an injected press, in milliseconds. Long
+  // enough for the daemon to round-trip both messages, short enough to
+  // read as one click.
+  const RELEASE_DELAY_MS = 80;
+
+  let ws = null;
+  const tiles = [];
+  // tileState holds the last setKeyState payload seen for each key, so
+  // the editor below can prefill from a tile's current state instead of
+  // always starting from a default.
+  const tileState = new Array(KEY_COUNT).fill(null);
+
+  for (let i = 0; i < KEY_COUNT; i++) {
+    const el = document.createElement("div");
+    el.className = "key";
+    el.innerHTML =
+      '<span class="index">#' + i + '</span>' +
+      '<span class="blink-badge">BLINK</span>' +
+      '<span class="glyph">—</span>' +
+      '<span class="last">no state yet</span>';
+    el.addEventListener("click", () => injectClick(i));
+    keysEl.appendChild(el);
+    tiles.push(el);
+  }
+
+  const editKeyEl = document.getElementById("editKey");
+  const editColorEl = document.getElementById("editColor");
+  const editEmojiEl = document.getElementById("editEmoji");
+  const editBlinkEl = document.getElementById("editBlink");
+  const editSendEl = document.getElementById("editSend");
+
+  for (let i = 0; i < KEY_COUNT; i++) {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = "#" + i;
+    editKeyEl.appendChild(opt);
+  }
+
+  // fillEditorFrom loads keyIndex's last known state into the editor
+  // fields, or a neutral default if this page has not seen one yet.
+  function fillEditorFrom(keyIndex) {
+    const s = tileState[keyIndex];
+    editColorEl.value = s ? rgb565ToHex(s.color) : "#333945";
+    editEmojiEl.value = s ? s.emojiId : 0;
+    editBlinkEl.checked = s ? !!s.blink : false;
+  }
+
+  editKeyEl.addEventListener("change", () => fillEditorFrom(parseInt(editKeyEl.value, 10)));
+  fillEditorFrom(0);
+
+  editSendEl.addEventListener("click", () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("event", "not connected: setKeyState not sent");
+      return;
+    }
+    ws.send(JSON.stringify({
+      kind: "setKeyState",
+      setKeyState: {
+        keyIndex: parseInt(editKeyEl.value, 10),
+        color: hexToRgb565(editColorEl.value),
+        emojiId: parseInt(editEmojiEl.value, 10) || 0,
+        blink: editBlinkEl.checked
+      }
+    }));
+  });
+
+  function log(kind, text) {
+    const line = document.createElement("div");
+    line.className = kind;
+    const ts = new Date().toLocaleTimeString();
+    line.textContent = "[" + ts + "] " + text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(connected) {
+    dotEl.classList.toggle("connected", connected);
+    statusEl.textContent = connected ? "connected" : "disconnected";
+    connectBtn.textContent = connected ? "Disconnect" : "Connect";
+  }
+
+  function connect() {
+    const url = urlEl.value.trim();
+    if (!url) return;
+    ws = new WebSocket(url);
+    ws.addEventListener("open", () => {
+      setStatus(true);
+      log("event", "connected to " + url);
+    });
+    ws.addEventListener("close", () => {
+      setStatus(false);
+      log("event", "connection closed");
+      ws = null;
+    });
+    ws.addEventListener("error", () => {
+      log("event", "connection error");
+    });
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      handleMessage(msg);
+    });
+  }
+
+  function disconnect() {
+    if (ws) ws.close();
+  }
+
+  connectBtn.addEventListener("click", () => {
+    if (ws) {
+      disconnect();
+    } else {
+      connect();
+    }
+  });
+
+  // handleMessage renders the two message kinds this page knows about,
+  // and ignores any other kind: a future protocol addition (for example
+  // task 0013's "signal") must not break this page.
+  function handleMessage(msg) {
+    switch (msg.kind) {
+      case "event":
+        onEvent(msg.event);
+        log("event", JSON.stringify(msg.event));
+        break;
+      case "setKeyState":
+        onSetKeyState(msg.setKeyState);
+        log("setKeyState", JSON.stringify(msg.setKeyState));
+        break;
+      default:
+        // Unknown kind: ignored by design, see driver/plugin/web/virtualpad.html's
+        // header comment and task 0029's spec, "Risks".
+        break;
+    }
+  }
+
+  function onEvent(payload) {
+    if (!payload) return;
+    const tile = tiles[payload.keyIndex];
+    if (!tile) return;
+    tile.classList.toggle("pressed", payload.type === "press");
+    tile.querySelector(".last").textContent = payload.type + " @" + payload.timestamp;
+  }
+
+  function onSetKeyState(payload) {
+    if (!payload) return;
+    const tile = tiles[payload.keyIndex];
+    if (!tile) return;
+    tileState[payload.keyIndex] = payload;
+    tile.style.background = rgb565ToCss(payload.color);
+    tile.classList.toggle("blink", !!payload.blink);
+    tile.querySelector(".glyph").textContent = "0x" + payload.emojiId.toString(16).toUpperCase().padStart(2, "0");
+  }
+
+  // rgb565ToCss expands a wire-protocol RGB565 color into a CSS rgb()
+  // string, the same 5-6-5 layout docs/wire-protocol.md's Color field
+  // uses.
+  function rgb565ToCss(c) {
+    const [r8, g8, b8] = rgb565To888(c);
+    return "rgb(" + r8 + "," + g8 + "," + b8 + ")";
+  }
+
+  // rgb565ToHex is rgb565ToCss's counterpart for an <input type="color">
+  // value, which takes a "#rrggbb" hex string instead of rgb(...).
+  function rgb565ToHex(c) {
+    const [r8, g8, b8] = rgb565To888(c);
+    return "#" + [r8, g8, b8].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+
+  function rgb565To888(c) {
+    const r = (c >> 11) & 0x1f;
+    const g = (c >> 5) & 0x3f;
+    const b = c & 0x1f;
+    return [Math.round((r * 255) / 31), Math.round((g * 255) / 63), Math.round((b * 255) / 31)];
+  }
+
+  // hexToRgb565 packs an <input type="color"> value's "#rrggbb" into the
+  // wire protocol's RGB565 layout, the inverse of rgb565ToHex.
+  function hexToRgb565(hex) {
+    const r8 = parseInt(hex.slice(1, 3), 16);
+    const g8 = parseInt(hex.slice(3, 5), 16);
+    const b8 = parseInt(hex.slice(5, 7), 16);
+    return ((r8 >> 3) << 11) | ((g8 >> 2) << 5) | (b8 >> 3);
+  }
+
+  // injectClick sends a press, then a release after RELEASE_DELAY_MS —
+  // the same shape a real key's debounced switch produces.
+  function injectClick(keyIndex) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("event", "not connected: click ignored");
+      return;
+    }
+    sendInject(keyIndex, "press");
+    setTimeout(() => sendInject(keyIndex, "release"), RELEASE_DELAY_MS);
+  }
+
+  function sendInject(keyIndex, type) {
+    ws.send(JSON.stringify({
+      kind: "injectEvent",
+      injectEvent: { keyIndex: keyIndex, type: type }
+    }));
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

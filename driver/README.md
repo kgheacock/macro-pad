@@ -118,11 +118,44 @@ Every message on the connection is JSON, shaped by
 
 - **`setKeyState`** — client to device. Becomes one
   `transport.Transport.SendKeyState` call; the server fills in the wire
-  protocol's version byte, so a plugin never has to track it:
+  protocol's version byte, so a plugin never has to track it. The server
+  also rebroadcasts the message to every connected client, itself
+  included, so any observer sees the resulting key state without reading
+  it back off the device:
 
   ```json
   {"kind": "setKeyState", "setKeyState": {"keyIndex": 2, "color": 63488, "emojiId": 7, "blink": true}}
   ```
+
+- **`injectEvent`** — client to device, virtual pad only. Becomes one
+  `Injector.InjectEvent` call, simulating a press or release with no
+  board attached. `NewServer`'s `injector` argument is `nil` on a
+  real-hardware run, so the server drops this message instead of
+  applying it — `transport.Device` never satisfies `Injector`, so a real
+  run cannot be misconfigured to accept one:
+
+  ```json
+  {"kind": "injectEvent", "injectEvent": {"keyIndex": 2, "type": "press"}}
+  ```
+
+### Virtual pad, with no board attached
+
+`--emulate` opens an in-memory `transport.Emulator` instead of a real
+`transport.Device`, and wires it in as the plugin server's `Injector`:
+
+```bash
+go run ./driver/cmd/macropadd --emulate
+```
+
+[`driver/plugin/web/virtualpad.html`](plugin/web/virtualpad.html) is a
+static page with no build step — open it directly in a browser (it
+connects to `ws://127.0.0.1:8765` by default). It renders six key tiles;
+clicking one sends `injectEvent` (a press, then a release), and every
+tile updates its color, glyph, and blink state from any `setKeyState`
+message it sees, from any connected client. The same page, and the same
+plugin code reacting to it, works unchanged against a real board once
+keys are wired — it is an ordinary WebSocket client of this API, not a
+separate tool. See task 0029.
 
 ### Bounds
 

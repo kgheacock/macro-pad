@@ -1,14 +1,14 @@
 ---
 id: "0020"
 title: "Add a single-command end-to-end test harness driven through the driver API"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0020-e2e-hardware-test-harness"
 related: ["0002", "0010", "0013", "0014", "0019", "0021", "0022", "0023", "0024", "0028"]
 tags: ["driver", "testing", "hardware", "dx"]
 ---

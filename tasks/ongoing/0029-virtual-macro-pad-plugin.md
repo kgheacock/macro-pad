@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/27"
 branch: "0029-virtual-macro-pad-plugin"
 related: ["0028", "0013", "0020"]
 tags: ["driver", "plugin", "emulator", "ui"]

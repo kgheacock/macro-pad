@@ -1,14 +1,14 @@
 ---
 id: "0005"
 title: "Add the audio ring buffer and chunking logic"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0005-audio-ring-buffer-chunking"
 related: ["0001", "0002"]
 tags: ["firmware", "audio"]
 ---

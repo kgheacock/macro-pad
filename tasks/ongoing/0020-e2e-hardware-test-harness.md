@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/24"
 branch: "0020-e2e-hardware-test-harness"
 related: ["0002", "0010", "0013", "0014", "0019", "0021", "0022", "0023", "0024", "0028"]
 tags: ["driver", "testing", "hardware", "dx"]

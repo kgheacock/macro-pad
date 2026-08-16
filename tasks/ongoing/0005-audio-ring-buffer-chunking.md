@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/26"
 branch: "0005-audio-ring-buffer-chunking"
 related: ["0001", "0002"]
 tags: ["firmware", "audio"]

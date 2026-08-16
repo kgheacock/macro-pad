@@ -16,18 +16,20 @@ var ErrUnsupportedVersion = errors.New("transport: unsupported protocol version"
 type MessageType byte
 
 const (
-	MessageTypeEvent      MessageType = 1
-	MessageTypeAudioChunk MessageType = 2
-	MessageTypePong       MessageType = 3
-	MessageTypeTrace      MessageType = 4
+	MessageTypeEvent          MessageType = 1
+	MessageTypeAudioChunk     MessageType = 2
+	MessageTypePong           MessageType = 3
+	MessageTypeTrace          MessageType = 4
+	MessageTypeSetCustomGlyph MessageType = 5
 )
 
 const (
-	keyStateSize    = 6
-	eventSize       = 10
-	pongSize        = 1
-	traceRecordSize = 12
-	frameHeaderSize = 3 // type + payload length, little-endian uint16
+	keyStateSize       = 6
+	eventSize          = 10
+	pongSize           = 1
+	traceRecordSize    = 12
+	frameHeaderSize    = 3                         // type + payload length, little-endian uint16
+	customGlyphPayload = 1 + CustomGlyphPixelsSize // key index + pixels
 )
 
 func encodeKeyState(w io.Writer, ks KeyState) error {
@@ -220,6 +222,28 @@ func encodeTraceRecord(tr TraceRecord) []byte {
 	binary.LittleEndian.PutUint16(buf[2:4], tr.Payload)
 	binary.LittleEndian.PutUint64(buf[4:12], tr.Timestamp)
 	return buf
+}
+
+// encodeCustomGlyph builds a Set custom glyph frame's payload: a key
+// index, then a 128×128 raw RGB565 pixel buffer, row-major,
+// little-endian per pixel. See "Set custom glyph" in
+// docs/wire-protocol.md. Returns ErrInvalidGlyphSize if pixels is not
+// exactly CustomGlyphPixelsSize bytes.
+func encodeCustomGlyph(keyIndex byte, pixels []byte) ([]byte, error) {
+	if len(pixels) != CustomGlyphPixelsSize {
+		return nil, fmt.Errorf("%w: got %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	}
+	buf := make([]byte, 0, customGlyphPayload)
+	buf = append(buf, keyIndex)
+	buf = append(buf, pixels...)
+	return buf, nil
+}
+
+func decodeCustomGlyph(payload []byte) (CustomGlyph, error) {
+	if len(payload) != customGlyphPayload {
+		return CustomGlyph{}, fmt.Errorf("transport: custom glyph payload is %d bytes, want %d", len(payload), customGlyphPayload)
+	}
+	return CustomGlyph{KeyIndex: payload[0], Pixels: payload[1:]}, nil
 }
 
 func decodeTraceRecord(payload []byte) (TraceRecord, error) {

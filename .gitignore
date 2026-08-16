@@ -18,6 +18,12 @@ assets/generated/
 # Downloaded CircuitPython UF2 — rebuild with `make firmware-uf2`
 firmware/modules/
 
+# Per-key persisted glyph state — device-local, written at runtime. Not
+# part of the source tree `make flash` syncs from, so its own
+# `rsync --delete` wipes this on every reflash. See
+# tasks/ongoing/0030-custom-glyph-upload-and-persistence.md.
+firmware/glyph_state/
+
 # driver/e2e scenario run logs — see driver/e2e/operator.go
 driver/e2e/runs/*.jsonl
 

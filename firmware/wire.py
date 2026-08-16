@@ -20,8 +20,20 @@ RELEASE = 1
 MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_PONG = 3  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_TRACE = 4  # docs/wire-protocol.md's Framing type registry
+MESSAGE_TYPE_SET_CUSTOM_GLYPH = 5  # docs/wire-protocol.md's Framing type registry
 
 PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
+
+CUSTOM_GLYPH_WIDTH = 128
+CUSTOM_GLYPH_HEIGHT = 128
+# docs/wire-protocol.md's "Set custom glyph": 128x128 pixels, RGB565, 2
+# bytes each.
+CUSTOM_GLYPH_PIXELS_SIZE = CUSTOM_GLYPH_WIDTH * CUSTOM_GLYPH_HEIGHT * 2
+CUSTOM_GLYPH_PAYLOAD_SIZE = 1 + CUSTOM_GLYPH_PIXELS_SIZE  # key index + pixels
+
+# docs/wire-protocol.md's "Emoji IDs": a key showing its last custom
+# image, not a built-in glyph table entry.
+CUSTOM_GLYPH_SENTINEL_EMOJI_ID = 0xFE
 
 
 class UnsupportedVersionError(ValueError):
@@ -116,3 +128,72 @@ def encode_pong(nonce):
     decoder.
     """
     return bytes((nonce,))
+
+
+class CustomGlyph:
+    """One decoded Set custom glyph message: a key index and its raw
+    128x128 RGB565 pixel buffer. See "Set custom glyph" in
+    docs/wire-protocol.md.
+    """
+
+    def __init__(self, key_index, pixels):
+        self.key_index = key_index
+        self.pixels = pixels
+
+
+def decode_custom_glyph(payload):
+    """Decode a Set custom glyph message's frame payload.
+
+    Raises `ValueError` when `payload` is not exactly
+    `CUSTOM_GLYPH_PAYLOAD_SIZE` bytes.
+    """
+    if len(payload) != CUSTOM_GLYPH_PAYLOAD_SIZE:
+        raise ValueError(
+            "custom glyph payload is {} bytes, want {}".format(
+                len(payload), CUSTOM_GLYPH_PAYLOAD_SIZE
+            )
+        )
+    return CustomGlyph(key_index=payload[0], pixels=bytes(payload[1:]))
+
+
+class CustomGlyphReader:
+    """Incrementally reads one framed CDC message from the host.
+
+    A Set custom glyph payload is up to 32,769 bytes — too large to read
+    in one `MacroPad.step` without stalling the switch scan and event
+    loop — so this buffers whatever `reader.in_waiting` reports on each
+    `feed` call, across as many calls as it takes, instead of blocking on
+    a full frame arriving at once.
+    """
+
+    def __init__(self):
+        self._buffer = bytearray()
+
+    def feed(self, reader):
+        """Read whatever is available from `reader`.
+
+        Returns a decoded `CustomGlyph` once a full Set custom glyph
+        frame has arrived, `None` otherwise. A frame of a type this
+        reader does not know is dropped once fully buffered, by its
+        declared length, matching `driver/transport/wire.go`'s
+        `readFrame`/`decodeMessage` split.
+        """
+        available = reader.in_waiting
+        if available:
+            self._buffer.extend(reader.read(available))
+
+        if len(self._buffer) < FRAME_HEADER_SIZE:
+            return None
+
+        message_type = self._buffer[0]
+        length = self._buffer[1] | (self._buffer[2] << 8)
+        total = FRAME_HEADER_SIZE + length
+        if len(self._buffer) < total:
+            return None
+
+        payload = bytes(self._buffer[FRAME_HEADER_SIZE:total])
+        del self._buffer[:total]
+
+        if message_type != MESSAGE_TYPE_SET_CUSTOM_GLYPH:
+            return None
+        return decode_custom_glyph(payload)

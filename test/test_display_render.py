@@ -1,7 +1,7 @@
 import displayio
 
 from firmware import glyphs
-from firmware.display_render import KeyState, render_key
+from firmware.display_render import KeyState, raw_bitmap_tile_grid, render_key
 
 
 class FakeDisplay:
@@ -65,6 +65,38 @@ def test_renders_digit():
     emoji_layer = list(display.shown_groups[-1])[1]
     expected = glyphs.lookup(0xF3, foreground=0xFFFFFF, background=0x000000)
     assert emoji_layer.bitmap is expected.bitmap
+
+
+def _solid_pixels(rgb565):
+    lo = rgb565 & 0xFF
+    hi = (rgb565 >> 8) & 0xFF
+    return bytes((lo, hi)) * (128 * 128)
+
+
+def test_raw_bitmap_tile_grid_unpacks_pixels():
+    pixels = _solid_pixels(0xF81F)
+
+    tile_grid = raw_bitmap_tile_grid(pixels)
+
+    assert tile_grid.bitmap.width == 128
+    assert tile_grid.bitmap.height == 128
+    assert tile_grid.bitmap[0] == 0xF81F
+    assert tile_grid.bitmap[128 * 128 - 1] == 0xF81F
+    assert tile_grid.pixel_shader.input_colorspace == displayio.Colorspace.RGB565
+
+
+def test_render_key_prefers_pixels_over_emoji_lookup():
+    display = FakeDisplay()
+    pixels = _solid_pixels(0x07E0)
+    key_state = KeyState(emoji_id=0xF3, color=0x000000, pixels=pixels)
+
+    def failing_emoji_lookup(emoji_id):
+        raise AssertionError("emoji_lookup called despite key_state.pixels being set")
+
+    render_key(display, key_state, failing_emoji_lookup)
+
+    image_layer = list(display.shown_groups[-1])[1]
+    assert image_layer.bitmap[0] == 0x07E0
 
 
 def test_blink_toggle():

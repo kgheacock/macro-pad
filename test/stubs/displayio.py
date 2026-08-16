@@ -28,6 +28,15 @@ class Palette:
         self._colors[index] = color
 
 
+class Colorspace:
+    RGB565 = "RGB565"
+
+
+class ColorConverter:
+    def __init__(self, *, input_colorspace=None, **kwargs):
+        self.input_colorspace = input_colorspace
+
+
 class TileGrid:
     def __init__(self, bitmap, *, pixel_shader, **kwargs):
         self.bitmap = bitmap

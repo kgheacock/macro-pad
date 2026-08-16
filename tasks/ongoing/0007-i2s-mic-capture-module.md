@@ -1,14 +1,14 @@
 ---
 id: "0007"
 title: "Add the I2S mic capture module"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-03"
-updated: "2026-08-03"
+updated: "2026-08-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0007-i2s-mic-capture-module"
 related: ["0001", "0002", "0003", "0005"]
 tags: ["firmware", "audio"]
 ---

@@ -151,6 +151,148 @@ Every message on the connection is JSON, shaped by
   {"kind": "setCustomGlyph", "setCustomGlyph": {"keyIndex": 2, "image": "<base64 PNG bytes>"}}
   ```
 
+- **`signal`** — client to server, and server to every client. No
+  `transport.Transport` call results from it — the server only
+  rebroadcasts it, exactly like `setKeyState`'s rebroadcast, to every
+  connected client, itself included. Two things emit a `signal`:
+
+  1. The server itself, once it resolves a key's raw press/release pairs
+     into a click pattern — see "Click-pattern resolution," below.
+  2. A client — `macrodriver signal`, most often — broadcasting a
+     hook-driven status. See "Signal vocabulary," below.
+
+  ```json
+  {"kind": "signal", "signal": {"keyIndex": 0, "name": "processDone"}}
+  ```
+
+  An in-process observer that already lives inside `macropadd` — task
+  0016's OSC 133 scanner, task 0015's iTerm2 bridge — calls
+  `Server.Broadcast` directly instead of dialing its own daemon over a
+  socket.
+
+### Click-pattern resolution
+
+The firmware only ever reports a raw press or release (see "Press/release
+event" in [`docs/wire-protocol.md`](../docs/wire-protocol.md)); the driver
+resolves click patterns from a sequence of them. `plugin.Server` watches
+every key's events and broadcasts a `signal` named `singlePress`,
+`doublePress`, or `longPress`:
+
+- A release **500ms or more** after its press resolves as `longPress`,
+  broadcast the moment the release arrives.
+- A release under 500ms starts a **400ms** window, waiting to see whether
+  a second press follows. A second short click inside that window
+  resolves the pair as `doublePress`. No second press inside the window
+  resolves the first click as `singlePress`, broadcast once the window
+  elapses.
+
+These are fixed timing thresholds (`driver/plugin/resolver.go`), not
+adaptive to how fast a person presses — see the task 0013 spec's Risks.
+
+### Signal vocabulary
+
+| Name | Emitted by | Meaning |
+|---|---|---|
+| `singlePress` | `plugin.Server`, resolved from raw events | The key was pressed and released once, with no second press following inside the double-press window |
+| `doublePress` | `plugin.Server`, resolved from raw events | Two short clicks on the same key, the second starting inside the double-press window |
+| `longPress` | `plugin.Server`, resolved from raw events | The key was held 500ms or more before release |
+| `processWaiting` | `macrodriver signal`, from a Claude Code `Notification` hook | The owned session is waiting on input |
+| `processDone` | `macrodriver signal`, from a Claude Code `Stop` hook | The owned session finished its turn |
+
+`name` is not restricted to this table — a plugin may broadcast its own
+vocabulary — but only these five names carry a meaning any other plugin
+in this repository recognizes.
+
+### Go plugin helpers
+
+[`driver/api`](../api) gives a Go-based plugin small, typed helpers over
+this protocol, instead of building a `setKeyState` or `signal` message by
+hand:
+
+```go
+conn, err := api.Dial("127.0.0.1:8765") // plugin.DefaultPort
+if err != nil {
+	log.Fatal(err)
+}
+defer conn.Close()
+
+conn.SetEmoji(0, 0xF1)             // key 0 shows digit 1
+conn.SetState(0, "Waiting", nil)   // key 0 turns amber and blinks
+conn.Signal(0, plugin.SignalProcessDone)
+```
+
+`SetState`'s named states are a closed set — `Alert` (red, blinking),
+`Waiting` (amber, blinking), and `Done` (green, solid) — each mapping to
+a fixed `Color` and `Blink` flag; `color`, when not `nil`, overrides the
+named state's color. A name outside this set returns
+`api.ErrUnknownState`. Adding a new named state needs a driver code
+change, matching the wire protocol's own fixed-width messages having no
+room for open-ended state names either.
+
+### `macrodriver signal`
+
+`driver/cmd/macrodriver`'s `signal` subcommand opens a short-lived plugin
+connection, sends one `signal` message, and exits:
+
+```bash
+go run ./driver/cmd/macrodriver signal --key 0 --event stop
+```
+
+`--event` accepts `notification` (broadcasts `processWaiting`) and `stop`
+(broadcasts `processDone`) — the two Claude Code hook events task 0013
+wires up. `--addr` overrides the default `127.0.0.1:8765`.
+
+A hook runs `macrodriver` as a plain shell command, not `go run`, so
+install it onto `PATH` first: `go install
+./driver/cmd/macrodriver`.
+
+**Claude Code hook example.** Add these to `.claude/settings.json` so a
+`Notification` or `Stop` hook event runs `macrodriver signal`, and run
+[`driver/examples/claude-status`](../examples/claude-status) — the
+reference plugin below — to see the result on a key:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "macrodriver signal --key 0 --event notification"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "macrodriver signal --key 0 --event stop"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Reference plugin: `driver/examples/claude-status`
+
+[`driver/examples/claude-status`](../examples/claude-status) stays
+connected to `macropadd` and reacts to `processWaiting` and `processDone`
+signals named for one key by calling `SetState`: the key blinks amber
+while the session waits on input, and turns solid green once it's done.
+
+```bash
+go run ./driver/examples/claude-status --key 0
+```
+
+Run it alongside `macropadd` and the hook example above; a real Claude
+Code session's `Notification` and `Stop` hooks then drive the key's
+color with no other process in between.
+
 ### Virtual pad, with no board attached
 
 `--emulate` opens an in-memory `transport.Emulator` instead of a real
@@ -189,9 +331,10 @@ bound, and cannot block delivery to other clients:
 Total memory for queued-but-undelivered messages therefore never exceeds
 `maxClients × clientQueueSize` messages.
 
-**Out of scope for this API:** click-pattern resolution (single, double,
-long press — see tasks 0011–0013), binary audio streaming to a client, and
-auth beyond the `localhost` bind and the client cap.
+**Out of scope for this API:** binary audio streaming to a client, and
+auth beyond the `localhost` bind and the client cap. Click-pattern
+resolution (single, double, long press) is in scope as of task 0013 — see
+"Click-pattern resolution," above.
 
 ### Recording a trace alongside the plugin API
 

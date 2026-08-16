@@ -7,7 +7,7 @@ updated: "2026-08-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/30"
 branch: "0007-i2s-mic-capture-module"
 related: ["0001", "0002", "0003", "0005"]
 tags: ["firmware", "audio"]

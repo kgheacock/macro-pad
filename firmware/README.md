@@ -68,10 +68,13 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
 `step(now_us)` call does this, in order:
 
 1. Decode one HID key state message and update that key's render state.
-2. Read every switch, debounce it, and write a 10-byte event per accepted
+2. Decode one Set custom glyph message from the CDC data channel, if a
+   full one has arrived, and update that key's render state — see
+   "Custom glyphs and persisted state," below.
+3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
-3. Redraw the keys that changed, plus every key that blinks.
-4. Set each backlight from the idle timer.
+4. Redraw the keys that changed, plus every key that blinks.
+5. Set each backlight from the idle timer.
 
 `wire.py` encodes and decodes the messages in
 [`docs/wire-protocol.md`](../docs/wire-protocol.md). It is the firmware
@@ -109,6 +112,27 @@ The file is generated, not hand-written. To add or change a glyph:
 Running the generator again with no source changes must leave
 `firmware/glyphs.py` byte-identical — that's what keeps a hand-edit of
 the generated file visible in review.
+
+## Custom glyphs and persisted state
+
+A driver call can send an arbitrary 128×128 image for one key over CDC —
+"Set custom glyph" in [`docs/wire-protocol.md`](../docs/wire-protocol.md)
+— instead of one of `firmware/glyphs.py`'s built-in IDs. `wire.py`'s
+`CustomGlyphReader` buffers this message's bytes across as many `step`
+calls as it takes to arrive, since at up to 32,769 bytes it is too large
+to read in one iteration without stalling the switch scan.
+`display_render.raw_bitmap_tile_grid` renders the result the same way
+`glyphs.lookup` renders a built-in one.
+
+`glyph_state.py` persists each key's last state — built-in or custom,
+color, and blink — to one file per key under `glyph_state/`, so a key
+redraws its own last state after a power cycle with no driver connected.
+A firmware reflash (`make flash`) resets this: `glyph_state/` is not part
+of the source tree that command syncs from (see its `.gitignore` entry),
+so its `rsync --delete` removes the directory from the board on every
+run. `MacroPad`'s `storage` constructor argument injects a fake for this
+in tests, the same way `emoji_lookup` and the other hardware arguments
+do; `code.py` relies on the real `glyph_state.FilesystemStorage` default.
 
 ## Connectivity check
 

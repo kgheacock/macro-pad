@@ -140,28 +140,28 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `macropadd --emulate` runs with no board attached and
+- [x] **DoD-1** — `macropadd --emulate` runs with no board attached and
   accepts WebSocket connections. **Proof:** `go run ./driver/cmd/macropadd
   --emulate` prints `macropadd: listening on 127.0.0.1:8765` with no USB
   device present.
-- [ ] **DoD-2** — A click on a virtual key sends `injectEvent`, and every
+- [x] **DoD-2** — A click on a virtual key sends `injectEvent`, and every
   connected client receives the resulting `event` message. **Proof:**
   manual run: open `virtualpad.html` in two tabs, click a key in one tab,
   see the `event` logged in both tabs' consoles.
-- [ ] **DoD-3** — An `injectEvent` message sent to a `plugin.Server` with a
+- [x] **DoD-3** — An `injectEvent` message sent to a `plugin.Server` with a
   `nil` `Injector` is dropped, not applied. **Proof:**
   `go test ./driver/plugin/... -run TestServer_InjectEvent_NilInjector`
-- [ ] **DoD-4** — A `setKeyState` message sent by any client updates the
+- [x] **DoD-4** — A `setKeyState` message sent by any client updates the
   matching tile's color, glyph, and blink state in the browser. **Proof:**
   manual run: send `setKeyState` from a second WebSocket client (for
   example `wscat`), see the tile update in `virtualpad.html`.
-- [ ] **DoD-5** — Tests cover the new `Injector` gate and the `injectEvent`
+- [x] **DoD-5** — Tests cover the new `Injector` gate and the `injectEvent`
   decoding. **Proof:** `go test ./driver/plugin/...` passes. `git stash &&
   go test ./driver/plugin/... -run InjectEvent` fails on `main`.
-- [ ] **DoD-6** — `driver/README.md`'s "Plugin API" section documents
+- [x] **DoD-6** — `driver/README.md`'s "Plugin API" section documents
   `injectEvent` and `--emulate`, and states that real-hardware runs drop
   the message. **Proof:** `driver/README.md`, "Plugin API" section.
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 
 ## Risks

@@ -40,7 +40,7 @@ func (f *fakeConn) SetState(key int, state string, color *uint16) error {
 func TestWatch_ReactsToProcessWaitingAndDone(t *testing.T) {
 	conn := &fakeConn{
 		queue: []plugin.Message{
-			{Kind: plugin.KindEvent, Event: &plugin.EventPayload{KeyIndex: 0, Type: "press"}}, // ignored
+			{Kind: plugin.KindEvent, Event: &plugin.EventPayload{KeyIndex: 0, Type: "press"}},                        // ignored
 			{Kind: plugin.KindSignal, Signal: &plugin.SignalPayload{KeyIndex: 1, Name: plugin.SignalProcessWaiting}}, // wrong key, ignored
 			{Kind: plugin.KindSignal, Signal: &plugin.SignalPayload{KeyIndex: 0, Name: plugin.SignalProcessWaiting}},
 			{Kind: plugin.KindSignal, Signal: &plugin.SignalPayload{KeyIndex: 0, Name: plugin.SignalSinglePress}}, // unrecognized name, ignored

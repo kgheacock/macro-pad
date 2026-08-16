@@ -39,6 +39,7 @@ func solidPNG(t *testing.T, width, height int, c color.Color) []byte {
 type fakeConn struct {
 	mu          sync.Mutex
 	written     [][]byte
+	binWritten  [][]byte
 	closed      bool
 	closeCode   int
 	closeReason string
@@ -86,6 +87,20 @@ func (f *fakeConn) WriteJSON(v any) error {
 	return nil
 }
 
+func (f *fakeConn) WriteMessage(messageType int, data []byte) error {
+	if f.writeBlock != nil {
+		select {
+		case <-f.writeBlock:
+		case <-f.closeCh:
+			return io.EOF
+		}
+	}
+	f.mu.Lock()
+	f.binWritten = append(f.binWritten, append([]byte(nil), data...))
+	f.mu.Unlock()
+	return nil
+}
+
 func (f *fakeConn) WriteClose(code int, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -114,6 +129,14 @@ func (f *fakeConn) rawMessages() [][]byte {
 	defer f.mu.Unlock()
 	out := make([][]byte, len(f.written))
 	copy(out, f.written)
+	return out
+}
+
+func (f *fakeConn) audioMessages() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]byte, len(f.binWritten))
+	copy(out, f.binWritten)
 	return out
 }
 
@@ -660,4 +683,134 @@ func TestServer_RejectsOverCap(t *testing.T) {
 	if got != maxClients {
 		t.Fatalf("got %d registered clients after the rejection, want %d", got, maxClients)
 	}
+}
+
+func TestServer_DeliversAudioChunkToSubscriber(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	c := s.addClient(conn)
+	if c == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	conn.send(t, Message{Kind: KindSubscribeAudio})
+	waitForCondition(t, time.Second, c.audioSubscribed.Load)
+
+	chunk := transport.AudioChunk{StreamID: 7, PCM: []byte{1, 2, 3}, Final: true}
+	if err := dev.InjectAudioChunk(chunk); err != nil {
+		t.Fatalf("InjectAudioChunk: %v", err)
+	}
+
+	waitForCondition(t, time.Second, func() bool { return len(conn.audioMessages()) > 0 })
+
+	got := conn.audioMessages()[0]
+	want := audioFrame(chunk)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got audio frame %v, want %v", got, want)
+	}
+}
+
+func TestServer_UnsubscribedClientReceivesNoAudio(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	chunk := transport.AudioChunk{StreamID: 3, PCM: []byte{9, 9}, Final: true}
+	if err := dev.InjectAudioChunk(chunk); err != nil {
+		t.Fatalf("InjectAudioChunk: %v", err)
+	}
+
+	// Give the dispatch loop a moment to process the chunk, then prove it
+	// never reached a client that never subscribed.
+	time.Sleep(20 * time.Millisecond)
+	if len(conn.audioMessages()) != 0 {
+		t.Fatal("unsubscribed client received an audio frame")
+	}
+}
+
+func TestServer_UnsubscribeAudio_StopsDelivery(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	c := s.addClient(conn)
+	if c == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	conn.send(t, Message{Kind: KindSubscribeAudio})
+	waitForCondition(t, time.Second, c.audioSubscribed.Load)
+
+	first := transport.AudioChunk{StreamID: 1, PCM: []byte{1}, Final: false}
+	if err := dev.InjectAudioChunk(first); err != nil {
+		t.Fatalf("InjectAudioChunk: %v", err)
+	}
+	waitForCondition(t, time.Second, func() bool { return len(conn.audioMessages()) > 0 })
+
+	conn.send(t, Message{Kind: KindUnsubscribeAudio})
+	waitForCondition(t, time.Second, func() bool { return !c.audioSubscribed.Load() })
+
+	second := transport.AudioChunk{StreamID: 1, PCM: []byte{2}, Final: true}
+	if err := dev.InjectAudioChunk(second); err != nil {
+		t.Fatalf("InjectAudioChunk: %v", err)
+	}
+
+	// Give the dispatch loop a moment to process the second chunk, then
+	// prove unsubscribing stopped delivery instead of just the first
+	// chunk happening to arrive first.
+	time.Sleep(20 * time.Millisecond)
+	if len(conn.audioMessages()) != 1 {
+		t.Fatalf("got %d audio frames after unsubscribing, want 1 (only the pre-unsubscribe chunk)", len(conn.audioMessages()))
+	}
+}
+
+func TestServer_SlowAudioClientDoesNotBlockOthers(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	slow := newFakeConn()
+	slow.writeBlock = make(chan struct{}) // never closed: every write to slow parks here
+	slowClient := s.addClient(slow)
+	if slowClient == nil {
+		t.Fatal("addClient rejected the slow client")
+	}
+	slow.send(t, Message{Kind: KindSubscribeAudio})
+	waitForCondition(t, time.Second, slowClient.audioSubscribed.Load)
+
+	healthy := newFakeConn()
+	healthyClient := s.addClient(healthy)
+	if healthyClient == nil {
+		t.Fatal("addClient rejected the healthy client")
+	}
+	healthy.send(t, Message{Kind: KindSubscribeAudio})
+	waitForCondition(t, time.Second, healthyClient.audioSubscribed.Load)
+
+	// More than enough chunks to fill slow's audio queue and push it past
+	// maxDrops, so the test also proves the healthy client is unaffected
+	// by the slow one being disconnected mid-stream.
+	const n = audioQueueSize + maxDrops + 5
+	for i := 0; i < n; i++ {
+		chunk := transport.AudioChunk{StreamID: 1, PCM: []byte{byte(i)}, Final: i == n-1}
+		if err := dev.InjectAudioChunk(chunk); err != nil {
+			t.Fatalf("InjectAudioChunk %d: %v", i, err)
+		}
+	}
+	waitForCondition(t, time.Second, func() bool { return len(healthy.audioMessages()) >= n })
+
+	// The event path stays healthy too: a stuck audio subscriber must
+	// not stall the shared client-registry lock or event delivery.
+	if err := dev.InjectEvent(transport.Event{KeyIndex: 1, Type: transport.EventPress, Timestamp: 1}); err != nil {
+		t.Fatalf("InjectEvent: %v", err)
+	}
+	waitForCondition(t, time.Second, func() bool { return len(healthy.rawMessages()) > 0 })
 }

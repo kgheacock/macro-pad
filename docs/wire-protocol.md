@@ -13,21 +13,24 @@ little-endian, matching the RP2350's native byte order.
 | Message | Sender | Channel | Size |
 |---|---|---|---|
 | Key state | Host → Device | HID | 6 bytes |
+| Set custom glyph | Host → Device | CDC serial | 1 + 32,768 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
 | Trace record | Device → Host | CDC serial | 12 bytes |
 
-Sizes for the three device→host messages are the payload only. Every
-device→host message is wrapped in the 3-byte frame header described in
-[Framing](#framing).
+Sizes for every message but Key state are the payload only. Every message
+on the CDC data channel, in either direction, is wrapped in the 3-byte
+frame header described in [Framing](#framing).
 
 ## Framing
 
-Both device→host messages share one CDC data channel. Neither carries a
-field that says which message follows it — byte 0 is a key index in one
-and a stream ID in the other — so a reader cannot tell them apart on its
-own. Every device→host message is prefixed with a 3-byte frame header:
+The CDC data channel carries messages in both directions — Set custom
+glyph, host → device, and every other CDC message, device → host — and
+none of them carries a field that says which message it is: byte 0 is a
+key index in some and a stream ID in another, so a reader cannot tell them
+apart on its own. Every CDC message, in either direction, is prefixed with
+a 3-byte frame header:
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
@@ -36,18 +39,19 @@ own. Every device→host message is prefixed with a 3-byte frame header:
 
 The reader reads the header, reads exactly `Length` payload bytes, then
 decodes them if it knows `Type`. A type it does not know is skipped by
-`Length`, not guessed at, so firmware can add a message type that an older
-driver ignores. A stream that ends before `Length` payload bytes arrive is
-a truncated message, not a partial value.
+`Length`, not guessed at, so either side can add a message type the other
+end's build does not know yet. A stream that ends before `Length` payload
+bytes arrive is a truncated message, not a partial value.
 
 ### Type registry
 
-| Type | Message |
-|---|---|
-| 1 | Press/release event |
-| 2 | Audio chunk |
-| 3 | Pong |
-| 4 | Trace record |
+| Type | Message | Direction |
+|---|---|---|
+| 1 | Press/release event | Device → Host |
+| 2 | Audio chunk | Device → Host |
+| 3 | Pong | Device → Host |
+| 4 | Trace record | Device → Host |
+| 5 | Set custom glyph | Host → Device |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -65,6 +69,35 @@ change. One message covers one key.
 | 4 | 1 | Emoji ID | Index into the firmware's emoji bitmap table — see [Emoji IDs](#emoji-ids) |
 | 5 | 1 | Blink flag | `0` = steady, `1` = blink |
 
+### Set custom glyph (CDC, host → device)
+
+Sent whenever the driver wants a key to show an arbitrary image instead of
+a built-in glyph table entry. One message replaces one key's image
+entirely — there is no way to patch part of it. Framed per
+[Framing](#framing) as type `5`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Key index | 0-based index of the target key |
+| 1 | 32,768 | Pixels | 128×128 image, row-major, RGB565, 2 bytes per pixel, little-endian |
+
+32,768 bytes is 128 × 128 pixels × 2 bytes per pixel — the whole image in
+one frame, under the frame header's `uint16` `Length` field's limit, so
+this message needs no multi-frame reassembly on either side. The driver
+decodes the source PNG and converts its colors to RGB565 itself; firmware
+never parses an image format, it only copies length-prefixed bytes into a
+bitmap and a file. See
+[task 0030](../tasks/ongoing/0030-custom-glyph-upload-and-persistence.md)
+for the design decision, including why this task keeps the source PNG's
+fidelity a driver-side concern instead of an on-device one.
+
+Once firmware has stored and rendered this image, the key's state — for
+the purpose of [Emoji IDs](#emoji-ids) — becomes the reserved sentinel
+`0xFE`, "this key's last custom image," not the numeric Emoji ID of
+whatever built-in glyph the key showed before. A later ordinary Key state
+message naming a built-in Emoji ID switches the key back to the glyph
+table, replacing the custom image.
+
 ## Emoji IDs
 
 Reserved values for the Key state message's Emoji ID field. Every other
@@ -79,9 +112,12 @@ value is unreserved, for a later task's emoji set.
 | `0xF4` | Digit 4 |
 | `0xF5` | Digit 5 |
 | `0xF6` | Digit 6 |
+| `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied, never sent by the driver itself |
 
-`firmware/glyphs.py` maps each ID here to a bitmap; see
-[`firmware/README.md`](../firmware/README.md) for how to add one.
+`firmware/glyphs.py` maps each built-in ID here to a bitmap; see
+[`firmware/README.md`](../firmware/README.md) for how to add one. `0xFE`
+maps to a stored pixel buffer instead — see [Set custom
+glyph](#set-custom-glyph-cdc-host--device).
 
 ### Press/release event (CDC, device → host)
 

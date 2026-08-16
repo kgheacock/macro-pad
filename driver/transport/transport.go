@@ -97,6 +97,13 @@ type Transport interface {
 	// ReadMessage blocks until one device→host message arrives over CDC
 	// serial, or the transport is closed. A frame whose type this package
 	// does not know is skipped by its declared length and never returned.
+	//
+	// ReadMessage supports exactly one caller: Device and Emulator each
+	// drain one internal channel, not duplicate it, so two goroutines
+	// calling it on the same Transport steal messages from each other
+	// instead of each seeing every one. A caller that needs more than one
+	// reader wraps the Transport in a Fanout and gives each reader its own
+	// Subscribe subscription instead.
 	ReadMessage() (Message, error)
 
 	// Close releases the transport's underlying handles. A ReadMessage

@@ -94,6 +94,7 @@ type client struct {
 type Server struct {
 	dev      transport.Transport
 	injector Injector
+	resolver *clickResolver
 
 	upgrader websocket.Upgrader
 
@@ -121,6 +122,9 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 	}
+	s.resolver = newClickResolver(func(keyIndex byte, name string) {
+		s.Broadcast(signalMessage(keyIndex, name))
+	})
 	go s.dispatchLoop()
 	return s
 }
@@ -231,6 +235,11 @@ func (s *Server) readPump(c *client) {
 			}
 			ev.Timestamp = uint64(time.Now().UnixMicro())
 			s.injector.InjectEvent(ev)
+		case KindSignal:
+			if msg.Signal == nil {
+				continue
+			}
+			s.Broadcast(msg)
 		}
 	}
 }
@@ -248,7 +257,8 @@ func (s *Server) writePump(c *client) {
 
 // dispatchLoop reads decoded messages from s.dev until it errors, which
 // happens once the transport is closed, and broadcasts every Event to
-// connected clients.
+// connected clients. Every Event also feeds s.resolver, which may itself
+// broadcast a resolved click-pattern signal.
 func (s *Server) dispatchLoop() {
 	for {
 		msg, err := s.dev.ReadMessage()
@@ -259,7 +269,17 @@ func (s *Server) dispatchLoop() {
 			continue
 		}
 		s.broadcast(eventMessage(msg.Event))
+		s.resolver.handleEvent(msg.Event)
 	}
+}
+
+// Broadcast delivers m to every connected client, exactly like a device
+// event or a rebroadcast setKeyState/setCustomGlyph message. An
+// in-process observer — task 0016's OSC 133 scanner, task 0015's iTerm2
+// bridge — calls this directly to emit a signal, with no need to dial its
+// own daemon over a socket. See task 0013.
+func (s *Server) Broadcast(m Message) {
+	s.broadcast(m)
 }
 
 // broadcast delivers m to every connected client's send queue without

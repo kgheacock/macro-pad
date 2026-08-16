@@ -3,6 +3,8 @@
 // implements it without a physical device attached.
 package transport
 
+import "errors"
+
 // ProtocolVersion is the version byte this package builds against. It
 // matches the "Versioning" section of docs/wire-protocol.md.
 const ProtocolVersion = 1
@@ -15,6 +17,36 @@ type KeyState struct {
 	Color    uint16 // RGB565
 	EmojiID  byte
 	Blink    bool
+}
+
+// CustomGlyphWidth and CustomGlyphHeight are the fixed dimensions every
+// custom glyph image must decode to. See "Set custom glyph" in
+// docs/wire-protocol.md.
+const (
+	CustomGlyphWidth  = 128
+	CustomGlyphHeight = 128
+)
+
+// CustomGlyphPixelsSize is the length of the raw RGB565 pixel buffer a
+// custom glyph message carries: width × height × 2 bytes per pixel.
+const CustomGlyphPixelsSize = CustomGlyphWidth * CustomGlyphHeight * 2
+
+// CustomGlyphSentinelEmojiID marks a key as showing its last custom
+// image, not a built-in glyph table entry. See "Emoji IDs" in
+// docs/wire-protocol.md.
+const CustomGlyphSentinelEmojiID = 0xFE
+
+// ErrInvalidGlyphSize is returned when a custom glyph image is not
+// exactly CustomGlyphWidth × CustomGlyphHeight, or a raw pixel buffer is
+// not exactly CustomGlyphPixelsSize bytes.
+var ErrInvalidGlyphSize = errors.New("transport: custom glyph image must be 128x128")
+
+// CustomGlyph is a host→device message that replaces one key's image
+// with an arbitrary 128×128 picture. See "Set custom glyph" in
+// docs/wire-protocol.md.
+type CustomGlyph struct {
+	KeyIndex byte
+	Pixels   []byte // CustomGlyphPixelsSize bytes: RGB565, row-major, little-endian
 }
 
 // EventType identifies whether a press/release event is a press or a
@@ -93,6 +125,13 @@ type Message struct {
 type Transport interface {
 	// SendKeyState writes one key-state message to the device over HID.
 	SendKeyState(KeyState) error
+
+	// SendCustomGlyph writes one Set custom glyph message to the device
+	// over CDC serial: a key index and a 128×128 raw RGB565 pixel
+	// buffer, framed per "Framing" in docs/wire-protocol.md. pixels must
+	// be exactly CustomGlyphPixelsSize bytes — DecodePNGToRGB565 builds
+	// one from a PNG file's bytes.
+	SendCustomGlyph(keyIndex byte, pixels []byte) error
 
 	// ReadMessage blocks until one device→host message arrives over CDC
 	// serial, or the transport is closed. A frame whose type this package

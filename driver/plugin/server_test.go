@@ -1,7 +1,11 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"sync"
 	"testing"
@@ -9,6 +13,23 @@ import (
 
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
+
+// solidPNG builds a width x height PNG filled with c, for a test that
+// only cares about SetCustomGlyphPayload's dimensions, not its picture.
+func solidPNG(t *testing.T, width, height int, c color.Color) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
 
 // fakeConn is a wsConn test double. It marshals and unmarshals JSON the
 // same way *websocket.Conn does, so a test proves the server's JSON
@@ -190,6 +211,66 @@ func TestServer_SetKeyState(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("got key state %+v, want %+v", got, want)
+	}
+}
+
+func TestServer_SetCustomGlyph(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	pngBytes := solidPNG(t, transport.CustomGlyphWidth, transport.CustomGlyphHeight, color.RGBA{G: 0xFF, A: 0xFF})
+	conn.send(t, Message{
+		Kind: KindSetCustomGlyph,
+		SetCustomGlyph: &SetCustomGlyphPayload{
+			KeyIndex: 5,
+			Image:    pngBytes,
+		},
+	})
+
+	waitForCondition(t, time.Second, func() bool {
+		_, ok := dev.LastCustomGlyph()
+		return ok
+	})
+
+	got, _ := dev.LastCustomGlyph()
+	if got.KeyIndex != 5 {
+		t.Fatalf("LastCustomGlyph KeyIndex = %d, want 5", got.KeyIndex)
+	}
+	if len(got.Pixels) != transport.CustomGlyphPixelsSize {
+		t.Fatalf("LastCustomGlyph Pixels length = %d, want %d", len(got.Pixels), transport.CustomGlyphPixelsSize)
+	}
+}
+
+func TestServer_SetCustomGlyph_RejectsWrongSizeImage(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	pngBytes := solidPNG(t, 64, 64, color.RGBA{G: 0xFF, A: 0xFF})
+	conn.send(t, Message{
+		Kind: KindSetCustomGlyph,
+		SetCustomGlyph: &SetCustomGlyphPayload{
+			KeyIndex: 5,
+			Image:    pngBytes,
+		},
+	})
+
+	// Give the read pump a moment to process (and reject) the message,
+	// then prove it never reached the transport.
+	time.Sleep(20 * time.Millisecond)
+	if _, ok := dev.LastCustomGlyph(); ok {
+		t.Fatal("server sent a custom glyph despite a wrong-sized source image")
 	}
 }
 

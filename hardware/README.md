@@ -9,17 +9,19 @@ pad.
 
 | Part | Status |
 |---|---|
-| Pimoroni Pico Plus 2 (RP2350) | In hand |
-| 6× Waveshare 0.85" ScreenKey Module — ST7735 driver, 128×128, 65K color, SPI, integrated mechanical switch | In hand — confirm SKU/variant |
+| Pimoroni Pico Plus 2 (RP2350) | In hand, connected |
+| 6× Waveshare 0.85" ScreenKey Module — ST7735 driver, 128×128, 65K color, SPI, integrated mechanical switch | In hand, SKU confirmed |
 | I2S MEMS mic breakout (SPH0645 or ICS-43434) | Needed |
 | Pin headers/sockets, perfboard, hookup wire, USB-C cable | Needed |
 | Custom PCB (KiCad → JLCPCB/PCBWay) | Later — once the design is confirmed on breadboard |
 | Enclosure — printed, laser-cut, or aluminum panel | Later — once the design is confirmed on breadboard |
 
-**⚠️ Confirm the ScreenKey SKU before wiring.** The *Module* variant has a
-9-pin SPI Control Interface with a dedicated `KEY` pin. The *LCD-only*
-variant has a 12-pin LCD Interface with no switch signal. The wiring
-differs between the two.
+**ScreenKey SKU confirmed: the *Module* variant.** It has a 9-pin SPI
+Control Interface with a dedicated `KEY` pin, not the *LCD-only* variant's
+12-pin LCD Interface with no switch signal. The two need different wiring.
+See `docs/0.85inch_ScreenKey_Module.pdf` for the confirmed part's
+datasheet, and `docs/ppico_plus_2_pinout_diagram.pdf` for the Pico Plus
+2's.
 
 **Mount the modules on header or socket connectors. Do not use solder
 joints.** This makes a future swap a plug/replace operation, with no

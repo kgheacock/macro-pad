@@ -1,7 +1,7 @@
 ---
 id: "0023"
 title: "Add the glyph table and the digit glyphs 1 to 6"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
 updated: "2026-08-15"
 owner: "kgheacock"
@@ -131,27 +131,27 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — `lookup(0xF3, ...)` returns a `TileGrid` whose bitmap
+- [x] **DoD-1** — `lookup(0xF3, ...)` returns a `TileGrid` whose bitmap
       matches the pixels of `hardware/glyphs/3.png`. **Proof:**
       `.venv/bin/pytest test/test_glyphs.py -k digit_matches_source`
-- [ ] **DoD-2** — `lookup` on an unregistered ID returns the placeholder
+- [x] **DoD-2** — `lookup` on an unregistered ID returns the placeholder
       glyph and raises nothing. **Proof:** `.venv/bin/pytest
       test/test_glyphs.py -k unknown_id_returns_placeholder`
-- [ ] **DoD-3** — Two `lookup` calls for the same ID return grids backed
+- [x] **DoD-3** — Two `lookup` calls for the same ID return grids backed
       by the same `Bitmap` object. **Proof:** `.venv/bin/pytest
       test/test_glyphs.py -k lookup_caches_bitmap`
-- [ ] **DoD-4** — `render_key` draws a digit through `lookup` with no
+- [x] **DoD-4** — `render_key` draws a digit through `lookup` with no
       change to `firmware/display_render.py`. **Proof:**
       `.venv/bin/pytest test/test_display_render.py -k renders_digit` and
       `git diff --stat` shows `display_render.py` unchanged
-- [ ] **DoD-5** — Re-running `tools/gen_glyphs.py` leaves
+- [x] **DoD-5** — Re-running `tools/gen_glyphs.py` leaves
       `firmware/glyphs.py` byte-identical. **Proof:** `python3
       tools/gen_glyphs.py && git diff --exit-code firmware/glyphs.py`
-- [ ] **DoD-6** — `docs/wire-protocol.md`'s "Emoji IDs" section reserves
+- [x] **DoD-6** — `docs/wire-protocol.md`'s "Emoji IDs" section reserves
       `0x00` for the placeholder. **Proof:** `docs/wire-protocol.md`
-- [ ] **DoD-7** — `firmware/README.md` records how to add a glyph and
+- [x] **DoD-7** — `firmware/README.md` records how to add a glyph and
       regenerate the module. **Proof:** `firmware/README.md`
-- [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:**
       PR body
 
 ## Risks

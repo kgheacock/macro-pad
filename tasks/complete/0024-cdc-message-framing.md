@@ -1,9 +1,9 @@
 ---
 id: "0024"
 title: "Add a type and length header to every device→host CDC message"
-status: "ongoing"
+status: "complete"
 created: "2026-08-14"
-updated: "2026-08-14"
+updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -133,23 +133,23 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer.
 
-- [ ] **DoD-1** — One stream holding an event, an audio chunk, then an
+- [x] **DoD-1** — One stream holding an event, an audio chunk, then an
   event decodes to those three values in that order. **Proof:**
   `go test ./driver/transport/ -run TestReadMessageMixedStream`
-- [ ] **DoD-2** — A frame with type `0xFE` is skipped by its length, and
+- [x] **DoD-2** — A frame with type `0xFE` is skipped by its length, and
   the next known message decodes. **Proof:**
   `go test ./driver/transport/ -run TestReadMessageUnknownType`
-- [ ] **DoD-3** — A frame whose header declares 40 bytes and whose stream
+- [x] **DoD-3** — A frame whose header declares 40 bytes and whose stream
   ends after 10 returns `io.ErrUnexpectedEOF` and no value. **Proof:**
   `go test ./driver/transport/ -run TestReadMessageTruncated`
-- [ ] **DoD-4** — `Transport` has no `ReadEvent` and no `ReadAudioChunk`.
+- [x] **DoD-4** — `Transport` has no `ReadEvent` and no `ReadAudioChunk`.
   **Proof:** `go doc ./driver/transport Transport`
-- [ ] **DoD-5** — The new tests fail on `main`. **Proof:**
+- [x] **DoD-5** — The new tests fail on `main`. **Proof:**
   `git stash && go test ./driver/transport/` fails
-- [ ] **DoD-6** — `docs/wire-protocol.md` states the 3-byte header, the
+- [x] **DoD-6** — `docs/wire-protocol.md` states the 3-byte header, the
   type registry, and that the audio chunk no longer carries its own
   length. **Proof:** `docs/wire-protocol.md`, section "Framing"
-- [ ] **DoD-7** — The PR body links to this spec. **Proof:** the PR in the
+- [x] **DoD-7** — The PR body links to this spec. **Proof:** the PR in the
   `pr` field
 
 ## Risks

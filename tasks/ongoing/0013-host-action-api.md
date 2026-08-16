@@ -7,7 +7,7 @@ updated: "2026-08-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/29"
 branch: "0013-host-action-api"
 related: ["0002", "0011", "0012", "0015", "0016", "0028"]
 tags: ["driver", "api", "protocol"]

@@ -26,10 +26,13 @@ make flash
 ```
 
 This copies `firmware/` onto the `CIRCUITPY` drive with `rsync --delete`,
-apart from `modules/`, `__pycache__/`, and this `README.md`. `--delete`
-means any file on the drive that isn't in `firmware/` is removed,
-including test data or logs a developer added on the board directly. The
-target fails with a clear error if `CIRCUITPY` isn't mounted.
+apart from `modules/`, `__pycache__/`, `lib/`, and this `README.md`.
+`--delete` means any other file on the drive that isn't in `firmware/`
+is removed, including test data or logs a developer added on the board
+directly. `lib/` is excluded so a CircuitPython library installed there
+with `circup` — `adafruit_st7735r`, for the real display driver — survives
+a reflash. The target fails with a clear error if `CIRCUITPY` isn't
+mounted.
 
 ## Scope
 
@@ -147,6 +150,25 @@ disk; run `make flash` afterward to put the real `code.py` back on the
 board. See [`docs/wire-protocol.md`](../docs/wire-protocol.md#ping) for
 the Ping and Pong message layout, and
 [`driver/README.md`](../driver/README.md) for the host side of the check.
+
+## Soldering check
+
+`firmware/pin_voltage_check.py` verifies a soldered header pin by driving
+it HIGH and LOW from the REPL while you read it with a multimeter in DC
+voltage mode — more diagnostic than a continuity check, since a pin that
+follows its neighbor instead of the console print reveals a solder
+bridge, not just an open joint. It is not part of `code.py`'s loop; after
+`make flash` puts it on the `CIRCUITPY` drive, connect over serial,
+interrupt `code.py` with Ctrl-C, then run:
+
+```python
+import pin_voltage_check
+pin_voltage_check.check_pin("GP13")
+```
+
+See the module's docstring for how to read the result, and
+`pin_voltage_check.HEADER_PINS` for the full list of pins
+`firmware/pins.py` assigns.
 
 ## Loop period
 

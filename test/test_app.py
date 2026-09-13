@@ -18,7 +18,12 @@ class FakeDisplay:
     def __init__(self):
         self.shown_groups = []
 
-    def show(self, group):
+    @property
+    def root_group(self):
+        return self.shown_groups[-1]
+
+    @root_group.setter
+    def root_group(self, group):
         self.shown_groups.append(group)
 
     def refresh(self, **kwargs):

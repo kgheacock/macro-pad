@@ -1,4 +1,10 @@
-from typing import Optional
+try:
+    from typing import Optional
+except ImportError:
+    # This board's CircuitPython build ships no `typing` module. Optional
+    # is only ever used in annotations below, which CircuitPython does
+    # not evaluate at runtime, so a placeholder is enough.
+    Optional = None
 
 
 class Debouncer:

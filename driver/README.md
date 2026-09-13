@@ -127,6 +127,17 @@ Every message on the connection is JSON, shaped by
   {"kind": "setKeyState", "setKeyState": {"keyIndex": 2, "color": 63488, "emojiId": 7, "blink": true}}
   ```
 
+  **Connect-time replay.** `Server` remembers the last `setKeyState` or
+  `setCustomGlyph` message it broadcast for each key index. A client that
+  connects later is sent every remembered message, one per known key
+  index, in ascending order, right after it connects and before it sends
+  anything itself — the same message shape as a live rebroadcast, so a
+  client needs no separate code path to tell a replay from a fresh
+  change. A key never set since the daemon started is simply absent from
+  the replay; a client still reads it as unknown until a broadcast names
+  it. The cache is in-memory only and does not survive a daemon restart.
+  See task 0036.
+
 - **`injectEvent`** — client to device, virtual pad only. Becomes one
   `Injector.InjectEvent` call, simulating a press or release with no
   board attached. `NewServer`'s `injector` argument is `nil` on a
@@ -360,6 +371,23 @@ message it sees, from any connected client. The same page, and the same
 plugin code reacting to it, works unchanged against a real board once
 keys are wired — it is an ordinary WebSocket client of this API, not a
 separate tool. See task 0029.
+
+[`driver/plugin/web/keystate.html`](plugin/web/keystate.html) is a
+second static page, for administering key state rather than simulating a
+press: a table of the 6 keys, each row with a color picker, an emoji ID
+field, and a blink checkbox, a Set button, a Reset button, and a status
+column (unknown/pending/confirmed). Set sends `setKeyState` and marks the
+row "pending" until the daemon's own rebroadcast for that exact state
+arrives, then "confirmed"; a disconnect while "pending" reverts the row
+to "unknown". Reset restores a key to a defined default — a digit glyph
+(`0xF1` + the key index), blink off, a neutral color — instead of
+whatever the emoji ID field happens to hold, because `0x00` is a reserved
+placeholder that draws a full-screen white box, not a usable blank or
+reset value (see the Emoji ID table in
+[`docs/wire-protocol.md`](../docs/wire-protocol.md)). A row that already
+has a known state when the page connects — via the connect-time replay
+above — reads "confirmed" immediately, with no Set click needed. See task
+0036.
 
 ### Bounds
 

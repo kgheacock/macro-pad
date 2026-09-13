@@ -1,14 +1,14 @@
 ---
 id: "0034"
 title: "Send a raw emoji character to a key, not just a pre-made PNG"
-status: "backlog"
+status: "ongoing"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0034-emoji-character-to-custom-glyph-image"
 related: ["0030"]
 tags: ["driver", "cli", "display"]
 ---

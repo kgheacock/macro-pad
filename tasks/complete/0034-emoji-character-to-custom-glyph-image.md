@@ -1,13 +1,13 @@
 ---
 id: "0034"
 title: "Send a raw emoji character to a key, not just a pre-made PNG"
-status: "ongoing"
+status: "complete"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/34"
 branch: "0034-emoji-character-to-custom-glyph-image"
 related: ["0030"]
 tags: ["driver", "cli", "display"]
@@ -154,8 +154,9 @@ Files to change:
   signal`.
   The new `### \`macrodriver emoji\`` section sits directly after
   `### \`macrodriver signal\``.
-- [ ] **DoD-6** — The PR in the `pr` field links to this spec.
+- [x] **DoD-6** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.
+  PR #34's body names `tasks/ongoing/0034-emoji-character-to-custom-glyph-image.md` under "Implements".
 
 ## Risks
 

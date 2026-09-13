@@ -7,7 +7,7 @@ updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/33"
 branch: "0033-mutate-display-scene-graph-in-place"
 related: ["0006", "0022", "0031"]
 tags: ["firmware", "display", "performance", "bring-up"]

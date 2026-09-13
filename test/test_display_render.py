@@ -1,19 +1,30 @@
 import displayio
 
 from firmware import glyphs
-from firmware.display_render import KeyState, raw_bitmap_tile_grid, render_key
+from firmware.display_render import (
+    KeyState,
+    _rgb565_to_rgb888,
+    raw_bitmap_tile_grid,
+    render_key,
+)
 
 
 class FakeDisplay:
     """Records what a real `adafruit_st7735r.ST7735R` would have been
-    told to show, via the same `show`/`refresh` calls it exposes.
+    told to show, via the same `root_group` assignment and `refresh`
+    call it exposes.
     """
 
     def __init__(self) -> None:
         self.shown_groups = []
         self.refresh_count = 0
 
-    def show(self, group: displayio.Group) -> None:
+    @property
+    def root_group(self) -> displayio.Group:
+        return self.shown_groups[-1]
+
+    @root_group.setter
+    def root_group(self, group: displayio.Group) -> None:
         self.shown_groups.append(group)
 
     def refresh(self, **kwargs) -> bool:
@@ -27,13 +38,16 @@ def _emoji_tile_grid(bitmap: displayio.Bitmap) -> displayio.TileGrid:
     return displayio.TileGrid(bitmap, pixel_shader=palette)
 
 
-def _stub_emoji_lookup(emoji_id: str) -> displayio.TileGrid:
+def _stub_emoji_lookup(emoji_id: str, color: int) -> displayio.TileGrid:
     return _emoji_tile_grid(displayio.Bitmap(1, 1, 1))
 
 
 def test_fill_color():
     display = FakeDisplay()
-    key_state = KeyState(emoji_id="smile", color=0xFF00FF)
+    # 0xF81F is RGB565 magenta (R=0x1F, G=0, B=0x1F) — render_key must
+    # widen it to the 24-bit 0xFF00FF displayio.Palette expects, not
+    # assign the 16-bit value directly. See _rgb565_to_rgb888.
+    key_state = KeyState(emoji_id="smile", color=0xF81F)
 
     render_key(display, key_state, _stub_emoji_lookup)
 
@@ -42,12 +56,27 @@ def test_fill_color():
     assert display.refresh_count == 1
 
 
+def test_rgb565_to_rgb888():
+    assert _rgb565_to_rgb888(0x0000) == 0x000000
+    assert _rgb565_to_rgb888(0xFFFF) == 0xFFFFFF
+    assert _rgb565_to_rgb888(0xF800) == 0xFF0000  # pure red
+    assert _rgb565_to_rgb888(0x07E0) == 0x00FF00  # pure green
+    assert _rgb565_to_rgb888(0x001F) == 0x0000FF  # pure blue
+    # Confirmed live during task 0031: sending RGB565 red (0xF800) with
+    # no conversion rendered as green, since a bare int assigned to
+    # displayio.Palette is read as 0xRRGGBB and RGB565's max (0xFFFF)
+    # always leaves that top byte zero.
+    assert _rgb565_to_rgb888(0xFEA0) == 0xFFD600  # api.Conn.SetState's amber
+
+
 def test_emoji_bitmap():
     display = FakeDisplay()
     expected_bitmap = displayio.Bitmap(8, 8, 2)
     key_state = KeyState(emoji_id="smile", color=0x000000)
 
-    render_key(display, key_state, lambda emoji_id: _emoji_tile_grid(expected_bitmap))
+    render_key(
+        display, key_state, lambda emoji_id, color: _emoji_tile_grid(expected_bitmap)
+    )
 
     emoji_layer = list(display.shown_groups[-1])[1]
     assert emoji_layer.bitmap is expected_bitmap
@@ -57,14 +86,32 @@ def test_renders_digit():
     display = FakeDisplay()
     key_state = KeyState(emoji_id=0xF3, color=0x000000)
 
-    def emoji_lookup(emoji_id):
-        return glyphs.lookup(emoji_id, foreground=0xFFFFFF, background=0x000000)
+    def emoji_lookup(emoji_id, color):
+        return glyphs.lookup(emoji_id, foreground=0xFFFFFF, background=color)
 
     render_key(display, key_state, emoji_lookup)
 
     emoji_layer = list(display.shown_groups[-1])[1]
     expected = glyphs.lookup(0xF3, foreground=0xFFFFFF, background=0x000000)
     assert emoji_layer.bitmap is expected.bitmap
+
+
+def test_emoji_lookup_receives_key_color():
+    """`code.py`'s real emoji_lookup backgrounds a glyph to match the
+    key's own color (task 0023's Open questions) — render_key must pass
+    key_state.color through, not just emoji_id.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id=0xF3, color=0x07E0)
+    received = []
+
+    def emoji_lookup(emoji_id, color):
+        received.append((emoji_id, color))
+        return _emoji_tile_grid(displayio.Bitmap(1, 1, 1))
+
+    render_key(display, key_state, emoji_lookup)
+
+    assert received == [(0xF3, 0x07E0)]
 
 
 def _solid_pixels(rgb565):
@@ -90,7 +137,7 @@ def test_render_key_prefers_pixels_over_emoji_lookup():
     pixels = _solid_pixels(0x07E0)
     key_state = KeyState(emoji_id=0xF3, color=0x000000, pixels=pixels)
 
-    def failing_emoji_lookup(emoji_id):
+    def failing_emoji_lookup(emoji_id, color):
         raise AssertionError("emoji_lookup called despite key_state.pixels being set")
 
     render_key(display, key_state, failing_emoji_lookup)

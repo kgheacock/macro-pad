@@ -170,6 +170,32 @@ Every message on the connection is JSON, shaped by
   `Server.Broadcast` directly instead of dialing its own daemon over a
   socket.
 
+- **`subscribeAudio`** / **`unsubscribeAudio`** — client to server, no
+  payload. Start or stop delivery of every
+  `transport.MessageTypeAudioChunk` the daemon reads to this client. A
+  client that never sends `subscribeAudio` never receives one, and pays
+  no cost for a recording in progress — see "Audio delivery," below.
+
+  ```json
+  {"kind": "subscribeAudio"}
+  {"kind": "unsubscribeAudio"}
+  ```
+
+### Audio delivery
+
+A subscribed client receives one **binary** WebSocket frame per
+`transport.AudioChunk` the daemon reads off the wire, on a queue separate
+from every JSON message above: `StreamID` byte, then the chunk's raw PCM
+bytes, then a final-chunk byte (0 or 1) — the same layout
+[`docs/wire-protocol.md`](../docs/wire-protocol.md)'s "Audio chunk" frame
+uses, unwrapped from any JSON envelope. `StreamID` is forwarded as an
+opaque byte; this API does not yet fix what it means (for example whether
+it equals a `keyIndex`) — see task 0007 and task 0031's Open questions.
+
+A plugin author's WebSocket library must therefore branch on frame type —
+binary versus the text frames every other message above uses — instead of
+calling `JSON.parse` on everything it receives. See task 0031.
+
 ### Click-pattern resolution
 
 The firmware only ever reports a raw press or release (see "Press/release
@@ -326,15 +352,21 @@ bound, and cannot block delivery to other clients:
   client never stalls delivery to the rest.
 - **8 drops** (`maxDrops`) — a client whose queue has dropped this many
   messages is disconnected. The daemon keeps running for every other
-  client.
+  client. Dropping an audio frame counts against the same cap as
+  dropping a JSON message.
+- **8 audio frames per subscribed client** (`audioQueueSize`) — a
+  subscribed client's audio frames queue separately from its
+  `clientQueueSize`-bounded JSON queue, so one active recording cannot
+  fill the queue that bounds delivery of `event` and other JSON
+  messages. A client that never subscribes never has a frame queued for
+  it. See task 0031.
 
 Total memory for queued-but-undelivered messages therefore never exceeds
-`maxClients × clientQueueSize` messages.
+`maxClients × (clientQueueSize + audioQueueSize)` messages.
 
-**Out of scope for this API:** binary audio streaming to a client, and
-auth beyond the `localhost` bind and the client cap. Click-pattern
-resolution (single, double, long press) is in scope as of task 0013 — see
-"Click-pattern resolution," above.
+**Out of scope for this API:** auth beyond the `localhost` bind and the
+client cap. Click-pattern resolution (single, double, long press) is in
+scope as of task 0013 — see "Click-pattern resolution," above.
 
 ### Recording a trace alongside the plugin API
 

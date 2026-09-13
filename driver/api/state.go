@@ -71,6 +71,24 @@ func (c *Conn) SetEmoji(key int, id byte) error {
 	})
 }
 
+// SetKeyState sets key's color, emoji, and blink state all at once. Unlike
+// SetEmoji and SetState — each of which leaves the fields it doesn't set
+// at their own reset value, since the wire protocol's Key state message
+// carries all three together — SetKeyState lets a caller choose all three
+// in a single call, matching the raw JSON shape driver/README.md's Plugin
+// API section documents.
+func (c *Conn) SetKeyState(key int, color uint16, emojiID byte, blink bool) error {
+	return c.send(plugin.Message{
+		Kind: plugin.KindSetKeyState,
+		SetKeyState: &plugin.SetKeyStatePayload{
+			KeyIndex: byte(key),
+			Color:    color,
+			EmojiID:  emojiID,
+			Blink:    blink,
+		},
+	})
+}
+
 // namedState is one entry in the closed set SetState recognizes: a color
 // and blink state a plugin selects by name instead of building a
 // setKeyState payload by hand. Color and Blink become the Key state

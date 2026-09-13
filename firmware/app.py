@@ -32,6 +32,15 @@ from idle_timer import IdleTimer
 DEFAULT_COLOR = 0x0000
 DEFAULT_EMOJI_ID = 0
 
+# How often a blinking key's visibility toggles. `render_key` toggles
+# once per call (task 0006's DoD-3), which assumed render_key was called
+# at some human-perceptible cadence; task 0022's main loop instead calls
+# it on every `step`, unthrottled, so a blinking key toggled thousands of
+# times a second and looked like a flicker-blended solid color instead of
+# a blink. Confirmed live during task 0031's key-0 bring-up. 500ms gives
+# a 1Hz blink.
+BLINK_INTERVAL_US = 500_000
+
 
 class Backlight:
     """One key's PWM backlight, addressed as a 0.0 to 1.0 fraction.
@@ -70,7 +79,7 @@ def make_switch(pin):
     return switch
 
 
-def blank_glyph(emoji_id):
+def blank_glyph(emoji_id, color):
     """Stand-in emoji lookup used until task 0023 generates the real one.
 
     It returns an empty 1x1 tile so a board with no glyph table still
@@ -126,6 +135,9 @@ class MacroPad:
         self.key_states = [
             self._restore_key_state(key_index) for key_index in range(len(displays))
         ]
+        # Next `now_us` at which a blinking key is allowed to toggle
+        # visibility again; see BLINK_INTERVAL_US.
+        self._next_blink_us = [0] * len(displays)
         # Every key is dirty at power-on so the first step paints all six
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
@@ -153,6 +165,12 @@ class MacroPad:
     def _persist_key_state(self, key_index):
         """Write `key_index`'s current state to storage, unless it
         already matches what was last written there.
+
+        A write failure (for example the filesystem going read-only, or a
+        `make flash` sync landing on the same file at the same instant —
+        see `boot.py`'s `storage.remount` comment) is dropped rather than
+        raised: the key still keeps its new state in RAM and on its
+        display, it just won't survive the next power cycle.
         """
         key_state = self.key_states[key_index]
         data = glyph_state.encode(
@@ -160,7 +178,10 @@ class MacroPad:
         )
         if data == self._persisted[key_index]:
             return
-        self._storage.write(key_index, data)
+        try:
+            self._storage.write(key_index, data)
+        except OSError:
+            return
         self._persisted[key_index] = data
 
     def step(self, now_us):
@@ -169,7 +190,7 @@ class MacroPad:
         custom_glyph_message = self._apply_custom_glyph()
         key_event = self._scan_switches(now_us)
 
-        self._render_dirty_keys()
+        self._render_dirty_keys(now_us)
 
         if host_message or custom_glyph_message or key_event:
             self._idle_timer.touch(now_us)
@@ -303,18 +324,24 @@ class MacroPad:
 
         return wrote_event
 
-    def _render_dirty_keys(self):
-        """Redraw the keys that changed, plus every key that blinks.
+    def _render_dirty_keys(self, now_us):
+        """Redraw the keys that changed, plus every blinking key whose
+        BLINK_INTERVAL_US has elapsed since it last toggled.
 
-        A blinking key is redrawn each iteration because `render_key`
-        toggles its visibility once per call.
+        `render_key` toggles a blinking key's visibility once per call
+        (see display_render.py), so gating that call on elapsed wall-clock
+        time, not on `step`'s own iteration rate, is what makes the
+        toggle a human-visible blink instead of a flicker.
         """
         for index, key_state in enumerate(self.key_states):
-            if index not in self._dirty and not key_state.blink:
+            due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]
+            if index not in self._dirty and not due_to_blink:
                 continue
             display_render.render_key(
                 self._displays[index], key_state, self._emoji_lookup
             )
+            if key_state.blink:
+                self._next_blink_us[index] = now_us + BLINK_INTERVAL_US
 
         self._dirty.clear()
 

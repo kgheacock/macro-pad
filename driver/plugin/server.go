@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -37,6 +38,14 @@ const clientQueueSize = 32
 // enough to keep up, and holding its queue open no longer serves it.
 const maxDrops = 8
 
+// audioQueueSize bounds how many undelivered audio frames one subscribed
+// client's audio queue holds. It is sized independently of
+// clientQueueSize, on its own channel, so subscribing to audio never
+// shrinks the headroom clientQueueSize gives that client's JSON messages,
+// and a client that never subscribes never has an audio frame queued for
+// it at all. See task 0031.
+const audioQueueSize = 8
+
 // maxClientsCloseReason is sent to a client rejected for being past
 // maxClients.
 const maxClientsCloseReason = "too many clients connected"
@@ -47,6 +56,7 @@ const maxClientsCloseReason = "too many clients connected"
 type wsConn interface {
 	ReadJSON(v any) error
 	WriteJSON(v any) error
+	WriteMessage(messageType int, data []byte) error
 	WriteClose(code int, reason string) error
 	Close() error
 }
@@ -76,13 +86,22 @@ type Injector interface {
 
 // client is one connected plugin.
 type client struct {
-	conn wsConn
-	send chan Message
+	conn      wsConn
+	send      chan Message
+	audioSend chan []byte
 
-	// drops counts messages dropped because send was full. It is only
-	// ever touched from Server.broadcast, itself only ever called from
+	// drops counts messages dropped because send or audioSend was full.
+	// It is only ever touched from Server.broadcast and
+	// Server.broadcastAudio, themselves only ever called from
 	// Server.dispatchLoop, so no lock guards it.
 	drops int
+
+	// audioSubscribed says whether this client currently receives
+	// audio frames. Server.broadcastAudio (dispatchLoop's goroutine)
+	// reads it and this client's own readPump goroutine writes it, so
+	// it needs atomic access instead of the lock-free convention drops
+	// relies on.
+	audioSubscribed atomic.Bool
 
 	closeOnce sync.Once
 }
@@ -176,7 +195,11 @@ func (s *Server) addClient(conn wsConn) *client {
 		conn.Close()
 		return nil
 	}
-	c := &client{conn: conn, send: make(chan Message, clientQueueSize)}
+	c := &client{
+		conn:      conn,
+		send:      make(chan Message, clientQueueSize),
+		audioSend: make(chan []byte, audioQueueSize),
+	}
 	s.clients[c] = struct{}{}
 	s.mu.Unlock()
 
@@ -194,6 +217,7 @@ func (s *Server) removeClient(c *client) {
 		delete(s.clients, c)
 		s.mu.Unlock()
 		close(c.send)
+		close(c.audioSend)
 		c.conn.Close()
 	})
 }
@@ -240,36 +264,58 @@ func (s *Server) readPump(c *client) {
 				continue
 			}
 			s.Broadcast(msg)
+		case KindSubscribeAudio:
+			c.audioSubscribed.Store(true)
+		case KindUnsubscribeAudio:
+			c.audioSubscribed.Store(false)
 		}
 	}
 }
 
-// writePump delivers c's queued messages to its connection in order,
-// until the queue is closed by removeClient or a write fails.
+// writePump delivers c's queued messages and audio frames to its
+// connection in the order they arrive, until removeClient closes both
+// queues or a write fails.
 func (s *Server) writePump(c *client) {
-	for msg := range c.send {
-		if err := c.conn.WriteJSON(msg); err != nil {
-			s.removeClient(c)
-			return
+	for {
+		select {
+		case msg, ok := <-c.send:
+			if !ok {
+				return
+			}
+			if err := c.conn.WriteJSON(msg); err != nil {
+				s.removeClient(c)
+				return
+			}
+		case frame, ok := <-c.audioSend:
+			if !ok {
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+				s.removeClient(c)
+				return
+			}
 		}
 	}
 }
 
 // dispatchLoop reads decoded messages from s.dev until it errors, which
 // happens once the transport is closed, and broadcasts every Event to
-// connected clients. Every Event also feeds s.resolver, which may itself
-// broadcast a resolved click-pattern signal.
+// connected clients and every AudioChunk to subscribed ones. Every Event
+// also feeds s.resolver, which may itself broadcast a resolved
+// click-pattern signal.
 func (s *Server) dispatchLoop() {
 	for {
 		msg, err := s.dev.ReadMessage()
 		if err != nil {
 			return
 		}
-		if msg.Type != transport.MessageTypeEvent {
-			continue
+		switch msg.Type {
+		case transport.MessageTypeEvent:
+			s.broadcast(eventMessage(msg.Event))
+			s.resolver.handleEvent(msg.Event)
+		case transport.MessageTypeAudioChunk:
+			s.broadcastAudio(msg.AudioChunk)
 		}
-		s.broadcast(eventMessage(msg.Event))
-		s.resolver.handleEvent(msg.Event)
 	}
 }
 
@@ -305,4 +351,50 @@ func (s *Server) broadcast(m Message) {
 	for _, c := range toRemove {
 		s.removeClient(c)
 	}
+}
+
+// broadcastAudio delivers c's raw bytes, framed by audioFrame, to every
+// subscribed client's audioSend without blocking: a full queue drops the
+// frame for that client instead of stalling delivery to the rest. A
+// client whose queue has dropped maxDrops messages — audio or otherwise
+// — is disconnected, exactly like broadcast. A client that never
+// subscribed never receives a frame and never touches audioSend at all.
+func (s *Server) broadcastAudio(chunk transport.AudioChunk) {
+	frame := audioFrame(chunk)
+	var toRemove []*client
+
+	s.mu.Lock()
+	for c := range s.clients {
+		if !c.audioSubscribed.Load() {
+			continue
+		}
+		select {
+		case c.audioSend <- frame:
+		default:
+			c.drops++
+			if c.drops >= maxDrops {
+				toRemove = append(toRemove, c)
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	for _, c := range toRemove {
+		s.removeClient(c)
+	}
+}
+
+// audioFrame builds the binary frame layout a subscribed client receives
+// for one transport.AudioChunk: the stream ID byte, the raw PCM bytes,
+// then a final-chunk byte — the same layout driver/transport's wire
+// protocol uses to encode transport.MessageTypeAudioChunk.
+func audioFrame(c transport.AudioChunk) []byte {
+	buf := make([]byte, 0, 2+len(c.PCM))
+	buf = append(buf, c.StreamID)
+	buf = append(buf, c.PCM...)
+	final := byte(0)
+	if c.Final {
+		final = 1
+	}
+	return append(buf, final)
 }

@@ -341,7 +341,11 @@ class MacroPad:
         Each redraw builds its own display bus and releases it again
         (task 0032) — this board allows only 1 concurrent display bus, so
         `render_key_with_builder` must fully return, releasing the bus,
-        before the next dirty key's turn.
+        before the next dirty key's turn. The bus is rebuilt every time,
+        but each key's own `Group`/`Palette`/glyph `TileGrid` are not:
+        `render_key` builds them once per key, on `self.key_states[index]`,
+        and mutates that same scene graph on every later call (task 0033),
+        so a redraw touches only the region that actually changed.
         """
         for index, key_state in enumerate(self.key_states):
             due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]

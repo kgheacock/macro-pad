@@ -1,14 +1,14 @@
 ---
 id: "0033"
 title: "Mutate the display scene graph in place instead of rebuilding it every render_key call"
-status: "backlog"
+status: "ongoing"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/33"
+branch: "0033-mutate-display-scene-graph-in-place"
 related: ["0006", "0022", "0031"]
 tags: ["firmware", "display", "performance", "bring-up"]
 ---
@@ -142,16 +142,21 @@ Files to change:
   redraws in measurably less than the 43-45ms full-panel baseline.
   **Proof:** a recorded millisecond figure in `firmware/README.md`,
   taken with the same debug-console timing method task 0031 used.
-- [ ] **DoD-2** — The placeholder glyph (`0x00`) still renders
+  **Not confirmed.** This implementation session had no board attached
+  to measure against. `firmware/README.md`'s new "Persistent display
+  scene graph" section records the figure as not yet measured and names
+  the exact probe to run — the same open question this spec's Open
+  questions section already flagged as needing hardware.
+- [x] **DoD-2** — The placeholder glyph (`0x00`) still renders
   correctly. Its cost is documented as unchanged by design.
   **Proof:** `firmware/README.md`'s entry for DoD-1 states this.
-- [ ] **DoD-3** — `render_key`, `KeyState`, and the app render step pass
+- [x] **DoD-3** — `render_key`, `KeyState`, and the app render step pass
   the full test suite. **Proof:** `.venv/bin/pytest test/ -q` passes.
-- [ ] **DoD-4** — Dedicated tests cover a color-only change, a glyph
+- [x] **DoD-4** — Dedicated tests cover a color-only change, a glyph
   change, and a blink-only toggle against the new split.
   **Proof:** test names in `test/test_display_render.py` and
   `test/test_app.py`.
-- [ ] **DoD-5** — `firmware/README.md` documents the persistent scene
+- [x] **DoD-5** — `firmware/README.md` documents the persistent scene
   graph and links this spec. **Proof:** `firmware/README.md`.
 - [ ] **DoD-6** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.

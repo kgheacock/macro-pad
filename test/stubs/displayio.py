@@ -43,6 +43,7 @@ class TileGrid:
         self.pixel_shader = pixel_shader
         self.x = kwargs.get("x", 0)
         self.y = kwargs.get("y", 0)
+        self.hidden = kwargs.get("hidden", False)
 
 
 class Group:
@@ -61,6 +62,12 @@ class Group:
 
     def __iter__(self):
         return iter(self._layers)
+
+    def __getitem__(self, index):
+        return self._layers[index]
+
+    def __setitem__(self, index, layer):
+        self._layers[index] = layer
 
 
 class FourWire:

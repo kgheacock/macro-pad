@@ -7,7 +7,7 @@ updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/32"
 branch: "0032-share-one-display-bus-across-six-keys"
 related: ["0006", "0010", "0022"]
 tags: ["firmware", "display", "hardware", "bring-up"]

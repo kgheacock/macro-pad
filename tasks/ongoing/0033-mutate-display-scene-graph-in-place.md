@@ -1,14 +1,14 @@
 ---
 id: "0033"
 title: "Mutate the display scene graph in place instead of rebuilding it every render_key call"
-status: "backlog"
+status: "ongoing"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0033-mutate-display-scene-graph-in-place"
 related: ["0006", "0022", "0031"]
 tags: ["firmware", "display", "performance", "bring-up"]
 ---

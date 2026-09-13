@@ -47,6 +47,14 @@ DISPLAY_ROWSTART = 2
 # lands. See tasks/backlog/ for that follow-up task.
 BRING_UP_KEYS = pins.KEYS[:1]
 
+# fourwire.FourWire's own default (24MHz) visibly wipes top-to-bottom on
+# a full-panel redraw — every render_key call repaints the whole 128x128
+# panel, so this is hit on every state change, not just occasionally.
+# Confirmed live during task 0031's key-0 bring-up. Bumped experimentally;
+# lower this if frames start showing garbled/torn pixels on this board's
+# breadboard wiring.
+DISPLAY_BAUDRATE = 32_000_000
+
 displayio.release_displays()
 
 spi = busio.SPI(
@@ -63,6 +71,7 @@ displays = [
             command=getattr(board, pins.DISPLAY_DC),
             chip_select=getattr(board, key.display_cs_pin),
             reset=getattr(board, pins.DISPLAY_RST),
+            baudrate=DISPLAY_BAUDRATE,
         ),
         width=DISPLAY_WIDTH,
         height=DISPLAY_HEIGHT,

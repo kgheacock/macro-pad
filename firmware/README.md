@@ -61,9 +61,10 @@ the byte layout of every message sent or received over these channels.
 CircuitPython runs `boot.py` first, then `code.py`. `code.py` is this
 firmware's entry point.
 
-`code.py` only builds the real hardware objects — switches, displays,
-backlights, the HID device, and the CDC data channel — and passes them to
-`app.MacroPad`, then calls `run()`. It holds no loop logic of its own.
+`code.py` only builds the real hardware objects — switches, a
+display-bus builder, backlights, the HID device, and the CDC data
+channel — and passes them to `app.MacroPad`, then calls `run()`. It
+holds no loop logic of its own.
 
 The loop lives in `app.py`. `MacroPad` takes every hardware object as a
 constructor argument, so the same loop runs under pytest against the
@@ -76,7 +77,9 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
    "Custom glyphs and persisted state," below.
 3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
-4. Redraw the keys that changed, plus every key that blinks.
+4. Redraw the keys that changed, plus every key that blinks — see
+   "Display bus," below, for how each redraw builds and releases its
+   own bus.
 5. Set each backlight from the idle timer.
 
 `wire.py` encodes and decodes the messages in
@@ -88,6 +91,25 @@ version byte is not the one this build was written against.
 Modules under `firmware/` import each other flat (`import wire`, not
 `from firmware import wire`), because this folder's contents are copied
 to the root of the `CIRCUITPY` drive, where no `firmware` package exists.
+
+## Display bus
+
+This board's CircuitPython build allows only 1 concurrent `displayio`
+display bus — a 2nd `fourwire.FourWire` raises `RuntimeError: Too many
+display busses`, confirmed live during task 0010's bring-up. All 6
+keys' displays share one `busio.SPI` bus with a distinct chip-select
+pin each, so only one key's `fourwire.FourWire`/`ST7735R` pair can
+exist at a time.
+
+`code.py` reflects this: it holds no persistent list of display
+objects. Instead, its `build_display(key_index)` builds one key's bus
+on demand, and `app.MacroPad` calls it through
+`display_render.render_key_with_builder`, which builds the bus, draws
+one frame through it, then calls `displayio.release_displays()` before
+returning — freeing the bus for whichever key redraws next. See
+[`tasks/ongoing/0032-share-one-display-bus-across-six-keys.md`](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md)
+for the design decision, including why this construct-draw-release
+cost, paid on every redraw, was accepted over the alternatives.
 
 ## Glyphs
 
@@ -211,7 +233,7 @@ class NullHID:
 
 pad = MacroPad(
     switches=[make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS],
-    displays=[NullDisplay() for _ in pins.KEYS],
+    build_display=lambda key_index: NullDisplay(),
     backlights=[NullBacklight() for _ in pins.KEYS],
     hid_device=NullHID(),
     serial=NullSerial(),
@@ -246,6 +268,27 @@ Record the result here as a line of the form:
 
 ```
 Measured loop period: N.NNN ms (RP2350, displays absent, 1000 iterations)
+```
+
+## Per-redraw display-bus latency
+
+**Not yet measured.** Task
+[`0032`](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md)'s
+per-redraw `build_display`/`render_key_with_builder` cycle constructs a
+fresh `fourwire.FourWire` and `ST7735R`, which runs the panel's full
+init sequence, on every redraw — a cost the held-open display list this
+replaced never paid. This needs the real board to measure: time one
+`display_render.render_key_with_builder` call end to end with a console
+attached (see "Loop period," above, for how to reach the console), and
+record how many keys can redraw in one main-loop tick before that
+latency, multiplied by the number of dirty keys, threatens task 0022's
+loop-period budget — several keys blinking together is the worst case
+named in task 0032's Risks.
+
+Record the result here as a line of the form:
+
+```
+Measured per-redraw display-bus latency: N.NNN ms (RP2350, one key, ST7735R init included)
 ```
 
 ## Out of scope

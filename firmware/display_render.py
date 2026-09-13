@@ -170,3 +170,22 @@ def render_key(
 
     display.root_group = group
     display.refresh()
+
+
+def render_key_with_builder(
+    build_display: Callable[[], DisplayLike],
+    key_state: KeyState,
+    emoji_lookup: EmojiLookup,
+) -> None:
+    """Build one key's display bus, render one frame through it, then
+    release the bus before returning.
+
+    This board allows only 1 concurrent `displayio` display bus (task
+    0032), so no other key can build its own bus until this call
+    returns. `build_display` takes no arguments — the caller binds the
+    key index itself, so this module stays free of `pins.py`/`code.py`
+    hardware-construction concerns.
+    """
+    display = build_display()
+    render_key(display, key_state, emoji_lookup)
+    displayio.release_displays()

@@ -1,14 +1,14 @@
 ---
 id: "0032"
 title: "Share the RP2350's single display bus across all 6 keys' displays"
-status: "backlog"
+status: "ongoing"
 created: "2026-09-12"
-updated: "2026-09-12"
+updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0032-share-one-display-bus-across-six-keys"
 related: ["0006", "0010", "0022"]
 tags: ["firmware", "display", "hardware", "bring-up"]
 ---

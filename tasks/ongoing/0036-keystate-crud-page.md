@@ -172,23 +172,45 @@ Files to change:
   Set sends one `setKeyState` message with those exact fields. **Proof:**
   manual run against `macropadd --emulate`; the message log shows one
   `setKeyState` frame with the entered values.
+  **Not confirmed:** the implementing sandbox kills any process that
+  opens a listening TCP socket, so `macropadd` cannot stay up long enough
+  here to drive `keystate.html` against it. `sendSet` in
+  `driver/plugin/web/keystate.html` builds and sends exactly one
+  `setKeyState` message from the row's current field values by
+  inspection; a person with a normal shell should run the manual proof
+  before trusting this box.
 - [ ] **DoD-2** — Key 0's row shows "pending" right after Set, then
   "confirmed" only once a `setKeyState` broadcast matching every sent
   field arrives. **Proof:** manual run; status changes only after the
   matching broadcast, not on send.
+  **Not confirmed:** same sandbox limit as DoD-1. `onSetKeyState`'s
+  pending/confirmed logic is exercised indirectly by
+  `TestServer_SnapshotReplaysEachKeyOnceInAscendingOrder` and friends at
+  the server layer, but the client-side state machine itself needs the
+  manual run.
 - [ ] **DoD-3** — Clicking Reset for key N sends `setKeyState` with
   `emojiId` equal to `0xF1 + N`, never `0`. **Proof:** `grep -n "0xF1"
   driver/plugin/web/keystate.html` shows the constant; manual run shows a
   digit glyph, not a solid white box.
+  **Partly confirmed:** the grep half passes — `RESET_EMOJI_BASE = 0xF1`
+  at `driver/plugin/web/keystate.html:171`, added to `row.keyIndex` in
+  `sendReset`. The manual-run half is blocked by the same sandbox limit.
 - [ ] **DoD-4** — Each row updates only from a broadcast naming its own
   `keyIndex`; a broadcast for key 2 leaves key 0's row unchanged. **Proof:**
   manual run; send a `setKeyState` for key 2 from a second client (for
   example `wscat`), confirm only row 2 changes.
+  **Not confirmed:** same sandbox limit as DoD-1. `onSetKeyState` indexes
+  `rows[payload.keyIndex]` and returns early if that row doesn't exist,
+  so by inspection only the named row's DOM is ever touched — but this
+  needs the manual run to confirm against a live daemon.
 - [ ] **DoD-5** — If the connection closes while a row is "pending", that
   row reverts to "unknown", not "confirmed". **Proof:** manual run; Set a
   key, disconnect before the broadcast arrives, confirm the row reads
   "unknown".
-- [ ] **DoD-6** — `driver/README.md`'s "Plugin API" section documents
+  **Not confirmed:** same sandbox limit as DoD-1. The `close` listener in
+  `driver/plugin/web/keystate.html` reverts every "pending" row to
+  "unknown" by inspection, but needs the manual run to confirm.
+- [x] **DoD-6** — `driver/README.md`'s "Plugin API" section documents
   `keystate.html` and the Reset default. **Proof:** `driver/README.md`,
   "Plugin API" section.
 - [ ] **DoD-7** — A client that connects after the daemon has already
@@ -199,7 +221,16 @@ Files to change:
   manual run confirms a `keystate.html` page opened after another client
   already set key 0 shows key 0 as "confirmed" immediately, with no Set
   click on this page.
-- [ ] **DoD-8** — `driver/README.md`'s "Protocol" subsection documents the
+  **Partly confirmed:** `go test ./driver/plugin/...` passes, including
+  `TestServer_SnapshotsSetKeyStateToNewClient`,
+  `TestServer_SnapshotsSetCustomGlyphToNewClient`, and
+  `TestServer_NewClientGetsNoSnapshotForUnknownKey`, which cover the
+  server side of both cases named above (`TestServer_SlowClientDoesNotBlockOthers`
+  and `TestServer_SlowAudioClientDoesNotBlockOthers` flake under load on
+  the unmodified base commit too — pre-existing, unrelated to this task).
+  The `keystate.html` half of the proof needs the manual run, blocked by
+  the same sandbox limit as DoD-1.
+- [x] **DoD-8** — `driver/README.md`'s "Protocol" subsection documents the
   connect-time replay next to the `setKeyState` bullet it extends.
   **Proof:** `driver/README.md`, "Protocol" subsection.
 - [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**

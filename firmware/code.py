@@ -34,10 +34,11 @@ DISPLAY_HEIGHT = 128
 # Confirmed live: a thin strip of stale RAM bled in along the bottom and
 # right edges — this panel's visible glass sits a couple pixels into the
 # ST7735R's addressable RAM, so the undersized draw window undershot it
-# on those edges. colstart=2 confirmed live (right edge bleed resolved);
-# rowstart raised from 1 after the bottom edge still showed a strip.
+# on those edges. colstart=2 confirmed live (right edge bleed resolved).
+# rowstart raised from 1 to 2, then to 3, after a 1px bottom-edge strip
+# remained at 2 (confirmed live rendering a custom glyph image).
 DISPLAY_COLSTART = 2
-DISPLAY_ROWSTART = 2
+DISPLAY_ROWSTART = 3
 
 # Temporary: this board's CircuitPython build allows only 1 concurrent
 # display bus (confirmed live: a 2nd fourwire.FourWire raises "Too many

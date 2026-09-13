@@ -5,7 +5,21 @@ both a real `adafruit_st7735r.ST7735R` display and a test fake satisfy.
 See tasks/ongoing/0006-display-render-module.md for the design decision.
 """
 
-from typing import Callable, Protocol
+try:
+    from typing import Callable, Protocol
+except ImportError:
+    # This board's CircuitPython build ships no `typing` module. Protocol
+    # is only ever used as a base class below, and Callable only to build
+    # the EmojiLookup alias, itself only ever used as an annotation, so
+    # placeholders that support the same syntax are enough.
+    class Protocol:
+        pass
+
+    class _Subscriptable:
+        def __getitem__(self, item):
+            return None
+
+    Callable = _Subscriptable()
 
 import displayio
 
@@ -14,13 +28,15 @@ class DisplayLike(Protocol):
     """The subset of `adafruit_st7735r.ST7735R` this module calls.
 
     `ST7735R` subclasses `busdisplay.BusDisplay` and adds no methods of
-    its own, so `show(group)` and `refresh(**kwargs)` — the two calls
-    below — are exactly the ones an `ST7735R` instance exposes. (The
-    older `fill`/`draw_bitmap` style API belongs to `adafruit_rgb_display`,
-    a different, non-displayio driver.)
+    its own, so setting `root_group` and calling `refresh(**kwargs)` —
+    the two calls below — are exactly what an `ST7735R` instance exposes.
+    (`BusDisplay.show(group)`, used in older CircuitPython, was removed
+    in favor of the `root_group` property. The older `fill`/`draw_bitmap`
+    style API belongs to `adafruit_rgb_display`, a different,
+    non-displayio driver.)
     """
 
-    def show(self, group: displayio.Group) -> None: ...
+    root_group: displayio.Group
 
     def refresh(self, **kwargs) -> bool: ...
 
@@ -34,6 +50,16 @@ EmojiLookup = Callable[[str], displayio.TileGrid]
 _CUSTOM_GLYPH_WIDTH = 128
 _CUSTOM_GLYPH_HEIGHT = 128
 _CUSTOM_GLYPH_COLOR_COUNT = 65536  # every value a 16-bit RGB565 pixel can hold
+
+# Matches code.py's DISPLAY_WIDTH/DISPLAY_HEIGHT (the real ST7735R panel
+# size). A bare 1x1 TileGrid only ever draws its bitmap's native 1x1
+# pixels — `test/stubs/displayio.py`'s FakeDisplay has no real canvas to
+# expose that, so unit tests never caught it — leaving the rest of the
+# 128x128 screen showing whatever the panel's power-on state was instead
+# of the key's background color. Tiling the same 1x1 bitmap across a
+# _DISPLAY_WIDTH x _DISPLAY_HEIGHT grid below fills the whole panel.
+_DISPLAY_WIDTH = 128
+_DISPLAY_HEIGHT = 128
 
 
 class KeyState:
@@ -95,7 +121,12 @@ def render_key(
     background_palette = displayio.Palette(1)
     background_palette[0] = key_state.color
     group.append(
-        displayio.TileGrid(background_bitmap, pixel_shader=background_palette)
+        displayio.TileGrid(
+            background_bitmap,
+            pixel_shader=background_palette,
+            width=_DISPLAY_WIDTH,
+            height=_DISPLAY_HEIGHT,
+        )
     )
 
     if key_state.blink:
@@ -107,5 +138,5 @@ def render_key(
         else:
             group.append(emoji_lookup(key_state.emoji_id))
 
-    display.show(group)
+    display.root_group = group
     display.refresh()

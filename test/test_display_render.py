@@ -6,14 +6,20 @@ from firmware.display_render import KeyState, raw_bitmap_tile_grid, render_key
 
 class FakeDisplay:
     """Records what a real `adafruit_st7735r.ST7735R` would have been
-    told to show, via the same `show`/`refresh` calls it exposes.
+    told to show, via the same `root_group` assignment and `refresh`
+    call it exposes.
     """
 
     def __init__(self) -> None:
         self.shown_groups = []
         self.refresh_count = 0
 
-    def show(self, group: displayio.Group) -> None:
+    @property
+    def root_group(self) -> displayio.Group:
+        return self.shown_groups[-1]
+
+    @root_group.setter
+    def root_group(self, group: displayio.Group) -> None:
         self.shown_groups.append(group)
 
     def refresh(self, **kwargs) -> bool:

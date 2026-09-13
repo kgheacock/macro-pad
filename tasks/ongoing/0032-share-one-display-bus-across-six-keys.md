@@ -145,16 +145,21 @@ Files to change:
   content within one `code.py` run, with no "Too many display busses"
   error. **Proof:** photo or video of both displays showing different
   content, linked from this spec.
-- [ ] **DoD-2** — `code.py` builds from the full `pins.KEYS`, not a
+  Missing: no board is wired up in this environment. This needs a
+  live-hardware check before it can be ticked.
+- [x] **DoD-2** — `code.py` builds from the full `pins.KEYS`, not a
   scoped subset. **Proof:** `grep -n BRING_UP_KEYS firmware/code.py`
   finds nothing.
-- [ ] **DoD-3** — The display-render and app test suites pass against
+- [x] **DoD-3** — The display-render and app test suites pass against
   the new design. **Proof:** `.venv/bin/pytest test/test_display_render.py
   test/test_app.py -q` passes.
 - [ ] **DoD-4** — The redraw latency of the new per-frame bus
   construction is measured and recorded. **Proof:** a figure in
   `firmware/README.md`, comparable to task 0010's loop-period entry.
-- [ ] **DoD-5** — `firmware/README.md` documents the per-redraw bus
+  Missing: no board is wired up in this environment, so
+  `firmware/README.md`'s new "Per-redraw display-bus latency" section
+  states the method but still reads "Not yet measured."
+- [x] **DoD-5** — `firmware/README.md` documents the per-redraw bus
   lifecycle and links this spec. **Proof:** `firmware/README.md`.
 - [ ] **DoD-6** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.

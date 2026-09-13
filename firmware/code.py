@@ -40,14 +40,6 @@ DISPLAY_HEIGHT = 128
 DISPLAY_COLSTART = 2
 DISPLAY_ROWSTART = 3
 
-# Temporary: this board's CircuitPython build allows only 1 concurrent
-# display bus (confirmed live: a 2nd fourwire.FourWire raises "Too many
-# display busses"), so building all 6 of pins.KEYS's displays at once
-# crashes. Only key 0 is wired for task 0010's single-key bring-up, so
-# scope every hardware list to it until the 6-key bus-sharing redesign
-# lands. See tasks/backlog/ for that follow-up task.
-BRING_UP_KEYS = pins.KEYS[:1]
-
 # fourwire.FourWire's own default (24MHz) visibly wipes top-to-bottom on
 # a full-panel redraw — every render_key call repaints the whole 128x128
 # panel, so this is hit on every state change, not just occasionally.
@@ -65,10 +57,22 @@ spi = busio.SPI(
     MOSI=getattr(board, pins.SPI_MOSI),
 )
 
-switches = [make_switch(getattr(board, key.switch_pin)) for key in BRING_UP_KEYS]
+switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
 
-displays = [
-    ST7735R(
+backlights = [
+    Backlight(pwmio.PWMOut(getattr(board, key.backlight_pin))) for key in pins.KEYS
+]
+
+
+def build_display(key_index):
+    """Build one key's `ST7735R` display bus.
+
+    This board allows only 1 concurrent `displayio` display bus, so this
+    is called just before one key's redraw and released again right
+    after (task 0032) — never held open across two keys at once.
+    """
+    key = pins.KEYS[key_index]
+    return ST7735R(
         fourwire.FourWire(
             spi,
             command=getattr(board, pins.DISPLAY_DC),
@@ -86,13 +90,7 @@ displays = [
         # polarity is the opposite of the driver's default.
         invert=True,
     )
-    for key in BRING_UP_KEYS
-]
 
-backlights = [
-    Backlight(pwmio.PWMOut(getattr(board, key.backlight_pin)))
-    for key in BRING_UP_KEYS
-]
 
 EMOJI_FOREGROUND = 0xFFFFFF  # white
 
@@ -108,7 +106,7 @@ def emoji_lookup(emoji_id, color):
 
 macro_pad = MacroPad(
     switches=switches,
-    displays=displays,
+    build_display=build_display,
     backlights=backlights,
     hid_device=usb_hid.devices[0],
     serial=usb_cdc.data,

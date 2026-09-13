@@ -304,6 +304,29 @@ reference plugin below — to see the result on a key:
 }
 ```
 
+### `macrodriver emoji`
+
+`driver/cmd/macrodriver`'s `emoji` subcommand sends a raw Unicode emoji
+character to a key, with no pre-made PNG file needed. It renders the
+character with `tools/render_emoji.py` (Apple Color Emoji, macOS only),
+then sends the PNG through task 0030's `setCustomGlyph` wire path via a
+new `api.Conn.SetCustomGlyph` helper — see task 0034.
+
+```bash
+go run ./driver/cmd/macrodriver emoji --key 0 --char 😍
+```
+
+`--char` takes exactly one Unicode codepoint — an emoji sequence (a
+flag, a skin-tone modifier, a family emoji joined by ZWJ) is rejected
+before any wire traffic. `--addr` overrides the default
+`127.0.0.1:8765`; `--emulate` sends to an in-process emulator instead of
+dialing a running `macropadd`, for local testing with no board or daemon
+attached. `--script` overrides the default `tools/render_emoji.py` path,
+run relative to the repo root.
+
+A missing `python3` or Pillow (`pip install pillow`) produces one clean
+error line naming the missing dependency, not a Python stack trace.
+
 ### Reference plugin: `driver/examples/claude-status`
 
 [`driver/examples/claude-status`](../examples/claude-status) stays

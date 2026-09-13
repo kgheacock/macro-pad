@@ -6,6 +6,7 @@ from firmware.display_render import (
     _rgb565_to_rgb888,
     raw_bitmap_tile_grid,
     render_key,
+    render_key_with_builder,
 )
 
 
@@ -144,6 +145,29 @@ def test_render_key_prefers_pixels_over_emoji_lookup():
 
     image_layer = list(display.shown_groups[-1])[1]
     assert image_layer.bitmap[0] == 0x07E0
+
+
+def test_render_key_with_builder_builds_draws_and_releases():
+    """Task 0032: `build_display` must be called exactly once, its
+    display rendered exactly once, and the bus released exactly once —
+    this board allows only 1 concurrent display bus, so any other order
+    or count would leave a bus open when the next key needs one.
+    """
+    display = FakeDisplay()
+    built = []
+    released_before = displayio.release_display_count
+
+    def build_display():
+        built.append(display)
+        return display
+
+    key_state = KeyState(emoji_id="smile", color=0xF81F)
+
+    render_key_with_builder(build_display, key_state, _stub_emoji_lookup)
+
+    assert built == [display]
+    assert display.refresh_count == 1
+    assert displayio.release_display_count == released_before + 1
 
 
 def test_blink_toggle():

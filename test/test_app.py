@@ -38,6 +38,24 @@ class FakeDisplay:
         return True
 
 
+class FakeDisplayBuilder:
+    """Stands in for `code.py`'s per-redraw display-bus builder callable
+    (task 0032).
+
+    Real hardware builds a fresh `ST7735R` bus for every redraw, so no
+    two renders of the same key ever share one display object. This
+    still hands back the same `FakeDisplay` for a given key index on
+    every call, so a test can read that key's whole render history
+    through `per_key`.
+    """
+
+    def __init__(self, key_count):
+        self.per_key = [FakeDisplay() for _ in range(key_count)]
+
+    def __call__(self, key_index):
+        return self.per_key[key_index]
+
+
 class FakeSerial:
     """CDC data endpoint that keeps every byte written to it, and hands
     back bytes a test queues with `feed`, mirroring `usb_cdc.data`'s
@@ -122,7 +140,7 @@ class FakeGlyphStorage:
 
 def _build_pad(idle_timer=None, tracer=None, storage=None):
     switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
-    displays = [FakeDisplay() for _ in pins.KEYS]
+    displays = FakeDisplayBuilder(len(pins.KEYS))
     backlights = [FakeBacklight() for _ in pins.KEYS]
     hid_device = FakeHID()
     serial = FakeSerial()
@@ -131,7 +149,7 @@ def _build_pad(idle_timer=None, tracer=None, storage=None):
 
     pad = MacroPad(
         switches=switches,
-        displays=displays,
+        build_display=displays,
         backlights=backlights,
         hid_device=hid_device,
         serial=serial,
@@ -218,14 +236,14 @@ def test_key_state_applies_to_one_key():
     # _background_color reads back what render_key handed displayio, which
     # is 24-bit RGB888 — key_states[3].color above stays 16-bit RGB565,
     # the wire/persisted format. See display_render._rgb565_to_rgb888.
-    assert _background_color(displays[3]) == _rgb565_to_rgb888(0xF81F)
-    assert len(displays[3].shown_groups) == 2
+    assert _background_color(displays.per_key[3]) == _rgb565_to_rgb888(0xF81F)
+    assert len(displays.per_key[3].shown_groups) == 2
     assert emoji_lookup.requested_ids == [0xA2]
 
     for index in (0, 1, 2, 4, 5):
         assert pad.key_states[index].color == DEFAULT_COLOR
         assert pad.key_states[index].emoji_id == DEFAULT_EMOJI_ID
-        assert len(displays[index].shown_groups) == 1  # not redrawn
+        assert len(displays.per_key[index].shown_groups) == 1  # not redrawn
 
 
 def test_key_state_rejects_version_and_keeps_state():
@@ -241,7 +259,7 @@ def test_key_state_rejects_version_and_keeps_state():
 
     assert pad.key_states[3].color == DEFAULT_COLOR
     assert pad.key_states[3].emoji_id == DEFAULT_EMOJI_ID
-    assert len(displays[3].shown_groups) == 1  # not redrawn
+    assert len(displays.per_key[3].shown_groups) == 1  # not redrawn
 
 
 def test_key_state_ignores_unknown_key_index():
@@ -389,22 +407,22 @@ def test_blink_key_redraws_only_after_blink_interval_elapses():
     pad, _, displays, _, hid_device, _, _, _ = _build_pad()
 
     pad.step(0)  # power-on: every key, including 5, renders once
-    assert len(displays[5].shown_groups) == 1
+    assert len(displays.per_key[5].shown_groups) == 1
 
     hid_device.feed(
         _key_state_report(key_index=5, color=0x001F, emoji_id=7, blink=True)
     )
     pad.step(1000)  # the state change itself: always redraws
-    assert len(displays[5].shown_groups) == 2
+    assert len(displays.per_key[5].shown_groups) == 2
 
     pad.step(2000)  # far short of BLINK_INTERVAL_US since the last toggle
     pad.step(3000)
-    assert len(displays[5].shown_groups) == 2
+    assert len(displays.per_key[5].shown_groups) == 2
 
     pad.step(1000 + BLINK_INTERVAL_US)  # interval elapsed
-    assert len(displays[5].shown_groups) == 3
+    assert len(displays.per_key[5].shown_groups) == 3
 
-    assert len(displays[0].shown_groups) == 1
+    assert len(displays.per_key[0].shown_groups) == 1
 
 
 def test_backlight_scales_fraction_to_pwm_duty_cycle():
@@ -428,11 +446,11 @@ def test_custom_glyph_applies_to_one_key():
 
     assert pad.key_states[3].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
     assert pad.key_states[3].pixels == _custom_glyph_pixels(0xAB)
-    assert len(displays[3].shown_groups) == 2
+    assert len(displays.per_key[3].shown_groups) == 2
 
     for index in (0, 1, 2, 4, 5):
         assert pad.key_states[index].pixels is None
-        assert len(displays[index].shown_groups) == 1  # not redrawn
+        assert len(displays.per_key[index].shown_groups) == 1  # not redrawn
 
 
 def test_custom_glyph_ignores_unknown_key_index():
@@ -458,12 +476,12 @@ def test_custom_glyph_arrives_across_multiple_steps():
     serial.feed(frame[:split])
     pad.step(1000)
     assert pad.key_states[2].pixels is None
-    assert len(displays[2].shown_groups) == 1  # not yet redrawn
+    assert len(displays.per_key[2].shown_groups) == 1  # not yet redrawn
 
     serial.feed(frame[split:])
     pad.step(2000)
     assert pad.key_states[2].pixels == _custom_glyph_pixels(0xCD)
-    assert len(displays[2].shown_groups) == 2
+    assert len(displays.per_key[2].shown_groups) == 2
 
 
 def test_built_in_glyph_replaces_custom_image():
@@ -518,7 +536,7 @@ def test_reboot_restores_persisted_state():
         assert rebooted.key_states[index].pixels is None
 
     rebooted.step(0)  # power-on paint reflects the restored state with no driver connected
-    assert len(displays[1].shown_groups) == 1
+    assert len(displays.per_key[1].shown_groups) == 1
 
 
 def test_second_state_leaves_no_trace_of_first():

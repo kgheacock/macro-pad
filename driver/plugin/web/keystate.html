@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Key state</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --panel: #1d2027;
+    --border: #2c313c;
+    --text: #e6e8eb;
+    --dim: #8b93a1;
+    --accent: #ffa500;
+    --ok: #3ddc84;
+    --bad: #ff5c5c;
+    --unknown: #8b93a1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: var(--dim); margin: 0 0 20px; }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .bar input {
+    flex: 0 0 260px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  .bar button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .bar button:hover { border-color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--bad);
+  }
+  .dot.connected { background: var(--ok); }
+
+  h2 { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 24px;
+  }
+  th, td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  th {
+    color: var(--dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  input[type="color"] {
+    width: 32px; height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    padding: 0;
+  }
+  input[type="number"] {
+    width: 64px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 6px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  td button {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+    margin-right: 6px;
+  }
+  td button:hover { background: var(--accent); color: #1a1a1a; }
+  .status-cell { font-size: 12px; font-weight: 600; }
+  .status-cell.unknown { color: var(--unknown); }
+  .status-cell.pending { color: var(--accent); }
+  .status-cell.confirmed { color: var(--ok); }
+
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    height: 220px;
+    overflow-y: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--dim);
+    white-space: pre-wrap;
+  }
+  #log div.event { color: var(--ok); }
+  #log div.setKeyState { color: var(--accent); }
+</style>
+</head>
+<body>
+  <h1>Key state</h1>
+  <p class="sub">
+    A WebSocket client of <code>driver/plugin</code> for administering
+    every key's color, emoji ID, and blink, and confirming each change
+    against the daemon's own rebroadcast; requires
+    <code>macropadd --emulate</code> or a real board. To simulate a press
+    instead, see <code>virtualpad.html</code>. See "Plugin API" in
+    <code>driver/README.md</code>.
+  </p>
+
+  <div class="bar">
+    <input id="url" value="ws://127.0.0.1:8765" spellcheck="false">
+    <button id="connectBtn">Connect</button>
+    <span class="status"><span id="dot" class="dot"></span><span id="statusText">disconnected</span></span>
+  </div>
+
+  <h2>Keys</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Key</th>
+        <th>Color</th>
+        <th>Emoji ID</th>
+        <th>Blink</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2>Message log</h2>
+  <div id="log"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const KEY_COUNT = 6;
+  // RESET_EMOJI_BASE: Reset sends a digit glyph (0xF1 for key 0, 0xF2 for
+  // key 1, ...), never 0x00 — docs/wire-protocol.md's Emoji ID table
+  // fixes 0x00 as a "Placeholder" that draws a full-screen white box, not
+  // a usable blank or reset value.
+  const RESET_EMOJI_BASE = 0xF1;
+  const RESET_COLOR_HEX = "#333945"; // matches virtualpad.html's neutral tile background
+
+  const rowsEl = document.getElementById("rows");
+  const logEl = document.getElementById("log");
+  const urlEl = document.getElementById("url");
+  const connectBtn = document.getElementById("connectBtn");
+  const dotEl = document.getElementById("dot");
+  const statusEl = document.getElementById("statusText");
+
+  let ws = null;
+
+  // rows[i] tracks one key's row: its DOM elements, its status
+  // ("unknown" | "pending" | "confirmed"), and — while "pending" — the
+  // exact payload this page sent, so a matching setKeyState broadcast can
+  // be told apart from an unrelated one for the same key.
+  const rows = [];
+
+  for (let i = 0; i < KEY_COUNT; i++) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td>#' + i + '</td>' +
+      '<td><input type="color" class="color" value="' + RESET_COLOR_HEX + '"></td>' +
+      '<td><input type="number" class="emoji" min="0" max="255" value="0"></td>' +
+      '<td><input type="checkbox" class="blink"></td>' +
+      '<td class="status-cell unknown">unknown</td>' +
+      '<td><button class="set">Set</button><button class="reset">Reset</button></td>';
+    rowsEl.appendChild(tr);
+
+    const row = {
+      keyIndex: i,
+      status: "unknown",
+      pendingPayload: null,
+      colorEl: tr.querySelector(".color"),
+      emojiEl: tr.querySelector(".emoji"),
+      blinkEl: tr.querySelector(".blink"),
+      statusEl: tr.querySelector(".status-cell"),
+    };
+    rows.push(row);
+
+    tr.querySelector(".set").addEventListener("click", () => sendSet(row));
+    tr.querySelector(".reset").addEventListener("click", () => sendReset(row));
+  }
+
+  function setRowStatus(row, status) {
+    row.status = status;
+    row.statusEl.textContent = status;
+    row.statusEl.className = "status-cell " + status;
+  }
+
+  function payloadFromRow(row) {
+    return {
+      keyIndex: row.keyIndex,
+      color: hexToRgb565(row.colorEl.value),
+      emojiId: parseInt(row.emojiEl.value, 10) || 0,
+      blink: row.blinkEl.checked,
+    };
+  }
+
+  function payloadsEqual(a, b) {
+    return !!a && !!b &&
+      a.keyIndex === b.keyIndex &&
+      a.color === b.color &&
+      a.emojiId === b.emojiId &&
+      a.blink === b.blink;
+  }
+
+  function sendSetKeyState(payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("event", "not connected: setKeyState not sent");
+      return false;
+    }
+    ws.send(JSON.stringify({ kind: "setKeyState", setKeyState: payload }));
+    return true;
+  }
+
+  function sendSet(row) {
+    const payload = payloadFromRow(row);
+    if (!sendSetKeyState(payload)) return;
+    row.pendingPayload = payload;
+    setRowStatus(row, "pending");
+  }
+
+  // sendReset restores row's key to a defined default: a digit glyph
+  // (never the 0x00 placeholder), blink off, and a neutral color — not
+  // whatever the editor fields currently hold.
+  function sendReset(row) {
+    const payload = {
+      keyIndex: row.keyIndex,
+      color: hexToRgb565(RESET_COLOR_HEX),
+      emojiId: RESET_EMOJI_BASE + row.keyIndex,
+      blink: false,
+    };
+    if (!sendSetKeyState(payload)) return;
+    row.pendingPayload = payload;
+    setRowStatus(row, "pending");
+  }
+
+  // applyPayloadToRow loads payload's fields into row's editor inputs, so
+  // the page reflects the device's actual confirmed state instead of
+  // whatever was last typed.
+  function applyPayloadToRow(row, payload) {
+    row.colorEl.value = rgb565ToHex(payload.color);
+    row.emojiEl.value = payload.emojiId;
+    row.blinkEl.checked = !!payload.blink;
+  }
+
+  function log(kind, text) {
+    const line = document.createElement("div");
+    line.className = kind;
+    const ts = new Date().toLocaleTimeString();
+    line.textContent = "[" + ts + "] " + text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnStatus(connected) {
+    dotEl.classList.toggle("connected", connected);
+    statusEl.textContent = connected ? "connected" : "disconnected";
+    connectBtn.textContent = connected ? "Disconnect" : "Connect";
+  }
+
+  function connect() {
+    const url = urlEl.value.trim();
+    if (!url) return;
+    ws = new WebSocket(url);
+    ws.addEventListener("open", () => {
+      setConnStatus(true);
+      log("event", "connected to " + url);
+    });
+    ws.addEventListener("close", () => {
+      setConnStatus(false);
+      log("event", "connection closed");
+      ws = null;
+      // A row still waiting on a matching confirmation loses that
+      // guarantee the moment the connection drops: it reverts to
+      // "unknown" rather than staying "pending" against a socket that no
+      // longer exists.
+      for (const row of rows) {
+        if (row.status === "pending") {
+          row.pendingPayload = null;
+          setRowStatus(row, "unknown");
+        }
+      }
+    });
+    ws.addEventListener("error", () => {
+      log("event", "connection error");
+    });
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      handleMessage(msg);
+    });
+  }
+
+  function disconnect() {
+    if (ws) ws.close();
+  }
+
+  connectBtn.addEventListener("click", () => {
+    if (ws) {
+      disconnect();
+    } else {
+      connect();
+    }
+  });
+
+  // handleMessage renders the one message kind this page acts on
+  // (setKeyState) and ignores every other kind — a future protocol
+  // addition must not break this page. See virtualpad.html's
+  // handleMessage for the same convention.
+  function handleMessage(msg) {
+    switch (msg.kind) {
+      case "setKeyState":
+        onSetKeyState(msg.setKeyState);
+        log("setKeyState", JSON.stringify(msg.setKeyState));
+        break;
+      default:
+        break;
+    }
+  }
+
+  // onSetKeyState is the confirmation path every row waits on, whether
+  // the message is this page's own rebroadcast, a change from another
+  // client, or the daemon's connect-time replay of a key's last known
+  // state (task 0036).
+  function onSetKeyState(payload) {
+    if (!payload) return;
+    const row = rows[payload.keyIndex];
+    if (!row) return;
+
+    if (row.status === "pending") {
+      if (!payloadsEqual(row.pendingPayload, payload)) {
+        // Some other broadcast for this key arrived while still waiting
+        // on the exact state this row sent — leave it "pending" rather
+        // than confirm the wrong state.
+        return;
+      }
+      row.pendingPayload = null;
+    }
+
+    applyPayloadToRow(row, payload);
+    setRowStatus(row, "confirmed");
+  }
+
+  function rgb565ToHex(c) {
+    const [r8, g8, b8] = rgb565To888(c);
+    return "#" + [r8, g8, b8].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+
+  function rgb565To888(c) {
+    const r = (c >> 11) & 0x1f;
+    const g = (c >> 5) & 0x3f;
+    const b = c & 0x1f;
+    return [Math.round((r * 255) / 31), Math.round((g * 255) / 63), Math.round((b * 255) / 31)];
+  }
+
+  function hexToRgb565(hex) {
+    const r8 = parseInt(hex.slice(1, 3), 16);
+    const g8 = parseInt(hex.slice(3, 5), 16);
+    const b8 = parseInt(hex.slice(5, 7), 16);
+    return ((r8 >> 3) << 11) | ((g8 >> 2) << 5) | (b8 >> 3);
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

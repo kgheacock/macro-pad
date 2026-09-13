@@ -12,7 +12,7 @@ pad.
 | Pimoroni Pico Plus 2 (RP2350) | In hand, connected |
 | 6× Waveshare 0.85" ScreenKey Module — ST7735 driver, 128×128, 65K color, SPI, integrated mechanical switch | In hand, SKU confirmed |
 | I2S MEMS mic breakout (SPH0645 or ICS-43434) | Needed |
-| Pin headers/sockets, perfboard, hookup wire, USB-C cable | Needed |
+| MX1.25 9-pin cable(s) (ships with each module), perfboard, hookup wire, USB-C cable | Needed |
 | Custom PCB (KiCad → JLCPCB/PCBWay) | Later — once the design is confirmed on breadboard |
 | Enclosure — printed, laser-cut, or aluminum panel | Later — once the design is confirmed on breadboard |
 
@@ -23,9 +23,13 @@ See `docs/0.85inch_ScreenKey_Module.pdf` for the confirmed part's
 datasheet, and `docs/ppico_plus_2_pinout_diagram.pdf` for the Pico Plus
 2's.
 
-**Mount the modules on header or socket connectors. Do not use solder
-joints.** This makes a future swap a plug/replace operation, with no
-rework.
+**Each module's interface is a factory MX1.25 9-pin socket, not a 2.54mm
+pin header — standard Dupont jumpers and 2.54mm headers/sockets do not
+mate with it.** Unplugging the module's own MX1.25 cable from the
+module is already the no-rework swap point, so there's no need to keep
+the perfboard side swappable too: cut the cable's free end to length
+and solder it directly to the perfboard (or to whatever
+headers/terminals the Pico-side wiring uses).
 
 **Enclosure material.** A 3D-printed or laser-cut case is enough — the
 power budget is too low to cause heat problems. An aluminum panel is a

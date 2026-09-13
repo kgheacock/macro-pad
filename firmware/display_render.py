@@ -87,6 +87,20 @@ class KeyState:
         self.pixels = pixels
         self._blink_visible = True
 
+        # The persistent displayio scene graph `render_key` builds once and
+        # mutates on every later call — see task 0033. `_group` is `None`
+        # until the first `render_key` call; that is the signal `render_key`
+        # uses to choose its build path over its update path. The
+        # `_rendered_*` fields snapshot what the scene graph currently shows,
+        # so an update call can tell which of `color`/`emoji_id`/`pixels`
+        # changed since the last render without re-deriving it from scratch.
+        self._group = None
+        self._background_palette = None
+        self._glyph_tile_grid = None
+        self._rendered_color = None
+        self._rendered_emoji_id = None
+        self._rendered_pixels = None
+
 
 def raw_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
     """Build a TileGrid from a 128x128 raw RGB565 pixel buffer.
@@ -131,19 +145,20 @@ def _rgb565_to_rgb888(color565: int) -> int:
     return (r8 << 16) | (g8 << 8) | b8
 
 
-def render_key(
-    display: DisplayLike,
-    key_state: KeyState,
-    emoji_lookup: EmojiLookup,
-) -> None:
-    """Compose and push one frame for a key.
+def _build_glyph(key_state: KeyState, emoji_lookup: EmojiLookup) -> displayio.TileGrid:
+    if key_state.pixels is not None:
+        return raw_bitmap_tile_grid(key_state.pixels)
+    return emoji_lookup(key_state.emoji_id, key_state.color)
 
-    Background fill and blink visibility are decided here. The image
-    itself comes from `key_state.pixels` when set, or from
-    `emoji_lookup`, which the caller supplies (see this task's non-goals
-    — emoji asset sourcing is out of scope), otherwise. `emoji_lookup`
-    also receives `key_state.color` (RGB565), so a glyph's own background
-    can match the key's — see task 0023's Open questions.
+
+def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
+    """Build a key's `Group`, background `Palette`, and glyph `TileGrid`
+    for the first time, and store them on `key_state`.
+
+    Run once per key — see `render_key`. Every later call goes through
+    `_update_scene` instead, which mutates these same objects rather than
+    replacing them, so displayio's own per-`TileGrid` dirty tracking can
+    shrink a later `refresh()` to the region that actually changed.
     """
     group = displayio.Group()
 
@@ -162,13 +177,78 @@ def render_key(
     if key_state.blink:
         key_state._blink_visible = not key_state._blink_visible
 
-    if key_state._blink_visible:
-        if key_state.pixels is not None:
-            group.append(raw_bitmap_tile_grid(key_state.pixels))
-        else:
-            group.append(emoji_lookup(key_state.emoji_id, key_state.color))
+    glyph_tile_grid = _build_glyph(key_state, emoji_lookup)
+    glyph_tile_grid.hidden = not key_state._blink_visible
+    group.append(glyph_tile_grid)
 
-    display.root_group = group
+    key_state._group = group
+    key_state._background_palette = background_palette
+    key_state._glyph_tile_grid = glyph_tile_grid
+    key_state._rendered_color = key_state.color
+    key_state._rendered_emoji_id = key_state.emoji_id
+    key_state._rendered_pixels = key_state.pixels
+
+
+def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
+    """Mutate a previously built scene graph in place for the next frame.
+
+    A blink-only toggle touches nothing but the glyph `TileGrid`'s
+    `hidden` flag, leaving the background layer's own dirty state
+    untouched — that is the redraw-area win this task exists for. A
+    color or glyph change still updates in place rather than rebuilding
+    the `Group`, so the `Group` and background `TileGrid` objects stay
+    the same displayio instances across every call.
+    """
+    color_changed = key_state.color != key_state._rendered_color
+    if color_changed:
+        key_state._background_palette[0] = _rgb565_to_rgb888(key_state.color)
+
+    using_pixels = key_state.pixels is not None
+    glyph_source_changed = key_state.pixels is not key_state._rendered_pixels or (
+        not using_pixels and key_state.emoji_id != key_state._rendered_emoji_id
+    )
+    # A built-in emoji's own background is baked into its bitmap to match
+    # key_state.color (task 0023's Open questions), so a color change
+    # while showing one needs a fresh glyph too, not just the background
+    # layer above. A custom image (key_state.pixels set) already fills
+    # the whole panel and ignores key_state.color, so it does not.
+    if glyph_source_changed or (not using_pixels and color_changed):
+        new_glyph = _build_glyph(key_state, emoji_lookup)
+        index = list(key_state._group).index(key_state._glyph_tile_grid)
+        key_state._group[index] = new_glyph
+        key_state._glyph_tile_grid = new_glyph
+
+    key_state._rendered_color = key_state.color
+    key_state._rendered_emoji_id = key_state.emoji_id
+    key_state._rendered_pixels = key_state.pixels
+
+    if key_state.blink:
+        key_state._blink_visible = not key_state._blink_visible
+    key_state._glyph_tile_grid.hidden = not key_state._blink_visible
+
+
+def render_key(
+    display: DisplayLike,
+    key_state: KeyState,
+    emoji_lookup: EmojiLookup,
+) -> None:
+    """Compose and push one frame for a key.
+
+    The first call for a given `key_state` builds its scene graph
+    (`_build_scene`); every later call mutates that same graph in place
+    (`_update_scene`) instead of rebuilding it — see task 0033. The image
+    itself comes from `key_state.pixels` when set, or from
+    `emoji_lookup`, which the caller supplies (see this task's non-goals
+    — emoji asset sourcing is out of scope), otherwise. `emoji_lookup`
+    also receives `key_state.color` (RGB565), so a glyph's own background
+    can match the key's — see task 0023's Open questions.
+    """
+    if key_state._group is None:
+        _build_scene(key_state, emoji_lookup)
+    else:
+        _update_scene(key_state, emoji_lookup)
+
+    display.root_group = key_state._group
     display.refresh()
 
 

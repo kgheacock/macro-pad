@@ -170,15 +170,146 @@ def test_render_key_with_builder_builds_draws_and_releases():
     assert displayio.release_display_count == released_before + 1
 
 
-def test_blink_toggle():
+def test_first_render_builds_scene_later_renders_reuse_it():
+    """Task 0033: `render_key` must build a key's `Group`, background
+    `Palette`, and glyph `TileGrid` only on the first call. Every later
+    call has to mutate those same objects — a fresh object graph on every
+    call is exactly what stopped displayio from shrinking `refresh()` to
+    the changed region.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id="smile", color=0x000000)
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    group = display.shown_groups[-1]
+    background = list(group)[0]
+    glyph = list(group)[1]
+
+    render_key(display, key_state, _stub_emoji_lookup)
+
+    assert display.shown_groups[-1] is group
+    assert list(group)[0] is background
+    assert list(group)[1] is glyph
+
+
+def test_blink_toggle_flips_hidden_without_rebuilding():
+    """A blink-only frame — no color, emoji, or pixels change — must
+    leave the `Group` at 2 children and toggle only the glyph
+    `TileGrid`'s `hidden` flag, not add or remove layers. Rebuilding
+    anything here is exactly the full-panel-redraw cost this task exists
+    to avoid.
+    """
     display = FakeDisplay()
     key_state = KeyState(emoji_id="smile", color=0x000000, blink=True)
 
     render_key(display, key_state, _stub_emoji_lookup)
-    assert len(list(display.shown_groups[0])) == 1  # emoji hidden this frame
+    group = display.shown_groups[-1]
+    glyph = list(group)[1]
+    assert len(group) == 2
+    assert glyph.hidden is True  # emoji hidden this frame
 
     render_key(display, key_state, _stub_emoji_lookup)
-    assert len(list(display.shown_groups[1])) == 2  # emoji visible this frame
+    assert list(group)[1] is glyph
+    assert glyph.hidden is False  # emoji visible this frame
 
     render_key(display, key_state, _stub_emoji_lookup)
-    assert len(list(display.shown_groups[2])) == 1  # hidden again
+    assert list(group)[1] is glyph
+    assert glyph.hidden is True  # hidden again
+
+
+def test_color_only_change_mutates_background_palette_in_place():
+    """A color change on a key showing a custom image (`pixels` set) must
+    rewrite the existing background `Palette` in place and leave the
+    glyph `TileGrid` untouched — a custom image ignores `key_state.color`
+    entirely, so nothing about it needs to change.
+    """
+    display = FakeDisplay()
+    pixels = _solid_pixels(0x07E0)
+    key_state = KeyState(emoji_id=0xF3, color=0x0000, pixels=pixels)
+
+    def failing_emoji_lookup(emoji_id, color):
+        raise AssertionError("emoji_lookup called despite key_state.pixels being set")
+
+    render_key(display, key_state, failing_emoji_lookup)
+    group = display.shown_groups[-1]
+    background = list(group)[0]
+    glyph = list(group)[1]
+
+    key_state.color = 0xF81F
+    render_key(display, key_state, failing_emoji_lookup)
+
+    assert list(group)[0] is background
+    assert list(group)[1] is glyph
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0xF81F)
+
+
+def test_color_change_in_emoji_mode_also_refreshes_glyph():
+    """A built-in emoji's own bitmap bakes in `key_state.color` as its
+    background (task 0023's Open questions). A color-only change must
+    still rebuild the glyph `TileGrid` through `emoji_lookup`, not just
+    the background layer, or the glyph's background goes stale.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id=0xF3, color=0x0000)
+    received = []
+
+    def emoji_lookup(emoji_id, color):
+        received.append((emoji_id, color))
+        return _emoji_tile_grid(displayio.Bitmap(1, 1, 1))
+
+    render_key(display, key_state, emoji_lookup)
+    group = display.shown_groups[-1]
+    old_glyph = list(group)[1]
+
+    key_state.color = 0x07E0
+    render_key(display, key_state, emoji_lookup)
+
+    assert received == [(0xF3, 0x0000), (0xF3, 0x07E0)]
+    assert list(group)[1] is not old_glyph
+
+
+def test_glyph_change_replaces_glyph_tile_grid():
+    """Changing `emoji_id` must swap in a fresh glyph `TileGrid` — built
+    through `emoji_lookup` again — without rebuilding the `Group` or the
+    background layer.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id=0xF3, color=0x000000)
+
+    def emoji_lookup(emoji_id, color):
+        return glyphs.lookup(emoji_id, foreground=0xFFFFFF, background=color)
+
+    render_key(display, key_state, emoji_lookup)
+    group = display.shown_groups[-1]
+    background = list(group)[0]
+    old_glyph = list(group)[1]
+
+    key_state.emoji_id = 0xA0
+    render_key(display, key_state, emoji_lookup)
+
+    expected = glyphs.lookup(0xA0, foreground=0xFFFFFF, background=0x000000)
+    new_glyph = list(group)[1]
+    assert display.shown_groups[-1] is group
+    assert list(group)[0] is background
+    assert new_glyph is not old_glyph
+    assert new_glyph.bitmap is expected.bitmap
+
+
+def test_pixels_change_replaces_glyph_tile_grid():
+    """Uploading a new custom image (`pixels` reassigned) must swap in a
+    fresh glyph `TileGrid` built from the new pixel buffer, without
+    calling `emoji_lookup`.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id=0xF3, color=0x000000, pixels=_solid_pixels(0xF81F))
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    group = display.shown_groups[-1]
+    old_glyph = list(group)[1]
+
+    key_state.pixels = _solid_pixels(0x07E0)
+    render_key(display, key_state, _stub_emoji_lookup)
+
+    new_glyph = list(group)[1]
+    assert new_glyph is not old_glyph
+    assert new_glyph.bitmap[0] == 0x07E0

@@ -272,6 +272,69 @@ def test_key_state_ignores_unknown_key_index():
     assert all(state.color == DEFAULT_COLOR for state in pad.key_states)
 
 
+def test_key_state_color_only_change_still_refreshes_glyph():
+    """Task 0033: a report that changes only `color` (same `emoji_id`)
+    must still call `emoji_lookup` again. A built-in emoji bakes
+    `key_state.color` into its own bitmap as its background (task 0023),
+    so leaving the glyph `TileGrid` alone here would leave its background
+    stale even though the panel's own background layer updated.
+    """
+    pad, _, displays, _, hid_device, _, emoji_lookup, _ = _build_pad()
+
+    pad.step(0)  # power-on paint of all six keys
+    hid_device.feed(_key_state_report(key_index=2, color=0x0000, emoji_id=7))
+    pad.step(1000)
+    emoji_lookup.requested_ids.clear()
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF81F, emoji_id=7))
+    pad.step(2000)
+
+    assert pad.key_states[2].emoji_id == 7
+    assert _background_color(displays.per_key[2]) == _rgb565_to_rgb888(0xF81F)
+    assert emoji_lookup.requested_ids == [7]
+
+
+def test_key_state_glyph_only_change_leaves_background_untouched():
+    """Task 0033: a report that changes only `emoji_id` (same `color`)
+    must rebuild the glyph `TileGrid` without touching the background
+    layer's own color.
+    """
+    pad, _, displays, _, hid_device, _, emoji_lookup, _ = _build_pad()
+
+    pad.step(0)  # power-on paint of all six keys
+    hid_device.feed(_key_state_report(key_index=4, color=0x001F, emoji_id=7))
+    pad.step(1000)
+    background_before = _background_color(displays.per_key[4])
+    emoji_lookup.requested_ids.clear()
+
+    hid_device.feed(_key_state_report(key_index=4, color=0x001F, emoji_id=9))
+    pad.step(2000)
+
+    assert pad.key_states[4].emoji_id == 9
+    assert _background_color(displays.per_key[4]) == background_before
+    assert emoji_lookup.requested_ids == [9]
+
+
+def test_blink_redraw_does_not_call_emoji_lookup_again():
+    """Task 0033: a blink-only redraw toggles the existing glyph
+    `TileGrid`'s `hidden` flag; it must not ask `emoji_lookup` for a new
+    glyph, since neither the emoji nor the color changed.
+    """
+    pad, _, displays, _, hid_device, _, emoji_lookup, _ = _build_pad()
+
+    pad.step(0)  # power-on paint of all six keys
+    hid_device.feed(
+        _key_state_report(key_index=5, color=0x001F, emoji_id=7, blink=True)
+    )
+    pad.step(1000)  # the state change itself
+    emoji_lookup.requested_ids.clear()
+
+    pad.step(1000 + BLINK_INTERVAL_US)  # blink interval elapsed
+
+    assert len(displays.per_key[5].shown_groups) == 3
+    assert emoji_lookup.requested_ids == []
+
+
 def test_key_state_accepts_report_with_report_id_prefix():
     pad, _, _, _, hid_device, _, _, _ = _build_pad()
 

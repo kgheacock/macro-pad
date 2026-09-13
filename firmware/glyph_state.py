@@ -81,15 +81,23 @@ def decode(data):
 
 
 class FilesystemStorage:
-    """Reads and writes one file per key under `glyph_state/`, relative
-    to the CircuitPython filesystem's root — where `code.py` runs from.
+    """Reads and writes one file per key under `glyph_state_files/`,
+    relative to the CircuitPython filesystem's root — where `code.py`
+    runs from.
 
     A missing file (no state saved yet, or the directory swept by
     `make flash`) is not an error: `read` returns `None`, and `MacroPad`
     falls back to its power-on defaults.
     """
 
-    _DIR = "glyph_state"
+    # Deliberately not "glyph_state" — that name collides with this
+    # module's own filename at the filesystem root. The first successful
+    # write creates the directory, and from then on CircuitPython's
+    # import resolves `glyph_state` to that empty directory instead of
+    # `glyph_state.py`, raising `AttributeError: 'module' object has no
+    # attribute 'FilesystemStorage'` on every subsequent boot. Confirmed
+    # live during task 0031's key-0 bring-up.
+    _DIR = "glyph_state_files"
 
     def _path(self, key_index):
         return "{}/{}.bin".format(self._DIR, key_index)

@@ -48,6 +48,17 @@ type Options struct {
 	// more than one is.
 	SerialNumber string
 
+	// CDCPort names the CDC serial port to use directly, skipping
+	// discovery by USB serial number. Set this when the board exposes
+	// more than one CDC port carrying the same serial number — for
+	// example with a debug console enabled alongside the data channel
+	// (see firmware/boot.py, `usb_cdc.enable`) — since every CDC
+	// interface of one composite device shares that device's single
+	// serial number, and neither VID, PID, serial number, nor (observed
+	// on macOS) the enumerator's product string tells them apart.
+	// Confirmed live during task 0031's key-0 bring-up.
+	CDCPort string
+
 	// pollInterval paces Open's retries while ctx is still open. Tests
 	// set it low; production callers leave it at its zero value, which
 	// open treats as defaultPollInterval.
@@ -183,9 +194,12 @@ func tryOpen(opts Options, hidB hidBackend, serialB serialBackend) (*Device, err
 		return nil, err
 	}
 
-	portName, err := serialB.findPort(serialNumber)
-	if err != nil {
-		return nil, err
+	portName := opts.CDCPort
+	if portName == "" {
+		portName, err = serialB.findPort(serialNumber)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	hidConn, err := hidB.open(opts.VendorID, opts.ProductID, serialNumber)

@@ -69,6 +69,35 @@ func TestSetState_Alert(t *testing.T) {
 	}
 }
 
+// TestSetKeyState proves SetKeyState builds a setKeyState message from
+// all three fields at once, unlike SetEmoji and SetState which each
+// leave one or two of them at a reset value.
+func TestSetKeyState(t *testing.T) {
+	ws := &fakeWS{}
+	c := &Conn{ws: ws}
+
+	if err := c.SetKeyState(2, 0x07E0, 0xF3, true); err != nil {
+		t.Fatalf("SetKeyState: %v", err)
+	}
+	if len(ws.written) != 1 {
+		t.Fatalf("got %d messages, want 1", len(ws.written))
+	}
+
+	msg := ws.written[0]
+	if msg.Kind != plugin.KindSetKeyState || msg.SetKeyState == nil {
+		t.Fatalf("got %+v, want a setKeyState message", msg)
+	}
+	want := plugin.SetKeyStatePayload{
+		KeyIndex: 2,
+		Color:    0x07E0,
+		EmojiID:  0xF3,
+		Blink:    true,
+	}
+	if *msg.SetKeyState != want {
+		t.Fatalf("got %+v, want %+v", *msg.SetKeyState, want)
+	}
+}
+
 func TestSetState_ColorOverride(t *testing.T) {
 	ws := &fakeWS{}
 	c := &Conn{ws: ws}

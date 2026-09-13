@@ -26,6 +26,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	vendorID := fs.Uint("vendor-id", 0, "USB vendor ID of the macro pad, e.g. 0x2E8A")
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x0009")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
+	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly (e.g. /dev/cu.usbmodem2103), bypassing discovery; needed when the board exposes more than one CDC port, such as a debug console alongside the data channel")
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
 	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
@@ -46,6 +47,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			VendorID:     uint16(*vendorID),
 			ProductID:    uint16(*productID),
 			SerialNumber: *serialNumber,
+			CDCPort:      *cdcPort,
 		})
 		if err != nil {
 			fmt.Fprintln(stderr, err)

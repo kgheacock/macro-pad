@@ -169,6 +169,9 @@ An outside reviewer verifies each item without help from the implementer.
 
 ## Open questions
 
-- [ ] Which foreground and background colors do the digits use by default,
-      or does the caller always pass them? — owner, when task 0020's
-      scenario is written.
+- [x] Which foreground and background colors do the digits use by default,
+      or does the caller always pass them? — Resolved in task 0031:
+      `display_render.EmojiLookup` now also receives `key_state.color`, and
+      `code.py`'s real `emoji_lookup` backgrounds every glyph to match it
+      (fixed white foreground), so a glyph blends into the key's own color
+      instead of painting a fixed-color square over the whole panel.

@@ -22,7 +22,7 @@ firmware/modules/
 # part of the source tree `make flash` syncs from, so its own
 # `rsync --delete` wipes this on every reflash. See
 # tasks/ongoing/0030-custom-glyph-upload-and-persistence.md.
-firmware/glyph_state/
+firmware/glyph_state_files/
 
 # driver/e2e scenario run logs — see driver/e2e/operator.go
 driver/e2e/runs/*.jsonl

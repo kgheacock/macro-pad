@@ -15,8 +15,10 @@ import pwmio
 import usb_cdc
 import usb_hid
 
+import display_render
+import glyphs
 import pins
-from app import Backlight, MacroPad, blank_glyph, make_switch
+from app import Backlight, MacroPad, make_switch
 
 try:
     from adafruit_st7735r import ST7735R
@@ -80,13 +82,25 @@ backlights = [
     for key in BRING_UP_KEYS
 ]
 
+EMOJI_FOREGROUND = 0xFFFFFF  # white
+
+
+def emoji_lookup(emoji_id, color):
+    """The real glyph table (task 0023), backgrounded to match the key's
+    own color so a glyph blends into it instead of painting a fixed-color
+    square over the whole panel — see task 0023's Open questions.
+    """
+    background = display_render._rgb565_to_rgb888(color)
+    return glyphs.lookup(emoji_id, foreground=EMOJI_FOREGROUND, background=background)
+
+
 macro_pad = MacroPad(
     switches=switches,
     displays=displays,
     backlights=backlights,
     hid_device=usb_hid.devices[0],
     serial=usb_cdc.data,
-    emoji_lookup=blank_glyph,
+    emoji_lookup=emoji_lookup,
 )
 
 macro_pad.run()

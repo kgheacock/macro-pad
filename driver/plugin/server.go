@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,17 @@ type Server struct {
 
 	mu      sync.Mutex
 	clients map[*client]struct{}
+
+	// stateMu guards stateCache, separately from mu, so recording a
+	// key's state never needs the client-registry lock, and snapshotTo
+	// never blocks on anything readPump or broadcast might be holding.
+	stateMu sync.Mutex
+	// stateCache holds the most recently broadcast setKeyState or
+	// setCustomGlyph Message for each key index this server has seen.
+	// snapshotTo replays it to a client that connects later, so that
+	// client learns a key's confirmed state without waiting for its own
+	// broadcast to arrive. See task 0036.
+	stateCache map[byte]Message
 }
 
 // NewServer creates a Server bridging dev, and starts the goroutine that
@@ -131,9 +143,10 @@ type Server struct {
 // receives.
 func NewServer(dev transport.Transport, injector Injector) *Server {
 	s := &Server{
-		dev:      dev,
-		injector: injector,
-		clients:  make(map[*client]struct{}),
+		dev:        dev,
+		injector:   injector,
+		clients:    make(map[*client]struct{}),
+		stateCache: make(map[byte]Message),
 		upgrader: websocket.Upgrader{
 			// The localhost bind and maxClients are this server's only
 			// access control (see the task spec's Non-goals); a browser
@@ -203,6 +216,8 @@ func (s *Server) addClient(conn wsConn) *client {
 	s.clients[c] = struct{}{}
 	s.mu.Unlock()
 
+	s.snapshotTo(c)
+
 	go s.writePump(c)
 	go s.readPump(c)
 	return c
@@ -241,6 +256,7 @@ func (s *Server) readPump(c *client) {
 				continue
 			}
 			s.dev.SendKeyState(ks)
+			s.rememberState(msg.SetKeyState.KeyIndex, msg)
 			s.broadcast(msg)
 		case KindSetCustomGlyph:
 			keyIndex, pixels, err := msg.SetCustomGlyph.toPixels()
@@ -248,6 +264,7 @@ func (s *Server) readPump(c *client) {
 				continue
 			}
 			s.dev.SendCustomGlyph(keyIndex, pixels)
+			s.rememberState(keyIndex, msg)
 			s.broadcast(msg)
 		case KindInjectEvent:
 			if s.injector == nil {
@@ -315,6 +332,45 @@ func (s *Server) dispatchLoop() {
 			s.resolver.handleEvent(msg.Event)
 		case transport.MessageTypeAudioChunk:
 			s.broadcastAudio(msg.AudioChunk)
+		}
+	}
+}
+
+// rememberState records m — a setKeyState or setCustomGlyph message this
+// server just broadcast — as the most recently confirmed state for
+// keyIndex, for snapshotTo to replay to a client that connects later.
+func (s *Server) rememberState(keyIndex byte, m Message) {
+	s.stateMu.Lock()
+	s.stateCache[keyIndex] = m
+	s.stateMu.Unlock()
+}
+
+// snapshotTo sends c the most recently confirmed state for every key this
+// server has seen, in ascending key-index order. It runs once, right
+// after c is registered and before its pumps start, so the replay
+// reaches c before anything c itself sends. A key with no cached entry is
+// left out entirely: c reads that key as unknown until a broadcast names
+// it, exactly as it would with no cache at all.
+//
+// The send to c.send is non-blocking, matching broadcast's
+// drop-rather-than-block rule: c's pumps have not started yet, so nothing
+// is draining c.send, and a large enough cache (an adversarial or buggy
+// client naming many distinct key indices) must not stall addClient.
+func (s *Server) snapshotTo(c *client) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	keys := make([]byte, 0, len(s.stateCache))
+	for k := range s.stateCache {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	for _, k := range keys {
+		select {
+		case c.send <- s.stateCache[k]:
+		default:
+			return
 		}
 	}
 }

@@ -7,7 +7,7 @@ updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/35"
 branch: "0036-keystate-crud-page"
 related: ["0028", "0029"]
 tags: ["driver", "plugin", "ui"]
@@ -233,7 +233,7 @@ Files to change:
 - [x] **DoD-8** — `driver/README.md`'s "Protocol" subsection documents the
   connect-time replay next to the `setKeyState` bullet it extends.
   **Proof:** `driver/README.md`, "Protocol" subsection.
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
 
 ## Risks

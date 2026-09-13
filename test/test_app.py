@@ -7,6 +7,7 @@ import pins
 import tracer as tracer_module
 import wire
 from app import DEFAULT_COLOR, DEFAULT_EMOJI_ID, Backlight, MacroPad, make_switch
+from display_render import _rgb565_to_rgb888
 from idle_timer import IdleTimer
 
 DEBOUNCE_WINDOW_US = 7500  # the Debouncer's 7.5 ms default
@@ -89,7 +90,7 @@ class RecordingEmojiLookup:
     def __init__(self):
         self.requested_ids = []
 
-    def __call__(self, emoji_id):
+    def __call__(self, emoji_id, color):
         self.requested_ids.append(emoji_id)
         palette = displayio.Palette(1)
         palette[0] = 0xFFFFFF
@@ -207,7 +208,10 @@ def test_key_state_applies_to_one_key():
 
     assert pad.key_states[3].color == 0xF81F
     assert pad.key_states[3].emoji_id == 0xA2
-    assert _background_color(displays[3]) == 0xF81F
+    # _background_color reads back what render_key handed displayio, which
+    # is 24-bit RGB888 — key_states[3].color above stays 16-bit RGB565,
+    # the wire/persisted format. See display_render._rgb565_to_rgb888.
+    assert _background_color(displays[3]) == _rgb565_to_rgb888(0xF81F)
     assert len(displays[3].shown_groups) == 2
     assert emoji_lookup.requested_ids == [0xA2]
 

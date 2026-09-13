@@ -70,7 +70,7 @@ def make_switch(pin):
     return switch
 
 
-def blank_glyph(emoji_id):
+def blank_glyph(emoji_id, color):
     """Stand-in emoji lookup used until task 0023 generates the real one.
 
     It returns an empty 1x1 tile so a board with no glyph table still
@@ -153,6 +153,12 @@ class MacroPad:
     def _persist_key_state(self, key_index):
         """Write `key_index`'s current state to storage, unless it
         already matches what was last written there.
+
+        A write failure (for example the filesystem going read-only, or a
+        `make flash` sync landing on the same file at the same instant —
+        see `boot.py`'s `storage.remount` comment) is dropped rather than
+        raised: the key still keeps its new state in RAM and on its
+        display, it just won't survive the next power cycle.
         """
         key_state = self.key_states[key_index]
         data = glyph_state.encode(
@@ -160,7 +166,10 @@ class MacroPad:
         )
         if data == self._persisted[key_index]:
             return
-        self._storage.write(key_index, data)
+        try:
+            self._storage.write(key_index, data)
+        except OSError:
+            return
         self._persisted[key_index] = data
 
     def step(self, now_us):

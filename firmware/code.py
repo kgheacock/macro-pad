@@ -50,10 +50,12 @@ BRING_UP_KEYS = pins.KEYS[:1]
 # fourwire.FourWire's own default (24MHz) visibly wipes top-to-bottom on
 # a full-panel redraw — every render_key call repaints the whole 128x128
 # panel, so this is hit on every state change, not just occasionally.
-# Confirmed live during task 0031's key-0 bring-up. Bumped experimentally;
-# lower this if frames start showing garbled/torn pixels on this board's
-# breadboard wiring.
-DISPLAY_BAUDRATE = 32_000_000
+# 32MHz was tried experimentally (task 0031's key-0 bring-up) but
+# confirmed live, testing task 0030's custom glyph upload, to leave the
+# panel showing no visible content at all — writes reported success with
+# no error, but nothing reached the glass. 4MHz confirmed live as
+# reliable on this board's breadboard wiring.
+DISPLAY_BAUDRATE = 4_000_000
 
 displayio.release_displays()
 

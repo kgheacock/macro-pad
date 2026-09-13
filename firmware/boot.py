@@ -9,10 +9,23 @@ reports back.
 
 See tasks/ongoing/0008-usb-composite-descriptor.md for the design
 decision.
+
+`storage.remount` below gives CircuitPython write access to its own
+filesystem, so `firmware/glyph_state.py` can persist a key's state (task
+0030). `disable_concurrent_write_protection=True` keeps the host's
+`make flash` able to write the same filesystem at the same time — the
+alternative, CircuitPython-exclusive write access, would make `CIRCUITPY`
+read-only to the host until the board is reset again. The accepted risk
+is a host write and a firmware write landing at the same instant
+corrupting the FAT filesystem; this board's usage pattern (occasional
+`make flash`, occasional key-state change) makes that low-odds.
 """
 
+import storage
 import usb_cdc
 import usb_hid
+
+storage.remount("/", readonly=False, disable_concurrent_write_protection=True)
 
 KEY_STATE_REPORT_ID = 1
 KEY_STATE_REPORT_SIZE = 6  # docs/wire-protocol.md's Key state message

@@ -78,9 +78,6 @@ class Display:
         self.height = height
         self.root_group = None
 
-    def show(self, group):
-        self.root_group = group
-
     def refresh(self, **kwargs):
         return True
 

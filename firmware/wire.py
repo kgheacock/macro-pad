@@ -192,7 +192,12 @@ class CustomGlyphReader:
             return None
 
         payload = bytes(self._buffer[FRAME_HEADER_SIZE:total])
-        del self._buffer[:total]
+        # CircuitPython's bytearray has no slice-delete (`del ba[:n]`
+        # raises "'bytearray' object doesn't support item deletion",
+        # confirmed live testing task 0030's custom glyph upload on real
+        # hardware); CPython's does, so the prior line passed pytest but
+        # crashed on the board. Reassigning a slice works on both.
+        self._buffer = self._buffer[total:]
 
         if message_type != MESSAGE_TYPE_SET_CUSTOM_GLYPH:
             return None

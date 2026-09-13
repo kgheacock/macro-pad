@@ -6,7 +6,15 @@ import glyph_state
 import pins
 import tracer as tracer_module
 import wire
-from app import DEFAULT_COLOR, DEFAULT_EMOJI_ID, Backlight, MacroPad, make_switch
+from app import (
+    BLINK_INTERVAL_US,
+    DEFAULT_COLOR,
+    DEFAULT_EMOJI_ID,
+    Backlight,
+    MacroPad,
+    make_switch,
+)
+from display_render import _rgb565_to_rgb888
 from idle_timer import IdleTimer
 
 DEBOUNCE_WINDOW_US = 7500  # the Debouncer's 7.5 ms default
@@ -18,7 +26,12 @@ class FakeDisplay:
     def __init__(self):
         self.shown_groups = []
 
-    def show(self, group):
+    @property
+    def root_group(self):
+        return self.shown_groups[-1]
+
+    @root_group.setter
+    def root_group(self, group):
         self.shown_groups.append(group)
 
     def refresh(self, **kwargs):
@@ -84,7 +97,7 @@ class RecordingEmojiLookup:
     def __init__(self):
         self.requested_ids = []
 
-    def __call__(self, emoji_id):
+    def __call__(self, emoji_id, color):
         self.requested_ids.append(emoji_id)
         palette = displayio.Palette(1)
         palette[0] = 0xFFFFFF
@@ -202,7 +215,10 @@ def test_key_state_applies_to_one_key():
 
     assert pad.key_states[3].color == 0xF81F
     assert pad.key_states[3].emoji_id == 0xA2
-    assert _background_color(displays[3]) == 0xF81F
+    # _background_color reads back what render_key handed displayio, which
+    # is 24-bit RGB888 — key_states[3].color above stays 16-bit RGB565,
+    # the wire/persisted format. See display_render._rgb565_to_rgb888.
+    assert _background_color(displays[3]) == _rgb565_to_rgb888(0xF81F)
     assert len(displays[3].shown_groups) == 2
     assert emoji_lookup.requested_ids == [0xA2]
 
@@ -362,18 +378,32 @@ def test_host_message_wakes_backlight():
     assert all(backlight.duty_cycle == 1.0 for backlight in backlights)
 
 
-def test_blink_key_redraws_every_step():
+def test_blink_key_redraws_only_after_blink_interval_elapses():
+    """A blinking key must not redraw on every `step` call — task 0022's
+    main loop calls `step` as fast as it can with no pacing of its own,
+    so redrawing every call toggled visibility far faster than a human
+    can see as a blink (confirmed live during task 0031's key-0
+    bring-up). It should redraw once immediately (the state change
+    itself), then again only once BLINK_INTERVAL_US has elapsed.
+    """
     pad, _, displays, _, hid_device, _, _, _ = _build_pad()
 
-    pad.step(0)
+    pad.step(0)  # power-on: every key, including 5, renders once
+    assert len(displays[5].shown_groups) == 1
+
     hid_device.feed(
         _key_state_report(key_index=5, color=0x001F, emoji_id=7, blink=True)
     )
-    pad.step(1000)
-    pad.step(2000)
-    pad.step(3000)
+    pad.step(1000)  # the state change itself: always redraws
+    assert len(displays[5].shown_groups) == 2
 
-    assert len(displays[5].shown_groups) == 4
+    pad.step(2000)  # far short of BLINK_INTERVAL_US since the last toggle
+    pad.step(3000)
+    assert len(displays[5].shown_groups) == 2
+
+    pad.step(1000 + BLINK_INTERVAL_US)  # interval elapsed
+    assert len(displays[5].shown_groups) == 3
+
     assert len(displays[0].shown_groups) == 1
 
 

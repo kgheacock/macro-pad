@@ -32,7 +32,7 @@ check-circuitpy:
 .PHONY: flash
 flash: check-circuitpy
 	rsync -rc --delete \
-		--exclude=modules/ --exclude=__pycache__/ --exclude=README.md \
+		--exclude=modules/ --exclude=__pycache__/ --exclude=README.md --exclude=lib/ \
 		--exclude=.Trashes --exclude=.Spotlight-V100 --exclude=.fseventsd --exclude=.DS_Store \
 		firmware/ $(CIRCUITPY_VOLUME)/
 

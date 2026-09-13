@@ -5,7 +5,13 @@ interface that both a real `audiobusio.I2SIn` and a test fake satisfy.
 See tasks/ongoing/0007-i2s-mic-capture-module.md for the design decision.
 """
 
-from typing import Protocol
+try:
+    from typing import Protocol
+except ImportError:
+    # This board's CircuitPython build ships no `typing` module. Protocol
+    # is only ever used as a base class below.
+    class Protocol:
+        pass
 
 from audio_buffer import DEFAULT_CHUNK_SIZE, RingBuffer
 

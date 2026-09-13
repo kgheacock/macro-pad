@@ -142,12 +142,24 @@ Files to change:
   path alongside the existing 1-bit glyph path.
 - New firmware storage module — write the last full per-key state (color,
   built-in ID or custom pixels, blink) to one file per key, under
-  `firmware/glyph_state/`. Overwrite the file on every change, and read it
-  back at boot to restore state.
-- `firmware/glyph_state/` — add to `.gitignore`, matching `firmware/modules/`.
-  A gitignored directory is never in the source tree `make flash` syncs
-  from, so its existing `rsync --delete` wipes this one on every reflash,
-  with no new Makefile logic.
+  `firmware/glyph_state_files/` (not `glyph_state/` — that name collides
+  with the module's own filename at the filesystem root; confirmed live
+  during task 0031's key-0 bring-up). Overwrite the file on every change,
+  and read it back at boot to restore state.
+- `firmware/glyph_state_files/` — add to `.gitignore`, matching
+  `firmware/modules/`. A gitignored directory is never in the source tree
+  `make flash` syncs from, so its existing `rsync --delete` wipes this one
+  on every reflash, with no new Makefile logic.
+- `boot.py` — `storage.remount("/", readonly=False,
+  disable_concurrent_write_protection=True)`, so firmware can write its
+  own persisted state; by default CircuitPython's filesystem is writable
+  by the USB host only. `disable_concurrent_write_protection=True` keeps
+  `make flash` working (the alternative revokes host write access), at
+  the accepted risk of a host and firmware write colliding and corrupting
+  the FAT filesystem.
+- `firmware/app.py`'s `_persist_key_state` — catch `OSError` around the
+  storage write, so a failure (read-only filesystem, full disk) drops
+  that one key's persistence instead of crashing the whole run loop.
 - `driver/transport/wire.go` — encode the new message. `Transport` gains a
   method that takes a key index and PNG bytes, and does the decode.
 - `driver/plugin/protocol.go`, `server.go` — let a plugin supply image
@@ -178,8 +190,8 @@ Files to change:
   && go test ./driver/... -run CustomGlyph` fails on `main`.
 - [ ] **DoD-7** — `make flash` removes every persisted per-key state file,
   so no firmware version reads a file an earlier version wrote. **Proof:**
-  run `make flash`, then check that `CIRCUITPY/glyph_state/` holds no
-  files from before the run.
+  run `make flash`, then check that `CIRCUITPY/glyph_state_files/` holds
+  no files from before the run.
 - [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 

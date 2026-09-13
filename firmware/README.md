@@ -111,6 +111,45 @@ returning — freeing the bus for whichever key redraws next. See
 for the design decision, including why this construct-draw-release
 cost, paid on every redraw, was accepted over the alternatives.
 
+## Persistent display scene graph
+
+`display_render.render_key` builds each key's `displayio.Group`,
+background `Palette`, and glyph `TileGrid` once, on that key's `KeyState`,
+and mutates those same objects on every later call instead of replacing
+them: the background `Palette`'s color is rewritten in place, the glyph
+`TileGrid` is swapped for a freshly built one only when its source
+(`emoji_id`, `pixels`, or — for a built-in emoji, whose bitmap bakes in
+`key_state.color` as its background, see task 0023 — `color`) actually
+changed, and a blink toggle flips the glyph `TileGrid`'s `hidden` flag
+rather than adding or removing it from the `Group`. Rebuilding a fresh
+object graph on every call, as `render_key` did before, gives displayio
+nothing to diff against the last frame, so it always redraws the full
+128×128 panel; mutating the same objects in place lets its own
+per-`TileGrid` dirty tracking shrink a blink-only redraw to the glyph's
+own area. See
+[`tasks/ongoing/0033-mutate-display-scene-graph-in-place.md`](../tasks/ongoing/0033-mutate-display-scene-graph-in-place.md)
+for the design decision.
+
+**Blink redraw latency: not yet measured on hardware.** Task 0033's
+Design assumes this CircuitPython build's `BusDisplay.refresh()` redraws
+only a `TileGrid`'s own dirty bounds rather than the union of every
+dirty `TileGrid` in the `Group` — its Open questions flags this as
+unconfirmed. It is also unconfirmed whether that holds once task 0032's
+per-redraw bus rebuild attaches the same persistent `Group` to a freshly
+built `BusDisplay` on every call, rather than one bus held open across
+frames. Confirm both with the real board: reuse task 0031's
+`time.monotonic_ns()` probe around `display.refresh()`, but on a
+blinking key whose glyph is smaller than the full panel (not emoji ID
+`0x00`, whose full-panel placeholder glyph's cost this task does not
+change by design), across several consecutive blink toggles once the
+scene graph is already built.
+
+Record the result here as a line of the form:
+
+```
+Measured blink redraw latency: N.NNN ms (RP2350, <emoji id>, glyph smaller than full panel)
+```
+
 ## Glyphs
 
 `firmware/glyphs.py` maps a wire-protocol emoji ID to a one-bit glyph

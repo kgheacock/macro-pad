@@ -136,6 +136,21 @@ func (c *Conn) SetState(key int, state string, color *uint16) error {
 	})
 }
 
+// SetCustomGlyph sets key's image to pngBytes, an arbitrary 128x128 PNG
+// file's raw bytes. Unlike SetEmoji and SetState, which each choose from
+// the device's built-in glyph table, this sends the image itself over
+// the wire — see task 0030's setCustomGlyph message and
+// docs/wire-protocol.md.
+func (c *Conn) SetCustomGlyph(key int, pngBytes []byte) error {
+	return c.send(plugin.Message{
+		Kind: plugin.KindSetCustomGlyph,
+		SetCustomGlyph: &plugin.SetCustomGlyphPayload{
+			KeyIndex: byte(key),
+			Image:    pngBytes,
+		},
+	})
+}
+
 // Signal broadcasts a plugin.KindSignal message naming name for key. A
 // one-shot caller such as `macrodriver signal` uses this to trigger every
 // other connected plugin's reaction, with no direct call into any of

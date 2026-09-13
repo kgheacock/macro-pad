@@ -139,6 +139,23 @@ func TestSetEmoji(t *testing.T) {
 	}
 }
 
+func TestSetCustomGlyph(t *testing.T) {
+	ws := &fakeWS{}
+	c := &Conn{ws: ws}
+
+	pngBytes := []byte{0x89, 'P', 'N', 'G'} // stand-in bytes; SetCustomGlyph forwards them unexamined
+	if err := c.SetCustomGlyph(4, pngBytes); err != nil {
+		t.Fatalf("SetCustomGlyph: %v", err)
+	}
+	msg := ws.written[0]
+	if msg.Kind != plugin.KindSetCustomGlyph || msg.SetCustomGlyph == nil {
+		t.Fatalf("got %+v, want a setCustomGlyph message", msg)
+	}
+	if msg.SetCustomGlyph.KeyIndex != 4 || string(msg.SetCustomGlyph.Image) != string(pngBytes) {
+		t.Fatalf("got %+v, want KeyIndex 4, Image %v", msg.SetCustomGlyph, pngBytes)
+	}
+}
+
 func TestSignal(t *testing.T) {
 	ws := &fakeWS{}
 	c := &Conn{ws: ws}

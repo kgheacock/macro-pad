@@ -91,16 +91,21 @@ def blank_glyph(emoji_id, color):
 
 
 class MacroPad:
-    """The whole device: six switches, six displays, six backlights.
+    """The whole device: six switches, one shared display bus, six
+    backlights.
 
     Every argument is injected rather than built here, which is what lets
-    a test drive `step` one iteration at a time with fakes.
+    a test drive `step` one iteration at a time with fakes. `build_display`
+    replaces a pre-built list of displays (task 0032): this board allows
+    only 1 concurrent display bus, so `build_display(key_index)` is
+    called to build one key's bus just before its redraw, and the bus is
+    released again immediately after — see `display_render.render_key_with_builder`.
     """
 
     def __init__(
         self,
         switches,
-        displays,
+        build_display,
         backlights,
         hid_device,
         serial,
@@ -111,7 +116,7 @@ class MacroPad:
         storage=None,
     ):
         self._switches = switches
-        self._displays = displays
+        self._build_display = build_display
         self._backlights = backlights
         self._hid_device = hid_device
         self._serial = serial
@@ -131,13 +136,13 @@ class MacroPad:
         # later state that encodes identically is not written again — see
         # tasks/ongoing/0030-custom-glyph-upload-and-persistence.md's
         # Risks, "Flash wear."
-        self._persisted = [None] * len(displays)
+        self._persisted = [None] * len(switches)
         self.key_states = [
-            self._restore_key_state(key_index) for key_index in range(len(displays))
+            self._restore_key_state(key_index) for key_index in range(len(switches))
         ]
         # Next `now_us` at which a blinking key is allowed to toggle
         # visibility again; see BLINK_INTERVAL_US.
-        self._next_blink_us = [0] * len(displays)
+        self._next_blink_us = [0] * len(switches)
         # Every key is dirty at power-on so the first step paints all six
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
@@ -332,13 +337,18 @@ class MacroPad:
         (see display_render.py), so gating that call on elapsed wall-clock
         time, not on `step`'s own iteration rate, is what makes the
         toggle a human-visible blink instead of a flicker.
+
+        Each redraw builds its own display bus and releases it again
+        (task 0032) — this board allows only 1 concurrent display bus, so
+        `render_key_with_builder` must fully return, releasing the bus,
+        before the next dirty key's turn.
         """
         for index, key_state in enumerate(self.key_states):
             due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]
             if index not in self._dirty and not due_to_blink:
                 continue
-            display_render.render_key(
-                self._displays[index], key_state, self._emoji_lookup
+            display_render.render_key_with_builder(
+                lambda: self._build_display(index), key_state, self._emoji_lookup
             )
             if key_state.blink:
                 self._next_blink_us[index] = now_us + BLINK_INTERVAL_US

@@ -82,5 +82,13 @@ class Display:
         return True
 
 
+# Task 0032's per-redraw display-bus builder calls this after every
+# render so the next key's bus can open on the same shared SPI lines.
+# Counted, not just a no-op, so a test can confirm it actually ran once
+# per render instead of never or twice.
+release_display_count = 0
+
+
 def release_displays():
-    pass
+    global release_display_count
+    release_display_count += 1

@@ -120,24 +120,40 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `macrodriver emoji --key 0 --char 😍 --emulate` ends
+- [x] **DoD-1** — `macrodriver emoji --key 0 --char 😍 --emulate` ends
   with the emulator's last custom glyph holding non-empty pixels.
   **Proof:** a driver test asserts `Emulator.LastCustomGlyph()` after
   running the command against `--emulate`.
-- [ ] **DoD-2** — The command rejects a multi-codepoint input (a ZWJ
+  `TestRunEmoji_Emulate` in `driver/cmd/macrodriver/emoji_test.go`
+  stubs `renderEmojiPNG` (a package var) with a solid-color PNG, so the
+  test exercises the real `--emulate` wire path with no dependency on a
+  live `python3`/Pillow install; `tools/render_emoji.py` itself was
+  proven separately, by hand, against a real `😍` character.
+- [x] **DoD-2** — The command rejects a multi-codepoint input (a ZWJ
   sequence, or more than one emoji) before any wire traffic. **Proof:**
   a unit test asserts an error and an empty `LastCustomGlyph()`.
-- [ ] **DoD-3** — A missing `python3` or Pillow produces one line that
+  `TestRunEmoji_RejectsMultiCodepoint` covers a ZWJ family emoji, a
+  flag, and two emoji in one `--char`.
+- [x] **DoD-3** — A missing `python3` or Pillow produces one line that
   names the missing dependency, not a stack trace. **Proof:** a test
   stubs `exec.LookPath` to fail and asserts the error text and a
   non-zero exit code.
-- [ ] **DoD-4** — Tests cover the new subcommand and its rejection
+  `TestRunEmoji_MissingPython3`.
+- [x] **DoD-4** — Tests cover the new subcommand and its rejection
   cases. **Proof:** `go test ./driver/cmd/macrodriver/... -run Emoji`
   passes. `git stash && go test ./driver/cmd/macrodriver/... -run
   Emoji` fails on `main`.
-- [ ] **DoD-5** — `driver/README.md` documents the new command.
+  The pass on this branch is confirmed. On `main`, `-run Emoji` matches
+  no test function (the subcommand doesn't exist there yet), so `go
+  test` reports `ok ... [no tests to run]` with exit code 0 — not a
+  hard failure. The literal proof text doesn't hold for that reason,
+  but the intent — new, passing tests that exist only on this branch —
+  does.
+- [x] **DoD-5** — `driver/README.md` documents the new command.
   **Proof:** `driver/README.md`, the section next to `macrodriver
   signal`.
+  The new `### \`macrodriver emoji\`` section sits directly after
+  `### \`macrodriver signal\``.
 - [ ] **DoD-6** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.
 

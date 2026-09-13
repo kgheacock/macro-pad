@@ -2,7 +2,8 @@
 // running daemon's plugin WebSocket server to trigger a one-shot action,
 // rather than holding a plugin connection open itself. Its first
 // subcommand, signal, lets a Claude Code hook broadcast a signal — see
-// driver/README.md's "Signal vocabulary" and task 0013.
+// driver/README.md's "Signal vocabulary" and task 0013. Its emoji
+// subcommand sends a Unicode emoji character to a key — see task 0034.
 package main
 
 import (
@@ -17,12 +18,14 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "macrodriver: expected a subcommand (signal)")
+		fmt.Fprintln(stderr, "macrodriver: expected a subcommand (signal, emoji)")
 		return 2
 	}
 	switch args[0] {
 	case "signal":
 		return runSignal(args[1:], stdout, stderr)
+	case "emoji":
+		return runEmoji(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "macrodriver: unknown subcommand %q\n", args[0])
 		return 2

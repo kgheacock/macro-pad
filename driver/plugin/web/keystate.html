@@ -178,11 +178,6 @@
   "use strict";
 
   const KEY_COUNT = 6;
-  // RESET_EMOJI_BASE: Reset sends a digit glyph (0xF1 for key 0, 0xF2 for
-  // key 1, ...), never 0x00 — docs/wire-protocol.md's Emoji ID table
-  // fixes 0x00 as a "Placeholder" that draws a full-screen white box, not
-  // a usable blank or reset value.
-  const RESET_EMOJI_BASE = 0xF1;
   const RESET_COLOR_HEX = "#333945"; // matches virtualpad.html's neutral tile background
 
   const rowsEl = document.getElementById("rows");
@@ -271,17 +266,16 @@
     setRowStatus(row, "pending");
   }
 
-  // sendReset restores row's key to a defined default: a digit glyph
-  // (never the 0x00 placeholder), blink off, and a neutral color — not
-  // whatever the editor fields currently hold. A digit glyph is a
-  // built-in Emoji ID, so this also switches the key back off any custom
-  // glyph "Set emoji" sent it — see docs/wire-protocol.md's "Set custom
-  // glyph" section.
+  // sendReset restores row's key to a defined default: no glyph, blink
+  // off, and a neutral color — not whatever the editor fields currently
+  // hold. emojiId 0 is a built-in Emoji ID, so this also switches the key
+  // back off any custom glyph "Set emoji" sent it — see
+  // docs/wire-protocol.md's "Set custom glyph" section.
   function sendReset(row) {
     const payload = {
       keyIndex: row.keyIndex,
       color: hexToRgb565(RESET_COLOR_HEX),
-      emojiId: RESET_EMOJI_BASE + row.keyIndex,
+      emojiId: 0,
       blink: false,
     };
     if (!sendSetKeyState(payload)) return;

@@ -253,7 +253,7 @@ if err != nil {
 }
 defer conn.Close()
 
-conn.SetEmoji(0, 0xF1)             // key 0 shows digit 1
+conn.SetEmoji(0, 0x00)             // key 0 shows a plain color, no glyph
 conn.SetState(0, "Waiting", nil)   // key 0 turns amber and blinks
 conn.Signal(0, plugin.SignalProcessDone)
 ```
@@ -380,12 +380,10 @@ Set emoji button, a Reset button, and a status column
 (unknown/pending/confirmed). Set sends `setKeyState` and marks the row
 "pending" until the daemon's own rebroadcast for that exact state
 arrives, then "confirmed"; a disconnect while "pending" reverts the row
-to "unknown". Reset restores a key to a defined default — a digit glyph
-(`0xF1` + the key index), blink off, a neutral color — instead of
-whatever the emoji ID field happens to hold, because `0x00` is a reserved
-placeholder that draws a full-screen white box, not a usable blank or
-reset value (see the Emoji ID table in
-[`docs/wire-protocol.md`](../docs/wire-protocol.md)). A row that already
+to "unknown". Reset restores a key to a defined default — emoji ID
+`0x00` (no glyph), blink off, a neutral color — instead of whatever the
+emoji ID field happens to hold; see the Emoji ID table in
+[`docs/wire-protocol.md`](../docs/wire-protocol.md). A row that already
 has a known state when the page connects — via the connect-time replay
 above — reads "confirmed" immediately, with no Set click needed.
 

@@ -9,7 +9,7 @@ issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/35"
 branch: "0036-keystate-crud-page"
-related: ["0028", "0029"]
+related: ["0028", "0029", "0030", "0034", "0037"]
 tags: ["driver", "plugin", "ui"]
 ---
 
@@ -30,6 +30,10 @@ exists to simulate a press, not to administer state across all six keys.
   daemon's own `setKeyState` rebroadcast for that exact state arrives.
 - A person resets a key to a defined default in one click, using a digit
   glyph (`0xF1`-`0xF6`), never the `0x00` placeholder.
+- A person sets a key's glyph to an actual Unicode emoji character —
+  typed directly, not looked up as a numeric Emoji ID — with the same
+  pending/confirmed feedback the color/emoji-ID/blink editor already
+  gives.
 - A client that connects after the daemon has already confirmed a key's
   state — this page, `virtualpad.html`, or any future plugin — sees that
   key's last known state right away, instead of reading "unknown" until
@@ -48,10 +52,18 @@ exists to simulate a press, not to administer state across all six keys.
 - Persistence across a daemon restart. The cache lives in `plugin.Server`
   only; a freshly started `macropadd` begins with an empty cache, same as
   today.
-- Custom glyph upload's UI (`setCustomGlyph`'s image picker). Task 0030's
-  job. The cache itself does treat a `setCustomGlyph` message as key state,
-  since leaving it out would make a key's replayed state wrong after a
-  custom glyph was the last thing set for it.
+- An arbitrary image file picker for `setCustomGlyph`. Task 0030's job.
+  This task's one narrow use of `setCustomGlyph` — sending a single typed
+  emoji character, rendered client-side — is not a general upload UI; the
+  cache itself does treat any `setCustomGlyph` message as key state
+  regardless of source, since leaving it out would make a key's replayed
+  state wrong after a custom glyph was the last thing set for it.
+- Plain letters or other non-emoji text as a key's glyph. The browser's
+  own font can render a letter as easily as an emoji, but this task
+  restricts the new input to characters that test as emoji (see Design),
+  matching `macrodriver emoji` (task 0034)'s same scope limit. Rendering
+  arbitrary text — a letter included — is task 0037's job
+  (`tools/render_html.py`), not this page's.
 - Click-pattern or signal handling. Task 0013's job.
 
 ## Approaches considered
@@ -129,6 +141,27 @@ changes for what began as a UI-only task, and two pages (`keystate.html`,
 `virtualpad.html`) still hand-copy the same WebSocket connect and RGB565
 code, per Approach B's own accepted cost.
 
+`keystate.html` also gains a way to type an emoji character directly,
+rather than only a raw numeric Emoji ID. `macrodriver emoji` (task 0034)
+already proved the wire-level shape — render a character to a 128×128
+PNG, send it as `setCustomGlyph` — but that command shells out to
+`tools/render_emoji.py`, a Python process a browser page cannot invoke.
+A browser already has its own emoji-capable font and a `<canvas>` element
+that can rasterize text to a PNG with no server round trip at all, so
+`keystate.html` renders the character itself: fill a 128×128 canvas
+black (matching `render_emoji.py`'s background), draw the character
+centered with a large emoji-covering font stack, and export it with
+`canvas.toDataURL`. This needs no change to `driver/plugin` or
+`driver/api` — `setCustomGlyph` already accepts any correctly-sized PNG,
+from any source. The input is restricted to a single codepoint that
+tests positive against JavaScript's `\p{Extended_Pictographic}` Unicode
+property — the same "exactly one codepoint" restriction
+`validateSingleCodepoint` enforces in `emoji.go`, checked here in the
+browser instead of in Go. A plain letter fails that test and is
+rejected with a log line, not silently rendered as a blank box the way
+`tools/render_emoji.py` renders one today (see Non-goals) — 0037 covers
+turning arbitrary text into a glyph, this page does not.
+
 ## Design
 
 Files to change:
@@ -160,11 +193,32 @@ Files to change:
   for. A disconnect while a row is "pending" reverts it to "unknown".
   Reset sends `setKeyState` with `emojiId: 0xF1 + keyIndex` (a digit
   glyph) and `blink: false`.
+
+  Each row also gets an "Emoji char" text input and its own "Set emoji"
+  button, independent of the numeric Emoji ID input and the main Set
+  button. Clicking "Set emoji" validates the field (exactly one code
+  point — `Array.from(value).length === 1` — that matches
+  `/\p{Extended_Pictographic}/u`); on failure it logs an error and sends
+  nothing. On success it rasterizes the character onto an offscreen
+  128×128 canvas and sends the result as one `setCustomGlyph` message,
+  marking the row "pending" with the kind and payload it is waiting on —
+  the same status column now tracks whichever of `setKeyState` or
+  `setCustomGlyph` this row's most recent action was. A `setCustomGlyph`
+  broadcast confirms a row exactly like a `setKeyState` broadcast already
+  does: an exact match against the awaited payload while "pending"
+  clears it to "confirmed"; any `setCustomGlyph` message arriving on a
+  row that is not "pending" (the connect-time replay, or another
+  client's change) sets that row straight to "confirmed" too, since it
+  is not this page's job to distinguish where a confirmed state came
+  from. A row confirmed by a custom glyph does not touch that row's
+  color/emoji-ID/blink inputs — `setCustomGlyph` carries no such fields
+  to show.
 - `driver/README.md` — "Plugin API" section's "Protocol" subsection gains
   a paragraph on the connect-time replay, next to the `setKeyState`
   bullet it extends; a new paragraph on `keystate.html` follows the
   existing `virtualpad.html` paragraph and states what Reset sends and
-  why (the `0x00` placeholder pitfall).
+  why (the `0x00` placeholder pitfall), and what the emoji-character
+  input sends and why it rejects a plain letter.
 
 ## Definition of done
 
@@ -235,6 +289,18 @@ Files to change:
   **Proof:** `driver/README.md`, "Protocol" subsection.
 - [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
+- [ ] **DoD-10** — Typing a single emoji character into key 0's "Emoji
+  char" field and clicking "Set emoji" sends one `setCustomGlyph` message
+  for key 0 whose image decodes as a 128×128 PNG. **Proof:** manual run
+  against `macropadd --emulate`; the message log shows one
+  `setCustomGlyph` frame for key 0.
+- [ ] **DoD-11** — Typing a plain letter into the same field and clicking
+  "Set emoji" sends nothing. **Proof:** manual run; the message log gains
+  no new frame, and an error line names the rejected input.
+- [ ] **DoD-12** — Key 0's row shows "pending" right after "Set emoji",
+  then "confirmed" only once a `setCustomGlyph` broadcast for key 0
+  arrives matching the exact image sent. **Proof:** manual run; status
+  changes only after the matching broadcast, not on send.
 
 ## Risks
 
@@ -257,3 +323,11 @@ Precedent: `driver/plugin/web/virtualpad.html` (task 0029) already proved
 the rebroadcast-as-confirmation pattern this task reuses, and the fixed
 Emoji ID table in `docs/wire-protocol.md` rules out `0x00` as a usable
 "reset" or "blank" value — see `0x00`'s "Placeholder" entry.
+
+`tools/render_emoji.py` (task 0034) renders a plain letter as a blank
+black box, since Apple Color Emoji has no non-emoji glyphs — confirmed by
+running it against `"A"` while scoping this addition. That gap stays
+unticketed here: `tasks/backlog/0037-render-static-html-on-a-key.md`
+already covers turning arbitrary text, letters included, into a glyph via
+`tools/render_html.py`, so a person who needs a letter on a key has a
+named task to pick up instead of a second, overlapping one.

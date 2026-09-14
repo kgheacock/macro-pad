@@ -78,8 +78,8 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
 3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
 4. Redraw the keys that changed, plus every key that blinks — see
-   "Display bus," below, for how each redraw builds and releases its
-   own bus.
+   "Display bus," below, for when a redraw reuses the open bus and when
+   it releases and rebuilds it.
 5. Set each backlight from the idle timer.
 
 `wire.py` encodes and decodes the messages in
@@ -103,13 +103,21 @@ exist at a time.
 
 `code.py` reflects this: it holds no persistent list of display
 objects. Instead, its `build_display(key_index)` builds one key's bus
-on demand, and `app.MacroPad` calls it through
-`display_render.render_key_with_builder`, which builds the bus, draws
-one frame through it, then calls `displayio.release_displays()` before
-returning — freeing the bus for whichever key redraws next. See
+on demand, and `app.MacroPad` tracks which key currently owns the open
+bus in `_active_key_index`/`_active_display`. A redraw for that same
+key reuses the live display and calls `display_render.render_key`
+directly — no rebuild, no `displayio.release_displays()` call, so the
+key's hardware reset line stays untouched. A redraw for a different key
+releases the current bus first, then builds the new one, before
+`render_key` runs. See
 [`tasks/ongoing/0032-share-one-display-bus-across-six-keys.md`](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md)
-for the design decision, including why this construct-draw-release
-cost, paid on every redraw, was accepted over the alternatives.
+for why the one-bus-at-a-time limit exists, and
+[`tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md`](../tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md)
+for why a redraw of the same key no longer pays a rebuild at all: on
+real hardware, rebuilding the bus on every redraw pulsed the reset line
+each time, and a key's color did not reliably hold across repeat
+redraws. Switching from one key to a different key still pulses that
+shared reset line — see 0040's Non-goals for why that cost remains.
 
 ## Persistent display scene graph
 
@@ -134,10 +142,12 @@ for the design decision.
 Design assumes this CircuitPython build's `BusDisplay.refresh()` redraws
 only a `TileGrid`'s own dirty bounds rather than the union of every
 dirty `TileGrid` in the `Group` — its Open questions flags this as
-unconfirmed. It is also unconfirmed whether that holds once task 0032's
-per-redraw bus rebuild attaches the same persistent `Group` to a freshly
-built `BusDisplay` on every call, rather than one bus held open across
-frames. Confirm both with the real board: reuse task 0031's
+unconfirmed. Task 0040 means a blinking key's own `BusDisplay` now
+stays open across its consecutive blink toggles (as long as no other
+key's redraw takes the bus in between), the same persistent `Group`
+attached throughout, rather than a fresh `BusDisplay` on every call —
+but whether `refresh()`'s dirty-bounds behavior itself holds is still
+unconfirmed. Confirm both with the real board: reuse task 0031's
 `time.monotonic_ns()` probe around `display.refresh()`, but on a
 blinking key whose glyph is smaller than the full panel (not emoji ID
 `0x00`, whose full-panel placeholder glyph's cost this task does not
@@ -298,25 +308,26 @@ Record the result here as a line of the form:
 Measured loop period: N.NNN ms (RP2350, displays absent, 1000 iterations)
 ```
 
-## Per-redraw display-bus latency
+## Per-key-switch display-bus latency
 
-**Not yet measured.** Task
-[`0032`](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md)'s
-per-redraw `build_display`/`render_key_with_builder` cycle constructs a
-fresh `fourwire.FourWire` and `ST7735R`, which runs the panel's full
-init sequence, on every redraw — a cost the held-open display list this
-replaced never paid. This needs the real board to measure: time one
-`display_render.render_key_with_builder` call end to end with a console
-attached (see "Loop period," above, for how to reach the console), and
-record how many keys can redraw in one main-loop tick before that
-latency, multiplied by the number of dirty keys, threatens task 0022's
-loop-period budget — several keys blinking together is the worst case
-named in task 0032's Risks.
+**Not yet measured.** `build_display(key_index)` constructs a fresh
+`fourwire.FourWire` and `ST7735R`, which runs the panel's full init
+sequence — a cost the held-open display list task 0032 replaced never
+paid. Task 0040 changed when this cost is paid: `app.MacroPad` only
+calls `build_display` when a redraw's key differs from
+`_active_key_index`, not on every redraw of the same key, so it lands
+once per key switch instead of once per redraw. This needs the real
+board to measure: time one `build_display` call end to end with a
+console attached (see "Loop period," above, for how to reach the
+console), and record how many key switches can happen in one main-loop
+tick before that latency, multiplied by the number of keys switching
+in, threatens task 0022's loop-period budget — several different keys
+blinking in turn is the worst case named in task 0032's Risks.
 
 Record the result here as a line of the form:
 
 ```
-Measured per-redraw display-bus latency: N.NNN ms (RP2350, one key, ST7735R init included)
+Measured per-key-switch display-bus latency: N.NNN ms (RP2350, one key, ST7735R init included)
 ```
 
 ## Out of scope

@@ -1,5 +1,6 @@
 import board
 import displayio
+import pytest
 
 # Imported flat, under the names the board uses. See conftest.py.
 import glyph_state
@@ -39,20 +40,37 @@ class FakeDisplay:
 
 
 class FakeDisplayBuilder:
-    """Stands in for `code.py`'s per-redraw display-bus builder callable
-    (task 0032).
+    """Stands in for `code.py`'s per-key-switch display-bus builder
+    callable (task 0032, changed by task 0040).
 
-    Real hardware builds a fresh `ST7735R` bus for every redraw, so no
-    two renders of the same key ever share one display object. This
-    still hands back the same `FakeDisplay` for a given key index on
-    every call, so a test can read that key's whole render history
-    through `per_key`.
+    Real hardware builds a fresh `ST7735R` bus each time a different key
+    takes over the shared bus, so no two keys ever share one display
+    object. This still hands back the same `FakeDisplay` for a given key
+    index on every call, so a test can read that key's whole render
+    history through `per_key`. `calls` and `release_count_at_call`
+    record when and how often the builder itself ran, so a test can tell
+    a bus reuse (no call) apart from a rebuild (a call), and confirm a
+    release happened first when one was expected.
     """
 
     def __init__(self, key_count):
         self.per_key = [FakeDisplay() for _ in range(key_count)]
+        self.calls = []
+        self.release_count_at_call = []
+        self._fail_next = set()
+
+    def fail_next(self, key_index):
+        """Test helper: make the next call for `key_index` raise instead
+        of returning a display, simulating a hardware bus-build failure.
+        """
+        self._fail_next.add(key_index)
 
     def __call__(self, key_index):
+        self.calls.append(key_index)
+        self.release_count_at_call.append(displayio.release_display_count)
+        if key_index in self._fail_next:
+            self._fail_next.discard(key_index)
+            raise RuntimeError("display bus build failed")
         return self.per_key[key_index]
 
 
@@ -313,6 +331,70 @@ def test_key_state_glyph_only_change_leaves_background_untouched():
     assert pad.key_states[4].emoji_id == 9
     assert _background_color(displays.per_key[4]) == background_before
     assert emoji_lookup.requested_ids == [9]
+
+
+def test_active_key_reuses_display_bus_across_redraws():
+    """Task 0040, DoD-1: two consecutive redraws of the same key must
+    build its display bus exactly once. Rebuilding on every redraw
+    pulsed the display's hardware reset line on real hardware, and the
+    color did not hold — see 0040's Problem.
+    """
+    pad, _, displays, _, hid_device, _, _, _ = _build_pad()
+    pad.step(0)  # power-on paint of all six keys
+    displays.calls.clear()
+
+    hid_device.feed(_key_state_report(key_index=3, color=0xF81F, emoji_id=0xA2))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(key_index=3, color=0x001F, emoji_id=0xA2))
+    pad.step(2000)
+
+    assert displays.calls == [3]  # built once, reused for the second redraw
+    # 1 append from the power-on paint, plus 1 per redraw below — both
+    # redraws still ran even though only the first one built a bus.
+    assert len(displays.per_key[3].shown_groups) == 3
+
+
+def test_switching_keys_releases_bus_before_building_next():
+    """Task 0040, DoD-2: redrawing a different key must release the
+    current display bus before building the next one — this board
+    allows only 1 concurrent bus (task 0032).
+    """
+    pad, _, displays, _, hid_device, _, _, _ = _build_pad()
+    pad.step(0)  # power-on paint of all six keys; key 5 ends up active
+    displays.calls.clear()
+    displays.release_count_at_call.clear()
+    released_before = displayio.release_display_count
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF81F, emoji_id=0xA2))
+    pad.step(1000)
+
+    assert displays.calls == [2]
+    # release_count_at_call records displayio.release_display_count at the
+    # moment key 2's bus was built — one higher than before the switch
+    # proves the release ran first, so the two busses were never open at
+    # once.
+    assert displays.release_count_at_call == [released_before + 1]
+    assert pad._active_key_index == 2
+
+
+def test_display_build_failure_leaves_no_active_key():
+    """Task 0040 Risks: if build_display raises after the old bus was
+    released, `_active_key_index` must land on `None`, not on the key
+    that failed to build — otherwise the next redraw would wrongly
+    assume that key's (nonexistent) bus was still open and skip
+    rebuilding it.
+    """
+    pad, _, displays, _, hid_device, _, _, _ = _build_pad()
+    pad.step(0)  # power-on paint of all six keys
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF81F, emoji_id=0xA2))
+    displays.fail_next(2)
+
+    with pytest.raises(RuntimeError):
+        pad.step(1000)
+
+    assert pad._active_key_index is None
+    assert pad._active_display is None
 
 
 def test_blink_redraw_does_not_call_emoji_lookup_again():

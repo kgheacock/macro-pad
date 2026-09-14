@@ -98,8 +98,11 @@ class MacroPad:
     a test drive `step` one iteration at a time with fakes. `build_display`
     replaces a pre-built list of displays (task 0032): this board allows
     only 1 concurrent display bus, so `build_display(key_index)` is
-    called to build one key's bus just before its redraw, and the bus is
-    released again immediately after — see `display_render.render_key_with_builder`.
+    called to build one key's bus. Task 0040 changed when: the bus for
+    the key that currently owns it (`_active_key_index`) stays open
+    across repeat redraws of that same key, and is only released and
+    rebuilt when a different key's turn comes up — see
+    `_render_dirty_keys`.
     """
 
     def __init__(
@@ -147,6 +150,10 @@ class MacroPad:
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
         self._dirty = set(range(len(self.key_states)))
+        # Which key's display bus is currently open, and that bus itself.
+        # Both `None` until the first redraw — see `_render_dirty_keys`.
+        self._active_key_index = None
+        self._active_display = None
 
     def _restore_key_state(self, key_index):
         """Build one key's starting `KeyState`: its last persisted state,
@@ -338,11 +345,15 @@ class MacroPad:
         time, not on `step`'s own iteration rate, is what makes the
         toggle a human-visible blink instead of a flicker.
 
-        Each redraw builds its own display bus and releases it again
-        (task 0032) — this board allows only 1 concurrent display bus, so
-        `render_key_with_builder` must fully return, releasing the bus,
-        before the next dirty key's turn. The bus is rebuilt every time,
-        but each key's own `Group`/`Palette`/glyph `TileGrid` are not:
+        This board allows only 1 concurrent display bus (task 0032), so
+        `_active_key_index`/`_active_display` track which key currently
+        owns the open bus. A redraw for that same key reuses the live
+        display, leaving its reset line untouched. A redraw for a
+        different key releases the current bus first, then builds the
+        new one — task 0040, replacing the old build-then-release-every-
+        redraw path, which pulsed the display's hardware reset on every
+        single redraw and made real hardware lose its color. Each key's
+        own `Group`/`Palette`/glyph `TileGrid` are unaffected either way:
         `render_key` builds them once per key, on `self.key_states[index]`,
         and mutates that same scene graph on every later call (task 0033),
         so a redraw touches only the region that actually changed.
@@ -351,8 +362,17 @@ class MacroPad:
             due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]
             if index not in self._dirty and not due_to_blink:
                 continue
-            display_render.render_key_with_builder(
-                lambda: self._build_display(index), key_state, self._emoji_lookup
+
+            if index != self._active_key_index:
+                if self._active_display is not None:
+                    displayio.release_displays()
+                    self._active_display = None
+                    self._active_key_index = None
+                self._active_display = self._build_display(index)
+                self._active_key_index = index
+
+            display_render.render_key(
+                self._active_display, key_state, self._emoji_lookup
             )
             if key_state.blink:
                 self._next_blink_us[index] = now_us + BLINK_INTERVAL_US

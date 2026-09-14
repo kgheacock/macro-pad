@@ -105,12 +105,13 @@ value is unreserved, for a later task's emoji set.
 
 | ID | Glyph |
 |---|---|
-| `0x00` | Placeholder — a filled box, drawn for any ID this table does not reserve |
+| `0x00` | Blank — a plain background-colored tile, drawn for any ID this table does not reserve |
 | `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied, never sent by the driver itself |
 
-`firmware/glyphs.py` draws the placeholder bitmap for any Emoji ID a Key
-state message carries, `0x00` included. `0xFE` is never sent by the
-driver on that field — a key reaches it only by way of a [Set custom
+`firmware/glyphs.py` draws a plain background-colored tile for any Emoji
+ID a Key state message carries, `0x00` included — it holds no glyph
+bitmap of its own. `0xFE` is never sent by the driver on that field — a
+key reaches it only by way of a [Set custom
 glyph](#set-custom-glyph-cdc-host--device) message, which bypasses
 `firmware/glyphs.py` entirely. See
 [`firmware/README.md`](../firmware/README.md#glyphs) for how a glyph

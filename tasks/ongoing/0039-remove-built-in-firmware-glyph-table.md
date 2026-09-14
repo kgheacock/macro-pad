@@ -99,9 +99,19 @@ with its key index.
 ## Design
 
 `firmware/glyphs.py` stops being generated. It keeps `PLACEHOLDER_ID` and a
-`lookup(emoji_id, foreground, background)` that always returns the
-placeholder box, so `code.py`'s `emoji_lookup` and `display_render.py` need
-no change.
+`lookup(emoji_id, foreground, background)` that always returns a plain
+background-colored tile, so `code.py`'s `emoji_lookup` and
+`display_render.py` need no change.
+
+**Mid-implementation addition:** the original design (below) kept the
+placeholder rendering a filled foreground-colored box, matching its
+pre-existing look. Implementing that, plus keystate.html's Reset sending
+`emojiId: 0`, surfaced a real defect: `0x00`'s box painted over a key's
+Color instead of showing it. Since the box carried no information once
+the digits were gone, the fix folded into this task instead of shipping
+known-broken behavior: `lookup` now returns a bitmap filled entirely with
+`background`, so `0x00` shows a plain color with no glyph, rather than a
+white box hiding it.
 
 Files to change:
 
@@ -136,6 +146,10 @@ Files to change:
   returns nothing
 - [x] **DoD-5** — `test/test_glyphs.py` passes with only the placeholder
   test left. **Proof:** `pytest test/test_glyphs.py` passes with 1 test
+- [x] **DoD-8** — `glyphs.lookup`'s bitmap no longer paints a foreground
+  box over the requested background color. **Proof:** every pixel in
+  `_blank_bitmap()` is palette index `0`, which `lookup` always maps to
+  `background`
 - [x] **DoD-6** — The full firmware test suite still passes with the
   smaller table. **Proof:** `pytest test/` passes (78 passed)
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**

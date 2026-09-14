@@ -134,21 +134,34 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — Two consecutive redraws of the same key build the
+- [x] **DoD-1** — Two consecutive redraws of the same key build the
   display exactly once. **Proof:** a `test/test_app.py` test asserts the
   display-builder function is called once across two redraws of one key.
-- [ ] **DoD-2** — Redrawing a different key releases the first display
+  `test_active_key_reuses_display_bus_across_redraws` asserts
+  `displays.calls == [3]` while both redraws still ran.
+- [x] **DoD-2** — Redrawing a different key releases the first display
   before building the second. **Proof:** a `test/test_app.py` test asserts
   release happens before the second build, and both are never open at once.
-- [ ] **DoD-3** — The full test suite passes. **Proof:** `pytest test/`
-  passes with no board attached.
+  `test_switching_keys_releases_bus_before_building_next` asserts the
+  builder observed `displayio.release_display_count` already incremented
+  at the moment it was called; `test_display_build_failure_leaves_no_active_key`
+  covers the Risks note below, that a build failure after release leaves
+  `_active_key_index` at `None`, not the new key's index.
+- [x] **DoD-3** — The full test suite passes. **Proof:** `pytest test/`
+  passes with no board attached. `.venv/bin/pytest test/ -q` → 82 passed.
 - [ ] **DoD-4** — On real hardware, five consecutive `keystate.html` Set
   clicks to the same key, each a different color, all hold correctly. No
   flash to the color's inverse, no revert to black. **Proof:** a person
   watches the panel through all five clicks and records the result in this
   spec's Notes.
-- [ ] **DoD-5** — `firmware/README.md` documents the new bus lifecycle and
-  links this spec. **Proof:** `firmware/README.md`.
+  Not confirmed — this proof needs a person watching the real board
+  through `keystate.html`, which this implementation pass did not have
+  access to. Still open.
+- [x] **DoD-5** — `firmware/README.md` documents the new bus lifecycle and
+  links this spec. **Proof:** `firmware/README.md`. The "Display bus"
+  section now documents `_active_key_index`/`_active_display` and links
+  this spec; the blink-latency and per-key-switch-latency sections were
+  also updated since they described the old per-redraw rebuild.
 - [ ] **DoD-6** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
 

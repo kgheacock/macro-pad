@@ -116,6 +116,18 @@ per-call process start, the same trade task 0034 already accepted for
 
 ## Design
 
+**Update, during implementation:** current WeasyPrint (the version `pip
+install weasyprint` gets today) dropped `HTML.write_png()` — since
+v53 it renders to PDF only. `tools/render_html.py` renders to a
+128×128-sized one-page PDF with WeasyPrint, then rasterizes that page
+to a PNG with PyMuPDF (`pip install pymupdf`), a second new dependency
+this section did not originally name. PyMuPDF's wheel bundles its own
+PDF engine, so it needs no extra system libraries beyond what
+WeasyPrint itself needs. Network-blocking moved from `base_url=None`
+alone to `weasyprint.urls.URLFetcher(allowed_protocols=[])`, WeasyPrint's
+own mechanism for the same guarantee — `base_url=None` alone does not
+stop an absolute remote URL from resolving.
+
 Files to change:
 
 - `tools/render_html.py` — new. Takes an HTML file path and an output
@@ -133,31 +145,42 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `macrodriver html --key 0 --file testdata/sample.html
+- [x] **DoD-1** — `macrodriver html --key 0 --file testdata/sample.html
   --emulate` ends with the emulator's last custom glyph holding
   non-empty pixels. **Proof:** a driver test stubs `renderHTMLPNG` and
   asserts `Emulator.LastCustomGlyph()`, matching
   `TestRunEmoji_Emulate`'s shape.
-- [ ] **DoD-2** — A `<script>` tag in the input HTML has no effect on
+  `TestRunHtml_Emulate` in `driver/cmd/macrodriver/html_test.go`; passes.
+- [x] **DoD-2** — A `<script>` tag in the input HTML has no effect on
   the rendered image. **Proof:** render one HTML file whose script
   would change the background color if it ran, and one without that
   script; assert the two renders are pixel-identical.
-- [ ] **DoD-3** — A remote `<img src="http://...">` or `@font-face` URL
+  `TestRunHtml_ScriptInert`, run against the real `tools/render_html.py`
+  pipeline (python3 + WeasyPrint + PyMuPDF); passes.
+- [x] **DoD-3** — A remote `<img src="http://...">` or `@font-face` URL
   does not make the render hang. **Proof:** render HTML naming an
   unreachable URL and assert the call returns within a fixed timeout in
   a test.
-- [ ] **DoD-4** — A missing `python3` or WeasyPrint produces one line
+  `TestRunHtml_RemoteURLDoesNotHang`, real pipeline, 10s deadline;
+  returns in well under a second because `render_html.py`'s
+  `URLFetcher(allowed_protocols=[])` rejects the URL before any socket
+  opens.
+- [x] **DoD-4** — A missing `python3` or WeasyPrint produces one line
   naming the missing dependency, not a stack trace. **Proof:** a test
   stubs `exec.LookPath` (or the import check) to fail and asserts the
   error text and a non-zero exit code, matching
   `TestRunEmoji_MissingPython3`.
-- [ ] **DoD-5** — Tests cover the new subcommand and its script- and
+  `TestRunHtml_MissingPython3`; passes.
+- [x] **DoD-5** — Tests cover the new subcommand and its script- and
   network-inertness cases. **Proof:** `go test
   ./driver/cmd/macrodriver/... -run Html` passes; the same command on
   `main` reports no matching tests.
-- [ ] **DoD-6** — `driver/README.md` documents the new command and the
+  Confirmed both halves directly.
+- [x] **DoD-6** — `driver/README.md` documents the new command and the
   supported HTML/CSS subset. **Proof:** `driver/README.md`, the section
   next to `macrodriver emoji`.
+  New "`macrodriver html`" section added right after "`macrodriver
+  emoji`".
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.
 

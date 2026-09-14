@@ -375,9 +375,10 @@ separate tool. See task 0029.
 [`driver/plugin/web/keystate.html`](plugin/web/keystate.html) is a
 second static page, for administering key state rather than simulating a
 press: a table of the 6 keys, each row with a color picker, an emoji ID
-field, and a blink checkbox, a Set button, a Reset button, and a status
-column (unknown/pending/confirmed). Set sends `setKeyState` and marks the
-row "pending" until the daemon's own rebroadcast for that exact state
+field, an emoji character field, and a blink checkbox, a Set button, a
+Set emoji button, a Reset button, and a status column
+(unknown/pending/confirmed). Set sends `setKeyState` and marks the row
+"pending" until the daemon's own rebroadcast for that exact state
 arrives, then "confirmed"; a disconnect while "pending" reverts the row
 to "unknown". Reset restores a key to a defined default — a digit glyph
 (`0xF1` + the key index), blink off, a neutral color — instead of
@@ -386,8 +387,22 @@ placeholder that draws a full-screen white box, not a usable blank or
 reset value (see the Emoji ID table in
 [`docs/wire-protocol.md`](../docs/wire-protocol.md)). A row that already
 has a known state when the page connects — via the connect-time replay
-above — reads "confirmed" immediately, with no Set click needed. See task
-0036.
+above — reads "confirmed" immediately, with no Set click needed.
+
+Set emoji takes an actual typed Unicode emoji character instead of a
+numeric ID: the page rasterizes it onto an offscreen 128×128 canvas with
+the browser's own emoji font — no server round trip, unlike `macrodriver
+emoji`'s (task 0034) `tools/render_emoji.py` step — and sends the result
+as one `setCustomGlyph` message, tracked through the same
+pending/confirmed status column. The input must be exactly one Unicode
+code point that tests as emoji (JavaScript's
+`/\p{Extended_Pictographic}/u`); a plain letter is rejected with a log
+line rather than sent, since a regular letter has no glyph in Apple
+Color Emoji, the font `tools/render_emoji.py` uses, and would otherwise
+render as an unreadable blank box. Rendering arbitrary text — a letter
+included — onto a key is a separate, broader task; see
+[`tasks/backlog/0037-render-static-html-on-a-key.md`](../tasks/backlog/0037-render-static-html-on-a-key.md).
+See task 0036.
 
 ### Bounds
 

@@ -93,6 +93,16 @@
     border-radius: 6px;
     font: inherit;
   }
+  input.emojiChar {
+    width: 48px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 6px;
+    border-radius: 6px;
+    font: inherit;
+    text-align: center;
+  }
   td button {
     background: var(--panel);
     border: 1px solid var(--accent);
@@ -122,6 +132,7 @@
   }
   #log div.event { color: var(--ok); }
   #log div.setKeyState { color: var(--accent); }
+  #log div.setCustomGlyph { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -130,9 +141,11 @@
     A WebSocket client of <code>driver/plugin</code> for administering
     every key's color, emoji ID, and blink, and confirming each change
     against the daemon's own rebroadcast; requires
-    <code>macropadd --emulate</code> or a real board. To simulate a press
-    instead, see <code>virtualpad.html</code>. See "Plugin API" in
-    <code>driver/README.md</code>.
+    <code>macropadd --emulate</code> or a real board. "Emoji char" sends an
+    actual typed emoji as a custom glyph, rendered in this page with no
+    server round trip — a plain letter is rejected, not rendered blank.
+    To simulate a press instead, see <code>virtualpad.html</code>. See
+    "Plugin API" in <code>driver/README.md</code>.
   </p>
 
   <div class="bar">
@@ -148,6 +161,7 @@
         <th>Key</th>
         <th>Color</th>
         <th>Emoji ID</th>
+        <th>Emoji char</th>
         <th>Blink</th>
         <th>Status</th>
         <th>Actions</th>
@@ -182,8 +196,9 @@
 
   // rows[i] tracks one key's row: its DOM elements, its status
   // ("unknown" | "pending" | "confirmed"), and — while "pending" — the
-  // exact payload this page sent, so a matching setKeyState broadcast can
-  // be told apart from an unrelated one for the same key.
+  // kind and exact payload this page sent (pendingKind is "setKeyState"
+  // or "setCustomGlyph"), so a matching broadcast can be told apart from
+  // an unrelated one for the same key, or one of the other kind.
   const rows = [];
 
   for (let i = 0; i < KEY_COUNT; i++) {
@@ -192,23 +207,27 @@
       '<td>#' + i + '</td>' +
       '<td><input type="color" class="color" value="' + RESET_COLOR_HEX + '"></td>' +
       '<td><input type="number" class="emoji" min="0" max="255" value="0"></td>' +
+      '<td><input type="text" class="emojiChar" maxlength="4" placeholder="\u{1F600}"></td>' +
       '<td><input type="checkbox" class="blink"></td>' +
       '<td class="status-cell unknown">unknown</td>' +
-      '<td><button class="set">Set</button><button class="reset">Reset</button></td>';
+      '<td><button class="set">Set</button> <button class="setEmoji">Set emoji</button> <button class="reset">Reset</button></td>';
     rowsEl.appendChild(tr);
 
     const row = {
       keyIndex: i,
       status: "unknown",
+      pendingKind: null,
       pendingPayload: null,
       colorEl: tr.querySelector(".color"),
       emojiEl: tr.querySelector(".emoji"),
+      emojiCharEl: tr.querySelector(".emojiChar"),
       blinkEl: tr.querySelector(".blink"),
       statusEl: tr.querySelector(".status-cell"),
     };
     rows.push(row);
 
     tr.querySelector(".set").addEventListener("click", () => sendSet(row));
+    tr.querySelector(".setEmoji").addEventListener("click", () => sendSetEmoji(row));
     tr.querySelector(".reset").addEventListener("click", () => sendReset(row));
   }
 
@@ -247,13 +266,17 @@
   function sendSet(row) {
     const payload = payloadFromRow(row);
     if (!sendSetKeyState(payload)) return;
+    row.pendingKind = "setKeyState";
     row.pendingPayload = payload;
     setRowStatus(row, "pending");
   }
 
   // sendReset restores row's key to a defined default: a digit glyph
   // (never the 0x00 placeholder), blink off, and a neutral color — not
-  // whatever the editor fields currently hold.
+  // whatever the editor fields currently hold. A digit glyph is a
+  // built-in Emoji ID, so this also switches the key back off any custom
+  // glyph "Set emoji" sent it — see docs/wire-protocol.md's "Set custom
+  // glyph" section.
   function sendReset(row) {
     const payload = {
       keyIndex: row.keyIndex,
@@ -262,7 +285,88 @@
       blink: false,
     };
     if (!sendSetKeyState(payload)) return;
+    row.pendingKind = "setKeyState";
     row.pendingPayload = payload;
+    setRowStatus(row, "pending");
+  }
+
+  // EMOJI_REGEX tests a single code point for emoji-ness. Restricting
+  // "Set emoji" to this keeps it from becoming a general text-to-glyph
+  // feature — a plain letter renders fine on this page's own canvas, but
+  // that job belongs to tasks/backlog/0037-render-static-html-on-a-key.md,
+  // not this one.
+  const EMOJI_REGEX = /\p{Extended_Pictographic}/u;
+
+  // CUSTOM_GLYPH_SIZE matches transport.CustomGlyphWidth /
+  // transport.CustomGlyphHeight — the fixed size DecodePNGToRGB565
+  // requires, checked before any bytes reach the wire.
+  const CUSTOM_GLYPH_SIZE = 128;
+
+  // singleEmojiCodepoint returns value trimmed if it is exactly one
+  // Unicode code point that tests as emoji, or null otherwise.
+  // Array.from splits by code point, not UTF-16 code unit, so an astral
+  // emoji (most of them) still counts as one entry.
+  function singleEmojiCodepoint(value) {
+    const trimmed = value.trim();
+    if (Array.from(trimmed).length !== 1) return null;
+    if (!EMOJI_REGEX.test(trimmed)) return null;
+    return trimmed;
+  }
+
+  // renderEmojiToPNGDataURL rasterizes char onto an offscreen
+  // CUSTOM_GLYPH_SIZE×CUSTOM_GLYPH_SIZE canvas — black background,
+  // matching tools/render_emoji.py's letterboxing — using the browser's
+  // own emoji-covering font, and returns it as a PNG data URL. No
+  // daemon or Python round trip: the browser already has everything
+  // tools/render_emoji.py needs Apple Color Emoji for.
+  function renderEmojiToPNGDataURL(char) {
+    const canvas = document.createElement("canvas");
+    canvas.width = CUSTOM_GLYPH_SIZE;
+    canvas.height = CUSTOM_GLYPH_SIZE;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, CUSTOM_GLYPH_SIZE, CUSTOM_GLYPH_SIZE);
+    ctx.font = Math.round(CUSTOM_GLYPH_SIZE * 0.75) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(char, CUSTOM_GLYPH_SIZE / 2, CUSTOM_GLYPH_SIZE / 2 + 2);
+    return canvas.toDataURL("image/png");
+  }
+
+  // dataURLToBase64 strips a data: URL's "data:<mime>;base64," prefix,
+  // leaving the same base64 text encoding/json expects for a []byte
+  // field — SetCustomGlyphPayload.Image on the Go side.
+  function dataURLToBase64(dataURL) {
+    return dataURL.slice(dataURL.indexOf(",") + 1);
+  }
+
+  function sendSetCustomGlyph(keyIndex, imageBase64) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("event", "not connected: setCustomGlyph not sent");
+      return false;
+    }
+    ws.send(JSON.stringify({
+      kind: "setCustomGlyph",
+      setCustomGlyph: { keyIndex: keyIndex, image: imageBase64 },
+    }));
+    return true;
+  }
+
+  // sendSetEmoji validates row's "Emoji char" field, rejecting anything
+  // that is not exactly one emoji code point — a plain letter included —
+  // with a log line and no send, rather than sending a character
+  // tools/render_emoji.py's font would draw as an unreadable blank box.
+  function sendSetEmoji(row) {
+    const raw = row.emojiCharEl.value;
+    const char = singleEmojiCodepoint(raw);
+    if (!char) {
+      log("event", "key " + row.keyIndex + ": " + JSON.stringify(raw) + " is not a single emoji character, not sent");
+      return;
+    }
+    const imageBase64 = dataURLToBase64(renderEmojiToPNGDataURL(char));
+    if (!sendSetCustomGlyph(row.keyIndex, imageBase64)) return;
+    row.pendingKind = "setCustomGlyph";
+    row.pendingPayload = imageBase64;
     setRowStatus(row, "pending");
   }
 
@@ -308,6 +412,7 @@
       // longer exists.
       for (const row of rows) {
         if (row.status === "pending") {
+          row.pendingKind = null;
           row.pendingPayload = null;
           setRowStatus(row, "unknown");
         }
@@ -339,15 +444,24 @@
     }
   });
 
-  // handleMessage renders the one message kind this page acts on
-  // (setKeyState) and ignores every other kind — a future protocol
-  // addition must not break this page. See virtualpad.html's
-  // handleMessage for the same convention.
+  // handleMessage renders the two message kinds this page acts on
+  // (setKeyState, setCustomGlyph) and ignores every other kind — a
+  // future protocol addition must not break this page. See
+  // virtualpad.html's handleMessage for the same convention.
   function handleMessage(msg) {
     switch (msg.kind) {
       case "setKeyState":
         onSetKeyState(msg.setKeyState);
         log("setKeyState", JSON.stringify(msg.setKeyState));
+        break;
+      case "setCustomGlyph":
+        onSetCustomGlyph(msg.setCustomGlyph);
+        // The image field is tens of kilobytes of base64; log its
+        // length instead of the full frame, or every "Set emoji" click
+        // would flood the log panel with unreadable text.
+        log("setCustomGlyph", msg.setCustomGlyph
+          ? "{keyIndex:" + msg.setCustomGlyph.keyIndex + ", image: " + (msg.setCustomGlyph.image || "").length + " base64 chars}"
+          : "{}");
         break;
       default:
         break;
@@ -364,16 +478,40 @@
     if (!row) return;
 
     if (row.status === "pending") {
-      if (!payloadsEqual(row.pendingPayload, payload)) {
-        // Some other broadcast for this key arrived while still waiting
+      if (row.pendingKind !== "setKeyState" || !payloadsEqual(row.pendingPayload, payload)) {
+        // Either this row is waiting on its own "Set emoji" instead, or
+        // some other setKeyState broadcast arrived while still waiting
         // on the exact state this row sent — leave it "pending" rather
         // than confirm the wrong state.
         return;
       }
+      row.pendingKind = null;
       row.pendingPayload = null;
     }
 
     applyPayloadToRow(row, payload);
+    setRowStatus(row, "confirmed");
+  }
+
+  // onSetCustomGlyph mirrors onSetKeyState's confirmation logic for a
+  // setCustomGlyph broadcast: an exact match against a "pending"
+  // setCustomGlyph confirms it, a mismatch (or a row pending on
+  // setKeyState instead) leaves the row alone, and any other row is set
+  // straight to "confirmed" — the image itself has no color/emoji-ID/
+  // blink fields to show, so those inputs are left untouched.
+  function onSetCustomGlyph(payload) {
+    if (!payload) return;
+    const row = rows[payload.keyIndex];
+    if (!row) return;
+
+    if (row.status === "pending") {
+      if (row.pendingKind !== "setCustomGlyph" || row.pendingPayload !== payload.image) {
+        return;
+      }
+      row.pendingKind = null;
+      row.pendingPayload = null;
+    }
+
     setRowStatus(row, "confirmed");
   }
 

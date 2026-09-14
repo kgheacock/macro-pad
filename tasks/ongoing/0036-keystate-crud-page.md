@@ -294,13 +294,29 @@ Files to change:
   for key 0 whose image decodes as a 128×128 PNG. **Proof:** manual run
   against `macropadd --emulate`; the message log shows one
   `setCustomGlyph` frame for key 0.
+  **Not confirmed:** same sandbox limit as DoD-1 — no headless browser is
+  installed here either, so even a browser-only check (no daemon) isn't
+  available. `renderEmojiToPNGDataURL` sets the canvas to
+  `CUSTOM_GLYPH_SIZE` (128) on both axes before drawing, matching
+  `transport.CustomGlyphWidth`/`Height`, by inspection.
 - [ ] **DoD-11** — Typing a plain letter into the same field and clicking
   "Set emoji" sends nothing. **Proof:** manual run; the message log gains
   no new frame, and an error line names the rejected input.
+  **Partly confirmed:** `singleEmojiCodepoint`'s validation logic itself
+  needs no browser or daemon — copied verbatim into Node and run against
+  `"😀"`, `"A"`, `"1"`, `"🚀"`, `"🇺🇸"` (flag), `"👍🏽"` (skin-tone
+  modifier), and empty/whitespace input, it accepted only the two plain
+  single-codepoint emoji and rejected every letter, digit, and multi-
+  codepoint sequence — matching `macrodriver emoji`'s (task 0034) same
+  "exactly one codepoint" scope limit. The full page (log line on
+  rejection, no `ws.send` call) still needs the manual run.
 - [ ] **DoD-12** — Key 0's row shows "pending" right after "Set emoji",
   then "confirmed" only once a `setCustomGlyph` broadcast for key 0
   arrives matching the exact image sent. **Proof:** manual run; status
   changes only after the matching broadcast, not on send.
+  **Not confirmed:** same sandbox limit as DoD-1. `onSetCustomGlyph`
+  mirrors `onSetKeyState`'s already-reasoned-through pending/confirmed
+  logic by inspection, but needs the manual run.
 
 ## Risks
 

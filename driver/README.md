@@ -127,6 +127,17 @@ Every message on the connection is JSON, shaped by
   {"kind": "setKeyState", "setKeyState": {"keyIndex": 2, "color": 63488, "emojiId": 7, "blink": true}}
   ```
 
+  **Connect-time replay.** `Server` remembers the last `setKeyState` or
+  `setCustomGlyph` message it broadcast for each key index. A client that
+  connects later is sent every remembered message, one per known key
+  index, in ascending order, right after it connects and before it sends
+  anything itself — the same message shape as a live rebroadcast, so a
+  client needs no separate code path to tell a replay from a fresh
+  change. A key never set since the daemon started is simply absent from
+  the replay; a client still reads it as unknown until a broadcast names
+  it. The cache is in-memory only and does not survive a daemon restart.
+  See task 0036.
+
 - **`injectEvent`** — client to device, virtual pad only. Becomes one
   `Injector.InjectEvent` call, simulating a press or release with no
   board attached. `NewServer`'s `injector` argument is `nil` on a
@@ -360,6 +371,38 @@ message it sees, from any connected client. The same page, and the same
 plugin code reacting to it, works unchanged against a real board once
 keys are wired — it is an ordinary WebSocket client of this API, not a
 separate tool. See task 0029.
+
+[`driver/plugin/web/keystate.html`](plugin/web/keystate.html) is a
+second static page, for administering key state rather than simulating a
+press: a table of the 6 keys, each row with a color picker, an emoji ID
+field, an emoji character field, and a blink checkbox, a Set button, a
+Set emoji button, a Reset button, and a status column
+(unknown/pending/confirmed). Set sends `setKeyState` and marks the row
+"pending" until the daemon's own rebroadcast for that exact state
+arrives, then "confirmed"; a disconnect while "pending" reverts the row
+to "unknown". Reset restores a key to a defined default — a digit glyph
+(`0xF1` + the key index), blink off, a neutral color — instead of
+whatever the emoji ID field happens to hold, because `0x00` is a reserved
+placeholder that draws a full-screen white box, not a usable blank or
+reset value (see the Emoji ID table in
+[`docs/wire-protocol.md`](../docs/wire-protocol.md)). A row that already
+has a known state when the page connects — via the connect-time replay
+above — reads "confirmed" immediately, with no Set click needed.
+
+Set emoji takes an actual typed Unicode emoji character instead of a
+numeric ID: the page rasterizes it onto an offscreen 128×128 canvas with
+the browser's own emoji font — no server round trip, unlike `macrodriver
+emoji`'s (task 0034) `tools/render_emoji.py` step — and sends the result
+as one `setCustomGlyph` message, tracked through the same
+pending/confirmed status column. The input must be exactly one Unicode
+code point that tests as emoji (JavaScript's
+`/\p{Extended_Pictographic}/u`); a plain letter is rejected with a log
+line rather than sent, since a regular letter has no glyph in Apple
+Color Emoji, the font `tools/render_emoji.py` uses, and would otherwise
+render as an unreadable blank box. Rendering arbitrary text — a letter
+included — onto a key is a separate, broader task; see
+[`tasks/backlog/0037-render-static-html-on-a-key.md`](../tasks/backlog/0037-render-static-html-on-a-key.md).
+See task 0036.
 
 ### Bounds
 

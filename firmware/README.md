@@ -163,7 +163,7 @@ Rendering any other glyph — an emoji character or an arbitrary image —
 happens on the driver side and reaches a key as a [Set custom
 glyph](../docs/wire-protocol.md#set-custom-glyph-cdc-host--device)
 message. See [task
-0039](../tasks/ongoing/0039-remove-built-in-firmware-glyph-table.md) for
+0039](../tasks/complete/0039-remove-built-in-firmware-glyph-table.md) for
 the design decision.
 
 ## Custom glyphs and persisted state

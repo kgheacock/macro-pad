@@ -1,13 +1,13 @@
 ---
 id: "0039"
 title: "Remove the built-in firmware glyph table now that the API renders emoji"
-status: "ongoing"
+status: "complete"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/37"
 branch: "0039-remove-built-in-firmware-glyph-table"
 related: ["0023", "0030", "0034", "0037"]
 tags: ["firmware", "driver", "display"]
@@ -152,7 +152,7 @@ Files to change:
   `background`
 - [x] **DoD-6** — The full firmware test suite still passes with the
   smaller table. **Proof:** `pytest test/` passes (78 passed)
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 
 ## Risks

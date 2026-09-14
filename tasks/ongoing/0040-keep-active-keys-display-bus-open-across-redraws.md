@@ -7,7 +7,7 @@ updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/38"
 branch: "0040-keep-active-keys-display-bus-open-across-redraws"
 related: ["0010", "0032", "0033"]
 tags: ["firmware", "display", "hardware", "bring-up"]
@@ -162,8 +162,9 @@ Files to change:
   section now documents `_active_key_index`/`_active_display` and links
   this spec; the blink-latency and per-key-switch-latency sections were
   also updated since they described the old per-redraw rebuild.
-- [ ] **DoD-6** — The PR in the `pr` field links to this spec. **Proof:**
-  PR body.
+- [x] **DoD-6** — The PR in the `pr` field links to this spec. **Proof:**
+  PR body. PR #38's body opens with
+  "Implements tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md".
 
 ## Risks
 

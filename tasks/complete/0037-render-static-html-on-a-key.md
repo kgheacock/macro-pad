@@ -1,13 +1,13 @@
 ---
 id: "0037"
 title: "Render static HTML to a key's 128x128 image"
-status: "ongoing"
+status: "complete"
 created: "2026-09-13"
 updated: "2026-09-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/36"
 branch: "0037-render-static-html-on-a-key"
 related: ["0030", "0034"]
 tags: ["driver", "cli", "display"]
@@ -181,8 +181,10 @@ Files to change:
   next to `macrodriver emoji`.
   New "`macrodriver html`" section added right after "`macrodriver
   emoji`".
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec.
+- [x] **DoD-7** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.
+  PR #36's body: "Implements
+  tasks/ongoing/0037-render-static-html-on-a-key.md".
 
 ## Risks
 

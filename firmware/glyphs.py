@@ -3,7 +3,7 @@
 The built-in digit glyph table that once lived here, and the placeholder
 box that stood in for an unknown ID, were both removed once the driver
 could already render any character to a key; see
-tasks/ongoing/0039-remove-built-in-firmware-glyph-table.md. See
+tasks/complete/0039-remove-built-in-firmware-glyph-table.md. See
 tasks/complete/0023-glyph-table-and-digits.md for the original glyph
 table's design decision.
 """
@@ -30,7 +30,7 @@ def lookup(emoji_id, foreground, background):
 
     Every ID draws a plain tile — no built-in glyph remains. Rendering an
     emoji character or an arbitrary image now happens on the driver side;
-    see tasks/ongoing/0039-remove-built-in-firmware-glyph-table.md.
+    see tasks/complete/0039-remove-built-in-firmware-glyph-table.md.
     """
     palette = displayio.Palette(2)
     palette[0] = background

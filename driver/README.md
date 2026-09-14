@@ -338,6 +338,43 @@ run relative to the repo root.
 A missing `python3` or Pillow (`pip install pillow`) produces one clean
 error line naming the missing dependency, not a Python stack trace.
 
+### `macrodriver html`
+
+`driver/cmd/macrodriver`'s `html` subcommand turns a static HTML file
+into a key's image, with no pre-made PNG needed. It renders the file
+with `tools/render_html.py` — WeasyPrint (no JavaScript engine, by
+design) to a one-page PDF, rasterized to a PNG with PyMuPDF — then sends
+the PNG through task 0030's `setCustomGlyph` wire path via the same
+`api.Conn.SetCustomGlyph` helper `emoji` uses — see task 0037.
+
+```bash
+go run ./driver/cmd/macrodriver html --key 0 --file page.html
+```
+
+The renderer supports the subset of HTML/CSS a 128×128 button
+plausibly needs: plain text, block and inline layout, and background
+and text color. It does not aim for pixel parity with a real browser —
+WeasyPrint has no flexbox, grid, animation, or remote web font support.
+A `<script>` tag never runs: WeasyPrint has no JavaScript engine to run
+it with. Every resource URL the HTML names — a remote `<img src>`, an
+`@font-face`, a linked stylesheet — is refused before it is fetched, so
+a render never touches the network and never hangs on an unreachable
+host; a missing local image is simply skipped, the same as a browser's
+own broken-image handling.
+
+`--addr` overrides the default `127.0.0.1:8765`; `--emulate` sends to
+an in-process emulator instead of dialing a running `macropadd`, for
+local testing with no board or daemon attached. `--script` overrides
+the default `tools/render_html.py` path, run relative to the repo root.
+
+A missing `python3`, WeasyPrint, or PyMuPDF (`pip install weasyprint
+pymupdf`) produces one clean error line naming the missing dependency,
+not a Python stack trace. WeasyPrint itself needs Cairo and Pango
+installed on the host beyond `pip install` — see [WeasyPrint's
+installation
+docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation)
+for the platform-specific step.
+
 ### Reference plugin: `driver/examples/claude-status`
 
 [`driver/examples/claude-status`](../examples/claude-status) stays

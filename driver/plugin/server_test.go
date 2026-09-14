@@ -413,6 +413,130 @@ func TestServer_SetKeyState_BroadcastsToOtherClients(t *testing.T) {
 	}
 }
 
+func TestServer_SnapshotsSetKeyStateToNewClient(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	sender := newFakeConn()
+	if s.addClient(sender) == nil {
+		t.Fatal("addClient rejected the sending client")
+	}
+
+	want := SetKeyStatePayload{KeyIndex: 4, Color: 0xF800, EmojiID: 0xF5, Blink: true}
+	sender.send(t, Message{Kind: KindSetKeyState, SetKeyState: &want})
+	waitForCondition(t, time.Second, func() bool {
+		_, ok := dev.LastKeyState()
+		return ok
+	})
+
+	// A client that connects after the fact must see key 4's confirmed
+	// state immediately, with no send of its own.
+	late := newFakeConn()
+	if s.addClient(late) == nil {
+		t.Fatal("addClient rejected the late-connecting client")
+	}
+
+	waitForCondition(t, time.Second, func() bool { return len(late.rawMessages()) > 0 })
+	got := late.messages(t)[0]
+	if got.Kind != KindSetKeyState || got.SetKeyState == nil || *got.SetKeyState != want {
+		t.Fatalf("late client got %+v, want the cached setKeyState replayed as its first message", got)
+	}
+}
+
+func TestServer_SnapshotsSetCustomGlyphToNewClient(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	sender := newFakeConn()
+	if s.addClient(sender) == nil {
+		t.Fatal("addClient rejected the sending client")
+	}
+
+	pngBytes := solidPNG(t, transport.CustomGlyphWidth, transport.CustomGlyphHeight, color.RGBA{B: 0xFF, A: 0xFF})
+	sender.send(t, Message{
+		Kind:           KindSetCustomGlyph,
+		SetCustomGlyph: &SetCustomGlyphPayload{KeyIndex: 1, Image: pngBytes},
+	})
+	waitForCondition(t, time.Second, func() bool {
+		_, ok := dev.LastCustomGlyph()
+		return ok
+	})
+
+	late := newFakeConn()
+	if s.addClient(late) == nil {
+		t.Fatal("addClient rejected the late-connecting client")
+	}
+
+	waitForCondition(t, time.Second, func() bool { return len(late.rawMessages()) > 0 })
+	got := late.messages(t)[0]
+	if got.Kind != KindSetCustomGlyph || got.SetCustomGlyph == nil || got.SetCustomGlyph.KeyIndex != 1 {
+		t.Fatalf("late client got %+v, want the cached setCustomGlyph replayed as its first message", got)
+	}
+}
+
+func TestServer_NewClientGetsNoSnapshotForUnknownKey(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	// Nothing has been set yet, so a new client's queue must stay empty
+	// until it observes a real broadcast.
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	if len(conn.rawMessages()) != 0 {
+		t.Fatalf("got %d messages on connect with nothing cached, want 0", len(conn.rawMessages()))
+	}
+}
+
+func TestServer_SnapshotReplaysEachKeyOnceInAscendingOrder(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+
+	sender := newFakeConn()
+	if s.addClient(sender) == nil {
+		t.Fatal("addClient rejected the sending client")
+	}
+
+	// Key 5 is set twice; only the second (latest) value should survive
+	// into the cache. Key 0 is set once. Sent out of ascending order, to
+	// prove the replay itself sorts by key index rather than send order.
+	sender.send(t, Message{Kind: KindSetKeyState, SetKeyState: &SetKeyStatePayload{KeyIndex: 5, Color: 1, EmojiID: 1}})
+	sender.send(t, Message{Kind: KindSetKeyState, SetKeyState: &SetKeyStatePayload{KeyIndex: 0, Color: 2, EmojiID: 2}})
+	want5 := SetKeyStatePayload{KeyIndex: 5, Color: 3, EmojiID: 3}
+	sender.send(t, Message{Kind: KindSetKeyState, SetKeyState: &want5})
+
+	waitForCondition(t, time.Second, func() bool {
+		v, ok := dev.LastKeyState()
+		return ok && v.KeyIndex == 5 && v.Color == 3
+	})
+
+	late := newFakeConn()
+	if s.addClient(late) == nil {
+		t.Fatal("addClient rejected the late-connecting client")
+	}
+
+	waitForCondition(t, time.Second, func() bool { return len(late.rawMessages()) >= 2 })
+	time.Sleep(20 * time.Millisecond) // let any unexpected extra replay land, if it would
+
+	got := late.messages(t)
+	if len(got) != 2 {
+		t.Fatalf("got %d snapshot messages, want 2 (one per distinct key index)", len(got))
+	}
+	if got[0].SetKeyState == nil || got[0].SetKeyState.KeyIndex != 0 {
+		t.Fatalf("first replayed message = %+v, want key 0 (ascending key-index order)", got[0])
+	}
+	if got[1].SetKeyState == nil || *got[1].SetKeyState != want5 {
+		t.Fatalf("second replayed message = %+v, want key 5's latest value %+v", got[1], want5)
+	}
+}
+
 func TestServer_SlowClientDoesNotBlockOthers(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()

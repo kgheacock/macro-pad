@@ -152,7 +152,8 @@ Measured blink redraw latency: N.NNN ms (RP2350, <emoji id>, glyph smaller than 
 
 ## Glyphs
 
-`firmware/glyphs.py` renders the placeholder box for any emoji ID.
+`firmware/glyphs.py` renders a plain background-colored tile for any
+emoji ID — it holds no glyph bitmap of its own.
 `display_render.render_key` draws through it via the `emoji_lookup`
 callable, so this module never appears in the render loop directly. See
 [`docs/wire-protocol.md`](../docs/wire-protocol.md#emoji-ids) for the

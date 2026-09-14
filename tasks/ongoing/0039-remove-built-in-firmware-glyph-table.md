@@ -123,21 +123,21 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — `firmware/glyphs.py` has no `SOURCES`-style digit entries.
+- [x] **DoD-1** — `firmware/glyphs.py` has no `SOURCES`-style digit entries.
   **Proof:** `grep -n "0xF1\|0xF2\|0xF3\|0xF4\|0xF5\|0xF6" firmware/glyphs.py`
   returns nothing
-- [ ] **DoD-2** — `hardware/glyphs/` and `tools/gen_glyphs.py` no longer
+- [x] **DoD-2** — `hardware/glyphs/` and `tools/gen_glyphs.py` no longer
   exist. **Proof:** `git status` shows both deleted, and `ls hardware/glyphs`
   fails
-- [ ] **DoD-3** — `docs/wire-protocol.md`'s Emoji ID table lists only
+- [x] **DoD-3** — `docs/wire-protocol.md`'s Emoji ID table lists only
   `0x00` and `0xFE`. **Proof:** the table under "## Emoji IDs"
-- [ ] **DoD-4** — Resetting a key from `keystate.html` sends no glyph ID.
+- [x] **DoD-4** — Resetting a key from `keystate.html` sends no glyph ID.
   **Proof:** `grep -n "RESET_EMOJI_BASE" driver/plugin/web/keystate.html`
   returns nothing
-- [ ] **DoD-5** — `test/test_glyphs.py` passes with only the placeholder
+- [x] **DoD-5** — `test/test_glyphs.py` passes with only the placeholder
   test left. **Proof:** `pytest test/test_glyphs.py` passes with 1 test
-- [ ] **DoD-6** — The full firmware test suite still passes with the
-  smaller table. **Proof:** `pytest test/` passes
+- [x] **DoD-6** — The full firmware test suite still passes with the
+  smaller table. **Proof:** `pytest test/` passes (78 passed)
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 

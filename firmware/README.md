@@ -152,30 +152,18 @@ Measured blink redraw latency: N.NNN ms (RP2350, <emoji id>, glyph smaller than 
 
 ## Glyphs
 
-`firmware/glyphs.py` maps a wire-protocol emoji ID to a one-bit glyph
-bitmap. `display_render.render_key` draws through it via the
-`emoji_lookup` callable, so this module never appears in the render loop
-directly. See [`docs/wire-protocol.md`](../docs/wire-protocol.md#emoji-ids)
-for the reserved IDs.
+`firmware/glyphs.py` renders the placeholder box for any emoji ID.
+`display_render.render_key` draws through it via the `emoji_lookup`
+callable, so this module never appears in the render loop directly. See
+[`docs/wire-protocol.md`](../docs/wire-protocol.md#emoji-ids) for the
+reserved IDs.
 
-The file is generated, not hand-written. To add or change a glyph:
-
-1. Add or replace a 128×128 PNG in [`../hardware/glyphs/`](../hardware/glyphs/),
-   named after the emoji ID's source, and add its emoji ID to
-   `tools/gen_glyphs.py`'s `SOURCES` dict if it's new.
-2. Install the one build-time dependency this needs (not required to run
-   the test suite otherwise) and regenerate:
-
-   ```bash
-   .venv/bin/pip install pillow
-   .venv/bin/python3 tools/gen_glyphs.py
-   ```
-
-3. Commit both the PNG and the regenerated `firmware/glyphs.py`.
-
-Running the generator again with no source changes must leave
-`firmware/glyphs.py` byte-identical — that's what keeps a hand-edit of
-the generated file visible in review.
+Rendering any other glyph — an emoji character or an arbitrary image —
+happens on the driver side and reaches a key as a [Set custom
+glyph](../docs/wire-protocol.md#set-custom-glyph-cdc-host--device)
+message. See [task
+0039](../tasks/ongoing/0039-remove-built-in-firmware-glyph-table.md) for
+the design decision.
 
 ## Custom glyphs and persisted state
 

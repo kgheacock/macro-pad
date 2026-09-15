@@ -96,7 +96,9 @@ the purpose of [Emoji IDs](#emoji-ids) — becomes the reserved sentinel
 `0xFE`, "this key's last custom image," not the numeric Emoji ID of
 whatever built-in glyph the key showed before. A later ordinary Key state
 message naming a built-in Emoji ID switches the key back to the glyph
-table, replacing the custom image.
+table, replacing the custom image. A later Key state message that names
+`0xFE` itself instead keeps the custom image in place, and applies only
+that message's Color and Blink fields — see [Emoji IDs](#emoji-ids).
 
 ## Emoji IDs
 
@@ -106,16 +108,20 @@ value is unreserved, for a later task's emoji set.
 | ID | Glyph |
 |---|---|
 | `0x00` | Blank — a plain background-colored tile, drawn for any ID this table does not reserve |
-| `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied, never sent by the driver itself |
+| `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied. A Key state message may also name it, to toggle Color or Blink on the image already in place, without resending it |
 
 `firmware/glyphs.py` draws a plain background-colored tile for any Emoji
 ID a Key state message carries, `0x00` included — it holds no glyph
-bitmap of its own. `0xFE` is never sent by the driver on that field — a
-key reaches it only by way of a [Set custom
+bitmap of its own. A key first reaches `0xFE` by way of a [Set custom
 glyph](#set-custom-glyph-cdc-host--device) message, which bypasses
-`firmware/glyphs.py` entirely. See
-[`firmware/README.md`](../firmware/README.md#glyphs) for how a glyph
-reaches a key.
+`firmware/glyphs.py` entirely. A driver may then send an ordinary Key
+state message naming `0xFE` to toggle that key's Blink or Color while
+keeping the image; firmware keeps `pixels` set instead of clearing it, as
+it would for a built-in Emoji ID. Sending `0xFE` for a key with no stored
+image is defined, not an error: with no pixels to show, the key falls
+through to `firmware/glyphs.py` like any other unreserved ID, and renders
+blank. See [`firmware/README.md`](../firmware/README.md#glyphs) for how a
+glyph reaches a key.
 
 ### Press/release event (CDC, device → host)
 

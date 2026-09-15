@@ -1,13 +1,13 @@
 ---
 id: "0041"
 title: "Show a key's color behind its custom glyph, and blink only the background"
-status: "ongoing"
+status: "complete"
 created: "2026-09-14"
 updated: "2026-09-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/40"
 branch: "0041-color-and-blink-behind-custom-glyph"
 related: ["0030", "0033", "0035", "0038", "0039"]
 tags: ["firmware", "driver", "display", "wire-protocol"]
@@ -169,8 +169,10 @@ Files to change:
   "Set custom glyph" and "Emoji IDs".
   Confirmed: both sections updated with the RGBA4444 bit layout, the
   one-bit alpha convention, and the transparent-pixel blink meaning.
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
+  Confirmed: [PR #40](https://github.com/kgheacock/macro-pad/pull/40)'s
+  body names `tasks/ongoing/0041-color-and-blink-behind-custom-glyph.md`.
 
 ## Risks
 

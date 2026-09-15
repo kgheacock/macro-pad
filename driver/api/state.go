@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/kgheacock/macro-pad/driver/plugin"
+	"github.com/kgheacock/macro-pad/driver/transport"
 )
 
 // wsConn is the subset of *websocket.Conn Conn needs. Tests substitute a
@@ -27,6 +29,9 @@ type wsConn interface {
 // API.
 type Conn struct {
 	ws wsConn
+
+	mu     sync.Mutex
+	colors map[int]uint16 // last Color field sent per key, for SetCustomGlyphBlink
 }
 
 // Dial opens a plugin connection to the driver's WebSocket server at addr,
@@ -62,6 +67,7 @@ func (c *Conn) ReadMessage() (plugin.Message, error) {
 // flag — there is no way to change only the emoji on the wire. Call
 // SetState instead when color or blink matters too.
 func (c *Conn) SetEmoji(key int, id byte) error {
+	c.rememberColor(key, 0)
 	return c.send(plugin.Message{
 		Kind: plugin.KindSetKeyState,
 		SetKeyState: &plugin.SetKeyStatePayload{
@@ -78,6 +84,7 @@ func (c *Conn) SetEmoji(key int, id byte) error {
 // in a single call, matching the raw JSON shape driver/README.md's Plugin
 // API section documents.
 func (c *Conn) SetKeyState(key int, color uint16, emojiID byte, blink bool) error {
+	c.rememberColor(key, color)
 	return c.send(plugin.Message{
 		Kind: plugin.KindSetKeyState,
 		SetKeyState: &plugin.SetKeyStatePayload{
@@ -126,6 +133,7 @@ func (c *Conn) SetState(key int, state string, color *uint16) error {
 	if color != nil {
 		col = *color
 	}
+	c.rememberColor(key, col)
 	return c.send(plugin.Message{
 		Kind: plugin.KindSetKeyState,
 		SetKeyState: &plugin.SetKeyStatePayload{
@@ -149,6 +157,44 @@ func (c *Conn) SetCustomGlyph(key int, pngBytes []byte) error {
 			Image:    pngBytes,
 		},
 	})
+}
+
+// SetCustomGlyphBlink toggles blink on the image key's last SetCustomGlyph
+// call uploaded, at the key's current color, with no image bytes on the
+// wire — see the Key state message naming transport.CustomGlyphSentinelEmojiID
+// in docs/wire-protocol.md's "Emoji IDs" section. Calling this for a key
+// with no custom image in place leaves the key blank, per that same
+// section.
+func (c *Conn) SetCustomGlyphBlink(key int, blink bool) error {
+	return c.send(plugin.Message{
+		Kind: plugin.KindSetKeyState,
+		SetKeyState: &plugin.SetKeyStatePayload{
+			KeyIndex: byte(key),
+			Color:    c.colorFor(key),
+			EmojiID:  transport.CustomGlyphSentinelEmojiID,
+			Blink:    blink,
+		},
+	})
+}
+
+// rememberColor records color as the last Color field sent for key, so a
+// later SetCustomGlyphBlink call can resend it instead of resetting the
+// key's color to 0 — see SetCustomGlyphBlink.
+func (c *Conn) rememberColor(key int, color uint16) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.colors == nil {
+		c.colors = make(map[int]uint16)
+	}
+	c.colors[key] = color
+}
+
+// colorFor returns the last Color field rememberColor recorded for key,
+// or 0 if none has been sent yet.
+func (c *Conn) colorFor(key int) uint16 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.colors[key]
 }
 
 // Signal broadcasts a plugin.KindSignal message naming name for key. A

@@ -644,6 +644,28 @@ def test_built_in_glyph_replaces_custom_image():
     assert pad.key_states[1].emoji_id == 0xF1
 
 
+def test_key_state_naming_custom_glyph_sentinel_keeps_image_and_blinks():
+    pad, _, _, _, hid_device, serial, _, _ = _build_pad()
+
+    pad.step(0)
+    serial.feed(_custom_glyph_frame(key_index=1, fill_byte=0xAB))
+    pad.step(1000)
+    assert pad.key_states[1].pixels == _custom_glyph_pixels(0xAB)
+
+    hid_device.feed(
+        _key_state_report(
+            key_index=1,
+            color=0xF800,
+            emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+            blink=True,
+        )
+    )
+    pad.step(2000)
+
+    assert pad.key_states[1].pixels == _custom_glyph_pixels(0xAB)
+    assert pad.key_states[1].blink is True
+
+
 def test_custom_glyph_wakes_backlight():
     idle_timer = IdleTimer(idle_window_us=5000)
     pad, _, _, backlights, _, serial, _, _ = _build_pad(idle_timer=idle_timer)

@@ -123,22 +123,22 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — After a Set custom glyph message, a Key state message
+- [x] **DoD-1** — After a Set custom glyph message, a Key state message
   naming `0xFE` and `Blink=true` keeps the image and blinks it.
   **Proof:** a firmware pytest sends both messages through `MacroPad`
   and asserts `key_state.pixels` is unchanged and `key_state.blink` is
   `True`.
-- [ ] **DoD-2** — A Key state message naming a built-in Emoji ID still
+- [x] **DoD-2** — A Key state message naming a built-in Emoji ID still
   clears `pixels`, matching today's behavior. **Proof:** a firmware
   pytest asserts `key_state.pixels is None` after such a message.
-- [ ] **DoD-3** — `SetCustomGlyphBlink` sends no image bytes, only the
+- [x] **DoD-3** — `SetCustomGlyphBlink` sends no image bytes, only the
   6-byte Key state message. **Proof:** a driver test asserts the sent
   message has no `SetCustomGlyph` payload.
-- [ ] **DoD-4** — Tests cover the sentinel-preserving path and the
+- [x] **DoD-4** — Tests cover the sentinel-preserving path and the
   built-in-ID-clearing path. **Proof:** `pytest test/test_app.py -k
   custom_glyph` passes. `git stash && pytest test/test_app.py -k
   custom_glyph` fails on `main`.
-- [ ] **DoD-5** — `docs/wire-protocol.md` records the changed meaning
+- [x] **DoD-5** — `docs/wire-protocol.md` records the changed meaning
   of a Key state message naming `0xFE`. **Proof:** `docs/wire-
   protocol.md`, "Emoji IDs".
 - [ ] **DoD-6** — The PR in the `pr` field links to this spec.

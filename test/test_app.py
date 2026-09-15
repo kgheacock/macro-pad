@@ -230,14 +230,36 @@ def _custom_glyph_pixels(fill_byte):
     return bytes([fill_byte]) * wire.CUSTOM_GLYPH_PIXELS_SIZE
 
 
-def _custom_glyph_frame(key_index, fill_byte):
+def _custom_glyph_frame_with_pixels(key_index, pixels):
     """Build the raw framed bytes a host would write to CDC for one Set
     custom glyph message, ready to feed to a `FakeSerial`.
     """
     writer = FakeSerial()
-    payload = bytes((key_index,)) + _custom_glyph_pixels(fill_byte)
+    payload = bytes((key_index,)) + pixels
     wire.write_frame(writer, wire.MESSAGE_TYPE_SET_CUSTOM_GLYPH, payload)
     return bytes(writer.written)
+
+
+def _custom_glyph_frame(key_index, fill_byte):
+    return _custom_glyph_frame_with_pixels(key_index, _custom_glyph_pixels(fill_byte))
+
+
+def _rgba4444_solid_pixels(r4, g4, b4):
+    """A 128x128 raw RGBA4444 buffer (task 0041), solid opaque
+    (r4, g4, b4) — one little-endian pixel repeated. See
+    driver/transport/glyph.go's DecodePNGToRGBA4444 for the bit layout.
+    """
+    pixel = bytes(((g4 << 4) | b4, 0xF0 | r4))
+    return pixel * (wire.CUSTOM_GLYPH_PIXELS_SIZE // 2)
+
+
+def _rgba4444_pixels_with_transparent_corner(r4, g4, b4):
+    """`_rgba4444_solid_pixels`, except pixel 0 (the top-left corner) is
+    fully transparent (alpha nibble 0) instead of opaque (r4, g4, b4).
+    """
+    pixels = bytearray(_rgba4444_solid_pixels(r4, g4, b4))
+    pixels[0:2] = bytes((0x00, 0x00))
+    return bytes(pixels)
 
 
 def test_key_state_applies_to_one_key():
@@ -664,6 +686,110 @@ def test_key_state_naming_custom_glyph_sentinel_keeps_image_and_blinks():
 
     assert pad.key_states[1].pixels == _custom_glyph_pixels(0xAB)
     assert pad.key_states[1].blink is True
+
+
+def test_custom_glyph_transparent_pixel_shows_key_color():
+    """Task 0041 DoD-1: a custom glyph's transparent pixel must show the
+    key's own color, not a baked-in one.
+    """
+    pad, _, displays, _, hid_device, serial, _, _ = _build_pad()
+
+    pad.step(0)  # power-on paint of all six keys
+    hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0x00))
+    pad.step(1000)  # applies the key's color
+
+    pixels = _rgba4444_pixels_with_transparent_corner(0xF, 0x0, 0x0)  # opaque red
+    serial.feed(_custom_glyph_frame_with_pixels(key_index=4, pixels=pixels))
+    pad.step(2000)  # applies the custom glyph
+
+    group = displays.per_key[4].shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0x07E0)
+    corner_index = glyph.bitmap[0]
+    assert glyph.pixel_shader.is_transparent(corner_index)
+    assert glyph.hidden is False
+
+
+def test_custom_glyph_blink_toggles_background_when_transparent():
+    """Task 0041 DoD-2: while a key showing a transparent-pixel custom
+    glyph blinks, its opaque glyph pixels must stay on screen every
+    frame — the glyph is never hidden — and only the background color
+    alternates between the key's color and black.
+    """
+    pad, _, displays, _, hid_device, serial, _, _ = _build_pad()
+
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0x00))
+    pad.step(1000)
+
+    pixels = _rgba4444_pixels_with_transparent_corner(0xF, 0x0, 0x0)  # opaque red
+    serial.feed(_custom_glyph_frame_with_pixels(key_index=4, pixels=pixels))
+    pad.step(2000)
+
+    hid_device.feed(
+        _key_state_report(
+            key_index=4,
+            color=0x07E0,
+            emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+            blink=True,
+        )
+    )
+    pad.step(3000)  # applies blink
+
+    group = displays.per_key[4].shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+    opaque_pixel = glyph.bitmap[128 * 128 - 1]  # not the transparent corner
+
+    assert glyph.hidden is False
+    first_bg = background.pixel_shader[0]
+
+    pad.step(3000 + BLINK_INTERVAL_US)  # blink interval elapsed
+    assert glyph.hidden is False
+    assert glyph.bitmap[128 * 128 - 1] == opaque_pixel
+    second_bg = background.pixel_shader[0]
+    assert second_bg != first_bg
+    assert {first_bg, second_bg} == {_rgb565_to_rgb888(0x07E0), 0x000000}
+
+    pad.step(3000 + 2 * BLINK_INTERVAL_US)  # interval elapsed again
+    assert glyph.hidden is False
+    assert background.pixel_shader[0] == first_bg
+
+
+def test_custom_glyph_opaque_keeps_whole_image_blink_toggle():
+    """Task 0041 DoD-3: a custom glyph with no transparent pixel keeps
+    today's whole-image blink toggle — the glyph's `hidden` flag
+    alternates, not the background.
+    """
+    pad, _, displays, _, hid_device, serial, _, _ = _build_pad()
+
+    pad.step(0)
+    pixels = _rgba4444_solid_pixels(0xF, 0x0, 0x0)  # fully opaque, no transparency
+    serial.feed(_custom_glyph_frame_with_pixels(key_index=4, pixels=pixels))
+    pad.step(1000)
+
+    hid_device.feed(
+        _key_state_report(
+            key_index=4,
+            color=0x07E0,
+            emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+            blink=True,
+        )
+    )
+    pad.step(2000)  # applies blink
+
+    group = displays.per_key[4].shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+    first_hidden = glyph.hidden
+    first_bg = background.pixel_shader[0]
+
+    pad.step(2000 + BLINK_INTERVAL_US)
+    assert glyph.hidden != first_hidden
+    assert background.pixel_shader[0] == first_bg
+
+    pad.step(2000 + 2 * BLINK_INTERVAL_US)
+    assert glyph.hidden == first_hidden
+    assert background.pixel_shader[0] == first_bg
 
 
 def test_custom_glyph_wakes_backlight():

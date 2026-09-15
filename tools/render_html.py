@@ -60,8 +60,8 @@ def render(input_path, output_path):
     # A page-size CSS rule in the input HTML can win the cascade over
     # _PAGE_CSS above, and the zoom math can round to CANVAS_SIZE +/-
     # 1px; resize as a last resort so the output is always exactly
-    # CANVAS_SIZE square — transport.DecodePNGToRGB565 rejects any other
-    # size.
+    # CANVAS_SIZE square — transport.DecodePNGToRGBA4444 rejects any
+    # other size.
     if rendered.size != (CANVAS_SIZE, CANVAS_SIZE):
         rendered = rendered.resize((CANVAS_SIZE, CANVAS_SIZE), Image.NEAREST)
     rendered.save(output_path, "PNG")

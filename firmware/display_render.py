@@ -43,13 +43,14 @@ class DisplayLike(Protocol):
 
 EmojiLookup = Callable[[str, int], displayio.TileGrid]
 
-# A custom glyph's raw pixel buffer is 128x128 RGB565 — see "Set custom
+# A custom glyph's raw pixel buffer is 128x128 RGBA4444 — see "Set custom
 # glyph" in docs/wire-protocol.md. Matches wire.CUSTOM_GLYPH_WIDTH/HEIGHT,
 # not imported here so this module stays usable with a stub emoji_id type
 # in tests that never touch wire.py.
 _CUSTOM_GLYPH_WIDTH = 128
 _CUSTOM_GLYPH_HEIGHT = 128
-_CUSTOM_GLYPH_COLOR_COUNT = 65536  # every value a 16-bit RGB565 pixel can hold
+_CUSTOM_GLYPH_PIXEL_COUNT = _CUSTOM_GLYPH_WIDTH * _CUSTOM_GLYPH_HEIGHT
+_RGB565_COLOR_COUNT = 65536  # every value a 16-bit RGB565 pixel can hold
 
 # Matches code.py's DISPLAY_WIDTH/DISPLAY_HEIGHT (the real ST7735R panel
 # size). A bare 1x1 TileGrid only ever draws its bitmap's native 1x1
@@ -71,11 +72,11 @@ class KeyState:
     24-bit RGB888 `displayio.Palette` expects; see
     `_rgb565_to_rgb888`.
 
-    `pixels`, when not `None`, is a 128x128 raw RGB565 buffer that
-    replaces the built-in glyph table lookup entirely — see task 0030.
-    `emoji_id` is still tracked while `pixels` is set, so persistence
-    (`glyph_state.py`) can tell a custom image apart from a built-in one
-    with no second flag.
+    `pixels`, when not `None`, is a 128x128 raw RGBA4444 buffer that
+    replaces the built-in glyph table lookup entirely — see task 0030 and
+    task 0041. `emoji_id` is still tracked while `pixels` is set, so
+    persistence (`glyph_state.py`) can tell a custom image apart from a
+    built-in one with no second flag.
     """
 
     def __init__(
@@ -100,19 +101,50 @@ class KeyState:
         self._rendered_color = None
         self._rendered_emoji_id = None
         self._rendered_pixels = None
+        # Whether the current glyph TileGrid was built from a pixel
+        # buffer with at least one transparent pixel — see
+        # _pixels_have_transparent_pixel. Set whenever the glyph is
+        # (re)built; only meaningful once _group is not None.
+        self._transparent_glyph = False
 
 
-def raw_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
-    """Build a TileGrid from a 128x128 raw RGB565 pixel buffer.
+def _pixels_have_transparent_pixel(pixels: bytes) -> bool:
+    """True when a 128x128 raw RGBA4444 pixel buffer has at least one
+    alpha-zero pixel.
 
-    `pixels` is 32,768 bytes: one little-endian uint16 per pixel,
-    row-major, matching "Set custom glyph" in docs/wire-protocol.md.
+    The alpha nibble is the high nibble of each pixel's high byte — see
+    driver/transport/glyph.go's DecodePNGToRGBA4444, which builds this
+    buffer.
+    """
+    for i in range(_CUSTOM_GLYPH_PIXEL_COUNT):
+        if pixels[2 * i + 1] >> 4 == 0:
+            return True
+    return False
+
+
+def _opaque_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
+    """Build a whole-image glyph TileGrid from a 128x128 raw RGBA4444
+    buffer with no transparent pixel.
+
+    Each pixel's alpha nibble is discarded and its 4-bit red, green, and
+    blue channels are widened to RGB565 and fed straight into the
+    bitmap's raw value, exactly as this module did before task 0041's
+    RGBA4444 change — a blink still hides this whole TileGrid, since
+    there is no transparent pixel for a background layer to show through.
     """
     bitmap = displayio.Bitmap(
-        _CUSTOM_GLYPH_WIDTH, _CUSTOM_GLYPH_HEIGHT, _CUSTOM_GLYPH_COLOR_COUNT
+        _CUSTOM_GLYPH_WIDTH, _CUSTOM_GLYPH_HEIGHT, _RGB565_COLOR_COUNT
     )
-    for i in range(_CUSTOM_GLYPH_WIDTH * _CUSTOM_GLYPH_HEIGHT):
-        bitmap[i] = pixels[2 * i] | (pixels[2 * i + 1] << 8)
+    for i in range(_CUSTOM_GLYPH_PIXEL_COUNT):
+        lo = pixels[2 * i]
+        hi = pixels[2 * i + 1]
+        r4 = hi & 0x0F
+        g4 = lo >> 4
+        b4 = lo & 0x0F
+        r5 = (r4 * 31) // 15
+        g6 = (g4 * 63) // 15
+        b5 = (b4 * 31) // 15
+        bitmap[i] = (r5 << 11) | (g6 << 5) | b5
 
     return displayio.TileGrid(
         bitmap,
@@ -120,6 +152,57 @@ def raw_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
             input_colorspace=displayio.Colorspace.RGB565
         ),
     )
+
+
+def _transparent_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
+    """Build a palette-indexed glyph TileGrid from a 128x128 raw RGBA4444
+    buffer that has at least one transparent pixel.
+
+    An alpha-zero pixel maps to palette index 0, marked transparent with
+    `Palette.make_transparent`, so the background layer beneath shows
+    through it — task 0041's DoD-1. The palette holds one entry per
+    distinct opaque color the image actually uses (at most the 4096
+    values RGBA4444's 4-bit-per-channel color depth allows), not a fixed
+    65536-entry table, since most of that table would go unused for any
+    real glyph.
+    """
+    bitmap = displayio.Bitmap(
+        _CUSTOM_GLYPH_WIDTH, _CUSTOM_GLYPH_HEIGHT, _CUSTOM_GLYPH_PIXEL_COUNT + 1
+    )
+    color_indices = {}
+    for i in range(_CUSTOM_GLYPH_PIXEL_COUNT):
+        lo = pixels[2 * i]
+        hi = pixels[2 * i + 1]
+        if hi >> 4 == 0:
+            bitmap[i] = 0
+            continue
+        key = (hi & 0x0F, lo >> 4, lo & 0x0F)
+        index = color_indices.get(key)
+        if index is None:
+            index = len(color_indices) + 1
+            color_indices[key] = index
+        bitmap[i] = index
+
+    palette = displayio.Palette(len(color_indices) + 1)
+    palette.make_transparent(0)
+    for (r4, g4, b4), index in color_indices.items():
+        palette[index] = ((r4 * 17) << 16) | ((g4 * 17) << 8) | (b4 * 17)
+
+    return displayio.TileGrid(bitmap, pixel_shader=palette)
+
+
+def raw_bitmap_tile_grid(pixels: bytes) -> displayio.TileGrid:
+    """Build a glyph TileGrid from a 128x128 raw RGBA4444 pixel buffer.
+
+    `pixels` is 32,768 bytes: one little-endian uint16 per pixel,
+    row-major, matching "Set custom glyph" in docs/wire-protocol.md.
+    Delegates to `_transparent_bitmap_tile_grid` when the buffer has at
+    least one transparent pixel, or `_opaque_bitmap_tile_grid` otherwise
+    — task 0041's DoD-1 and DoD-3.
+    """
+    if _pixels_have_transparent_pixel(pixels):
+        return _transparent_bitmap_tile_grid(pixels)
+    return _opaque_bitmap_tile_grid(pixels)
 
 
 def _rgb565_to_rgb888(color565: int) -> int:
@@ -145,10 +228,27 @@ def _rgb565_to_rgb888(color565: int) -> int:
     return (r8 << 16) | (g8 << 8) | b8
 
 
+# The blink's off-color, for a transparent-pixel glyph's background
+# layer. Fixed, not configurable — see this task's Non-goals.
+_BLINK_OFF_COLOR = 0x000000
+
+
 def _build_glyph(key_state: KeyState, emoji_lookup: EmojiLookup) -> displayio.TileGrid:
     if key_state.pixels is not None:
         return raw_bitmap_tile_grid(key_state.pixels)
     return emoji_lookup(key_state.emoji_id, key_state.color)
+
+
+def _glyph_is_transparent(key_state: KeyState) -> bool:
+    """Whether `key_state`'s current glyph is a custom image with at
+    least one transparent pixel — the case where a blink toggles the
+    background layer's color instead of hiding the glyph. Only a custom
+    image (`pixels` set) can be transparent; an `emoji_lookup` glyph is
+    always a whole opaque tile.
+    """
+    return key_state.pixels is not None and _pixels_have_transparent_pixel(
+        key_state.pixels
+    )
 
 
 def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
@@ -178,7 +278,16 @@ def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
         key_state._blink_visible = not key_state._blink_visible
 
     glyph_tile_grid = _build_glyph(key_state, emoji_lookup)
-    glyph_tile_grid.hidden = not key_state._blink_visible
+    key_state._transparent_glyph = _glyph_is_transparent(key_state)
+    if key_state._transparent_glyph:
+        # The glyph layer never hides — its transparent pixels already
+        # show the background layer beneath, so the blink toggles that
+        # layer's own color instead. See task 0041's DoD-1 and DoD-2.
+        glyph_tile_grid.hidden = False
+        if key_state.blink and not key_state._blink_visible:
+            background_palette[0] = _BLINK_OFF_COLOR
+    else:
+        glyph_tile_grid.hidden = not key_state._blink_visible
     group.append(glyph_tile_grid)
 
     key_state._group = group
@@ -192,12 +301,15 @@ def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
 def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
     """Mutate a previously built scene graph in place for the next frame.
 
-    A blink-only toggle touches nothing but the glyph `TileGrid`'s
-    `hidden` flag, leaving the background layer's own dirty state
-    untouched — that is the redraw-area win this task exists for. A
-    color or glyph change still updates in place rather than rebuilding
-    the `Group`, so the `Group` and background `TileGrid` objects stay
-    the same displayio instances across every call.
+    A blink-only toggle on an opaque glyph touches nothing but the glyph
+    `TileGrid`'s `hidden` flag, leaving the background layer's own dirty
+    state untouched — that is the redraw-area win task 0033 exists for. A
+    blink-only toggle on a transparent-pixel glyph instead rewrites the
+    background `Palette` in place between `key_state.color` and black,
+    and never touches `hidden` — task 0041's DoD-2. A color or glyph
+    change still updates in place rather than rebuilding the `Group`, so
+    the `Group` and background `TileGrid` objects stay the same displayio
+    instances across every call.
     """
     color_changed = key_state.color != key_state._rendered_color
     if color_changed:
@@ -217,6 +329,7 @@ def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
         index = list(key_state._group).index(key_state._glyph_tile_grid)
         key_state._group[index] = new_glyph
         key_state._glyph_tile_grid = new_glyph
+        key_state._transparent_glyph = _glyph_is_transparent(key_state)
 
     key_state._rendered_color = key_state.color
     key_state._rendered_emoji_id = key_state.emoji_id
@@ -224,7 +337,18 @@ def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
 
     if key_state.blink:
         key_state._blink_visible = not key_state._blink_visible
-    key_state._glyph_tile_grid.hidden = not key_state._blink_visible
+
+    if key_state._transparent_glyph:
+        # Recomputed unconditionally, not just when color_changed above:
+        # a blink-only frame leaves key_state.color untouched but must
+        # still flip the background between it and black every call.
+        key_state._glyph_tile_grid.hidden = False
+        blinked_off = key_state.blink and not key_state._blink_visible
+        key_state._background_palette[0] = (
+            _BLINK_OFF_COLOR if blinked_off else _rgb565_to_rgb888(key_state.color)
+        )
+    else:
+        key_state._glyph_tile_grid.hidden = not key_state._blink_visible
 
 
 def render_key(

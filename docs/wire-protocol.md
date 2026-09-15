@@ -79,17 +79,40 @@ entirely — there is no way to patch part of it. Framed per
 | Offset | Size | Field | Description |
 |---|---|---|---|
 | 0 | 1 | Key index | 0-based index of the target key |
-| 1 | 32,768 | Pixels | 128×128 image, row-major, RGB565, 2 bytes per pixel, little-endian |
+| 1 | 32,768 | Pixels | 128×128 image, row-major, RGBA4444, 2 bytes per pixel, little-endian |
 
 32,768 bytes is 128 × 128 pixels × 2 bytes per pixel — the whole image in
 one frame, under the frame header's `uint16` `Length` field's limit, so
 this message needs no multi-frame reassembly on either side. The driver
-decodes the source PNG and converts its colors to RGB565 itself; firmware
-never parses an image format, it only copies length-prefixed bytes into a
-bitmap and a file. See
+decodes the source PNG and converts its colors to RGBA4444 itself;
+firmware never parses an image format, it only copies length-prefixed
+bytes into a bitmap and a file. See
 [task 0030](../tasks/ongoing/0030-custom-glyph-upload-and-persistence.md)
 for the design decision, including why this task keeps the source PNG's
 fidelity a driver-side concern instead of an on-device one.
+
+Each pixel packs a 4-bit alpha nibble (bits 15-12), then 4 bits each of
+red, green, and blue (bits 11-8, 7-4, 3-0). Alpha is one bit wide in
+practice, not four: the driver collapses every source pixel to either
+fully opaque (nibble `0xF`) or fully transparent (nibble `0x0`) before it
+reaches the wire — there is no blended transparency. A driver-rendered
+emoji ([task 0034](../tasks/complete/0034-emoji-character-to-custom-glyph-image.md))
+keeps its glyph's real transparent pixels; a plain photo upload (task
+0030's Approach A path) has no transparent pixels at all, since a source
+image with no alpha channel decodes as fully opaque everywhere. See
+[task 0041](../tasks/ongoing/0041-color-and-blink-behind-custom-glyph.md)
+for the design decision, including why this task chose a wire
+pixel-format change over baking the key's color into the image at render
+time.
+
+A transparent pixel shows the key's own Color underneath it, set by the
+same Key state message that names this image's key — see [Key
+state](#key-state-hid-host--device) above — instead of a fixed color
+baked into the image. While such a key blinks, its opaque pixels stay on
+screen every frame; only the color behind its transparent pixels
+alternates between Color and black. An image with no transparent pixel
+blinks the way every custom glyph did before task 0041: the whole image
+alternately shows and hides.
 
 Once firmware has stored and rendered this image, the key's state — for
 the purpose of [Emoji IDs](#emoji-ids) — becomes the reserved sentinel
@@ -108,7 +131,7 @@ value is unreserved, for a later task's emoji set.
 | ID | Glyph |
 |---|---|
 | `0x00` | Blank — a plain background-colored tile, drawn for any ID this table does not reserve |
-| `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied. A Key state message may also name it, to toggle Color or Blink on the image already in place, without resending it |
+| `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied. A Key state message may also name it, to toggle Color or Blink on the image already in place, without resending it. What Blink does to the image depends on whether it has a transparent pixel — see [Set custom glyph](#set-custom-glyph-cdc-host--device) |
 
 `firmware/glyphs.py` draws a plain background-colored tile for any Emoji
 ID a Key state message carries, `0x00` included — it holds no glyph

@@ -27,7 +27,7 @@ const (
 	CustomGlyphHeight = 128
 )
 
-// CustomGlyphPixelsSize is the length of the raw RGB565 pixel buffer a
+// CustomGlyphPixelsSize is the length of the raw RGBA4444 pixel buffer a
 // custom glyph message carries: width × height × 2 bytes per pixel.
 const CustomGlyphPixelsSize = CustomGlyphWidth * CustomGlyphHeight * 2
 
@@ -46,7 +46,7 @@ var ErrInvalidGlyphSize = errors.New("transport: custom glyph image must be 128x
 // docs/wire-protocol.md.
 type CustomGlyph struct {
 	KeyIndex byte
-	Pixels   []byte // CustomGlyphPixelsSize bytes: RGB565, row-major, little-endian
+	Pixels   []byte // CustomGlyphPixelsSize bytes: RGBA4444, row-major, little-endian
 }
 
 // EventType identifies whether a press/release event is a press or a
@@ -127,9 +127,9 @@ type Transport interface {
 	SendKeyState(KeyState) error
 
 	// SendCustomGlyph writes one Set custom glyph message to the device
-	// over CDC serial: a key index and a 128×128 raw RGB565 pixel
+	// over CDC serial: a key index and a 128×128 raw RGBA4444 pixel
 	// buffer, framed per "Framing" in docs/wire-protocol.md. pixels must
-	// be exactly CustomGlyphPixelsSize bytes — DecodePNGToRGB565 builds
+	// be exactly CustomGlyphPixelsSize bytes — DecodePNGToRGBA4444 builds
 	// one from a PNG file's bytes.
 	SendCustomGlyph(keyIndex byte, pixels []byte) error
 

@@ -114,27 +114,51 @@ def test_emoji_lookup_receives_key_color():
     assert received == [(0xF3, 0x07E0)]
 
 
-def _solid_pixels(rgb565):
-    lo = rgb565 & 0xFF
-    hi = (rgb565 >> 8) & 0xFF
-    return bytes((lo, hi)) * (128 * 128)
+def _opaque_pixel(r4, g4, b4):
+    """One little-endian RGBA4444 pixel: alpha nibble 0xF (opaque), the
+    given 4-bit red, green, and blue channels.
+    """
+    hi = 0xF0 | r4
+    lo = (g4 << 4) | b4
+    return bytes((lo, hi))
+
+
+def _transparent_pixel():
+    """One little-endian RGBA4444 pixel with alpha nibble 0 — see
+    DecodePNGToRGBA4444 in driver/transport/glyph.go for the bit layout.
+    """
+    return bytes((0x00, 0x00))
+
+
+def _solid_opaque_pixels(r4, g4, b4):
+    return _opaque_pixel(r4, g4, b4) * (128 * 128)
+
+
+def _expected_rgb565(r4, g4, b4):
+    """The RGB565 value `_opaque_bitmap_tile_grid` widens an opaque
+    RGBA4444 pixel's channels to.
+    """
+    r5 = (r4 * 31) // 15
+    g6 = (g4 * 63) // 15
+    b5 = (b4 * 31) // 15
+    return (r5 << 11) | (g6 << 5) | b5
 
 
 def test_raw_bitmap_tile_grid_unpacks_pixels():
-    pixels = _solid_pixels(0xF81F)
+    pixels = _solid_opaque_pixels(0xF, 0x0, 0xF)  # opaque magenta
 
     tile_grid = raw_bitmap_tile_grid(pixels)
 
     assert tile_grid.bitmap.width == 128
     assert tile_grid.bitmap.height == 128
-    assert tile_grid.bitmap[0] == 0xF81F
-    assert tile_grid.bitmap[128 * 128 - 1] == 0xF81F
+    assert tile_grid.bitmap[0] == _expected_rgb565(0xF, 0x0, 0xF)
+    assert tile_grid.bitmap[128 * 128 - 1] == _expected_rgb565(0xF, 0x0, 0xF)
     assert tile_grid.pixel_shader.input_colorspace == displayio.Colorspace.RGB565
 
 
 def test_render_key_prefers_pixels_over_emoji_lookup():
     display = FakeDisplay()
-    pixels = _solid_pixels(0x07E0)
+    pixels = _solid_opaque_pixels(0x0, 0xF, 0x0)  # opaque green
     key_state = KeyState(emoji_id=0xF3, color=0x000000, pixels=pixels)
 
     def failing_emoji_lookup(emoji_id, color):
@@ -143,7 +167,7 @@ def test_render_key_prefers_pixels_over_emoji_lookup():
     render_key(display, key_state, failing_emoji_lookup)
 
     image_layer = list(display.shown_groups[-1])[1]
-    assert image_layer.bitmap[0] == 0x07E0
+    assert image_layer.bitmap[0] == _expected_rgb565(0x0, 0xF, 0x0)
 
 
 def test_first_render_builds_scene_later_renders_reuse_it():
@@ -200,7 +224,7 @@ def test_color_only_change_mutates_background_palette_in_place():
     entirely, so nothing about it needs to change.
     """
     display = FakeDisplay()
-    pixels = _solid_pixels(0x07E0)
+    pixels = _solid_opaque_pixels(0x0, 0xF, 0x0)  # opaque green
     key_state = KeyState(emoji_id=0xF3, color=0x0000, pixels=pixels)
 
     def failing_emoji_lookup(emoji_id, color):
@@ -277,15 +301,101 @@ def test_pixels_change_replaces_glyph_tile_grid():
     calling `emoji_lookup`.
     """
     display = FakeDisplay()
-    key_state = KeyState(emoji_id=0xF3, color=0x000000, pixels=_solid_pixels(0xF81F))
+    key_state = KeyState(
+        emoji_id=0xF3, color=0x000000, pixels=_solid_opaque_pixels(0xF, 0x0, 0xF)
+    )
 
     render_key(display, key_state, _stub_emoji_lookup)
     group = display.shown_groups[-1]
     old_glyph = list(group)[1]
 
-    key_state.pixels = _solid_pixels(0x07E0)
+    key_state.pixels = _solid_opaque_pixels(0x0, 0xF, 0x0)
     render_key(display, key_state, _stub_emoji_lookup)
 
     new_glyph = list(group)[1]
     assert new_glyph is not old_glyph
-    assert new_glyph.bitmap[0] == 0x07E0
+    assert new_glyph.bitmap[0] == _expected_rgb565(0x0, 0xF, 0x0)
+
+
+def _corner_transparent_pixels(r4, g4, b4):
+    """A 128x128 RGBA4444 buffer that is solid opaque (r4, g4, b4) except
+    for pixel 0 (the top-left corner), which is fully transparent — the
+    task 0041 DoD-1/DoD-2 fixture.
+    """
+    pixels = bytearray(_solid_opaque_pixels(r4, g4, b4))
+    pixels[0:2] = _transparent_pixel()
+    return bytes(pixels)
+
+
+def test_transparent_pixel_shows_background_color():
+    """DoD-1: a custom glyph with a transparent pixel must show
+    key_state.color behind that pixel, not a baked-in color. The
+    transparent pixel's bitmap value must index a palette entry marked
+    transparent, with the background layer beneath already painted
+    key_state.color, and the glyph must not be hidden.
+    """
+    display = FakeDisplay()
+    pixels = _corner_transparent_pixels(0xF, 0x0, 0x0)  # opaque red, transparent corner
+    key_state = KeyState(emoji_id=0xF3, color=0x07E0, pixels=pixels)  # green background
+
+    render_key(display, key_state, _stub_emoji_lookup)
+
+    group = display.shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0x07E0)
+    corner_index = glyph.bitmap[0]
+    assert glyph.pixel_shader.is_transparent(corner_index)
+    assert glyph.hidden is False
+
+
+def test_transparent_glyph_blink_toggles_background_not_glyph():
+    """DoD-2: while a key with a transparent-pixel glyph blinks, its
+    opaque glyph pixels must stay on screen every frame — the glyph
+    TileGrid is never hidden — and only the background layer's color
+    alternates between key_state.color and black.
+    """
+    display = FakeDisplay()
+    pixels = _corner_transparent_pixels(0xF, 0x0, 0x0)  # opaque red, transparent corner
+    key_state = KeyState(emoji_id=0xF3, color=0x07E0, blink=True, pixels=pixels)
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    group = display.shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+    opaque_pixel = glyph.bitmap[128 * 128 - 1]  # not the transparent corner
+
+    assert glyph.hidden is False
+    assert background.pixel_shader[0] == 0x000000  # off this frame
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    assert glyph.hidden is False
+    assert glyph.bitmap[128 * 128 - 1] == opaque_pixel
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0x07E0)  # on this frame
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    assert glyph.hidden is False
+    assert glyph.bitmap[128 * 128 - 1] == opaque_pixel
+    assert background.pixel_shader[0] == 0x000000  # off again
+
+
+def test_opaque_pixels_keep_whole_image_blink_toggle():
+    """DoD-3: a custom glyph with no transparent pixel must keep today's
+    whole-image blink toggle — the glyph TileGrid's `hidden` flag
+    alternates, and the background layer is never touched.
+    """
+    display = FakeDisplay()
+    pixels = _solid_opaque_pixels(0xF, 0x0, 0x0)  # fully opaque, no transparency
+    key_state = KeyState(emoji_id=0xF3, color=0x07E0, blink=True, pixels=pixels)
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    group = display.shown_groups[-1]
+    background, glyph = list(group)[0], list(group)[1]
+    assert glyph.hidden is True  # emoji hidden this frame
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    assert glyph.hidden is False
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0x07E0)
+
+    render_key(display, key_state, _stub_emoji_lookup)
+    assert glyph.hidden is True
+    assert background.pixel_shader[0] == _rgb565_to_rgb888(0x07E0)

@@ -156,6 +156,58 @@ func TestSetCustomGlyph(t *testing.T) {
 	}
 }
 
+// TestSetCustomGlyphBlink proves SetCustomGlyphBlink sends only a
+// setKeyState message naming transport.CustomGlyphSentinelEmojiID, no
+// setCustomGlyph payload — so a blink toggle never resends the image.
+func TestSetCustomGlyphBlink(t *testing.T) {
+	ws := &fakeWS{}
+	c := &Conn{ws: ws}
+
+	if err := c.SetCustomGlyphBlink(4, true); err != nil {
+		t.Fatalf("SetCustomGlyphBlink: %v", err)
+	}
+	if len(ws.written) != 1 {
+		t.Fatalf("got %d messages, want 1", len(ws.written))
+	}
+
+	msg := ws.written[0]
+	if msg.Kind != plugin.KindSetKeyState || msg.SetKeyState == nil {
+		t.Fatalf("got %+v, want a setKeyState message", msg)
+	}
+	if msg.SetCustomGlyph != nil {
+		t.Fatalf("got a setCustomGlyph payload %+v, want none", msg.SetCustomGlyph)
+	}
+	want := plugin.SetKeyStatePayload{
+		KeyIndex: 4,
+		EmojiID:  transport.CustomGlyphSentinelEmojiID,
+		Blink:    true,
+	}
+	if *msg.SetKeyState != want {
+		t.Fatalf("got %+v, want %+v", *msg.SetKeyState, want)
+	}
+}
+
+// TestSetCustomGlyphBlink_KeepsCurrentColor proves a blink toggle resends
+// whatever color an earlier SetKeyState call set for the key, instead of
+// resetting it to 0 — a message naming the sentinel still replaces
+// Color, per docs/wire-protocol.md.
+func TestSetCustomGlyphBlink_KeepsCurrentColor(t *testing.T) {
+	ws := &fakeWS{}
+	c := &Conn{ws: ws}
+
+	if err := c.SetKeyState(4, 0x07E0, 0xF3, false); err != nil {
+		t.Fatalf("SetKeyState: %v", err)
+	}
+	if err := c.SetCustomGlyphBlink(4, true); err != nil {
+		t.Fatalf("SetCustomGlyphBlink: %v", err)
+	}
+
+	got := ws.written[1].SetKeyState
+	if got.Color != 0x07E0 {
+		t.Fatalf("got Color %#04x, want 0x07e0 (the color SetKeyState set)", got.Color)
+	}
+}
+
 func TestSignal(t *testing.T) {
 	ws := &fakeWS{}
 	c := &Conn{ws: ws}

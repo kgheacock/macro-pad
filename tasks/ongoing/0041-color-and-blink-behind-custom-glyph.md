@@ -127,30 +127,48 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — A custom glyph with a transparent pixel shows
+- [x] **DoD-1** — A custom glyph with a transparent pixel shows
   `key_state.color` behind that pixel, not a baked-in color. **Proof:** a
   firmware pytest builds a glyph with one transparent corner pixel and
   asserts the rendered corner equals `_rgb565_to_rgb888(key_state.color)`.
-- [ ] **DoD-2** — While such a key blinks, its opaque glyph pixels stay
+  Confirmed: `test/test_display_render.py::test_transparent_pixel_shows_background_color`
+  and `test/test_app.py::test_custom_glyph_transparent_pixel_shows_key_color`.
+- [x] **DoD-2** — While such a key blinks, its opaque glyph pixels stay
   on screen every frame. Only the background color changes. **Proof:** a
   firmware pytest steps `MacroPad` across two blink intervals and asserts
   an opaque glyph pixel never changes, while a background pixel
   alternates between `key_state.color` and black.
-- [ ] **DoD-3** — A custom glyph with no transparent pixel keeps today's
+  Confirmed: `test/test_display_render.py::test_transparent_glyph_blink_toggles_background_not_glyph`
+  and `test/test_app.py::test_custom_glyph_blink_toggles_background_when_transparent`.
+- [x] **DoD-3** — A custom glyph with no transparent pixel keeps today's
   whole-image blink toggle. **Proof:** a firmware pytest sends an
   all-opaque buffer with `Blink=true` and asserts the glyph `TileGrid`'s
   `hidden` flag still toggles across two blink intervals.
-- [ ] **DoD-4** — `tools/render_emoji.py` keeps the glyph's real alpha
+  Confirmed: `test/test_display_render.py::test_opaque_pixels_keep_whole_image_blink_toggle`
+  and `test/test_app.py::test_custom_glyph_opaque_keeps_whole_image_blink_toggle`.
+- [x] **DoD-4** — `tools/render_emoji.py` keeps the glyph's real alpha
   channel, not a black canvas. **Proof:** a driver test decodes the PNG
   for one emoji and asserts a known-transparent pixel's encoded alpha
   nibble is 0.
-- [ ] **DoD-5** — Tests cover the transparent-pixel path and the
+  Confirmed: `driver/transport/glyph_test.go::TestDecodePNGToRGBA4444_TransparentPixelEncodesZeroAlphaNibble`
+  (`go test ./transport/...` passes).
+- [x] **DoD-5** — Tests cover the transparent-pixel path and the
   fully-opaque path. **Proof:** `pytest test/test_app.py -k custom_glyph`
   passes. `git stash && pytest test/test_app.py -k custom_glyph` fails on
   `main`.
-- [ ] **DoD-6** — `docs/wire-protocol.md` records the RGBA4444 pixel
+  Confirmed: `.venv/bin/pytest test/test_app.py -k custom_glyph` passes
+  (8 tests) against this branch. Checking out `main`'s
+  `firmware/display_render.py` and `test/stubs/displayio.py` while
+  keeping this branch's `test/test_app.py` fails 2 of those 8 tests
+  (`test_custom_glyph_transparent_pixel_shows_key_color`,
+  `test_custom_glyph_blink_toggles_background_when_transparent`) — a
+  bare `git stash` on a clean, committed tree has nothing to stash, so
+  this checkout swap is the equivalent proof.
+- [x] **DoD-6** — `docs/wire-protocol.md` records the RGBA4444 pixel
   format and the new blink meaning. **Proof:** `docs/wire-protocol.md`,
   "Set custom glyph" and "Emoji IDs".
+  Confirmed: both sections updated with the RGBA4444 bit layout, the
+  one-bit alpha convention, and the transparent-pixel blink meaning.
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
 

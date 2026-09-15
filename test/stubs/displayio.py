@@ -17,6 +17,7 @@ class Bitmap:
 class Palette:
     def __init__(self, color_count):
         self._colors = [0] * color_count
+        self._transparent = [False] * color_count
 
     def __len__(self):
         return len(self._colors)
@@ -26,6 +27,15 @@ class Palette:
 
     def __setitem__(self, index, color):
         self._colors[index] = color
+
+    def make_transparent(self, index):
+        self._transparent[index] = True
+
+    def make_opaque(self, index):
+        self._transparent[index] = False
+
+    def is_transparent(self, index):
+        return self._transparent[index]
 
 
 class Colorspace:

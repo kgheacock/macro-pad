@@ -26,7 +26,7 @@ PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
 
 CUSTOM_GLYPH_WIDTH = 128
 CUSTOM_GLYPH_HEIGHT = 128
-# docs/wire-protocol.md's "Set custom glyph": 128x128 pixels, RGB565, 2
+# docs/wire-protocol.md's "Set custom glyph": 128x128 pixels, RGBA4444, 2
 # bytes each.
 CUSTOM_GLYPH_PIXELS_SIZE = CUSTOM_GLYPH_WIDTH * CUSTOM_GLYPH_HEIGHT * 2
 CUSTOM_GLYPH_PAYLOAD_SIZE = 1 + CUSTOM_GLYPH_PIXELS_SIZE  # key index + pixels
@@ -132,7 +132,7 @@ def encode_pong(nonce):
 
 class CustomGlyph:
     """One decoded Set custom glyph message: a key index and its raw
-    128x128 RGB565 pixel buffer. See "Set custom glyph" in
+    128x128 RGBA4444 pixel buffer. See "Set custom glyph" in
     docs/wire-protocol.md.
     """
 

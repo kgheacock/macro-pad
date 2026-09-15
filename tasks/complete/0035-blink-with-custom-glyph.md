@@ -1,13 +1,13 @@
 ---
 id: "0035"
 title: "Let a key blink while it shows a custom-glyph image"
-status: "ongoing"
+status: "complete"
 created: "2026-09-13"
 updated: "2026-09-14"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/39"
 branch: "0035-blink-with-custom-glyph"
 related: ["0030", "0034"]
 tags: ["firmware", "driver", "display"]
@@ -141,7 +141,7 @@ Files to change:
 - [x] **DoD-5** — `docs/wire-protocol.md` records the changed meaning
   of a Key state message naming `0xFE`. **Proof:** `docs/wire-
   protocol.md`, "Emoji IDs".
-- [ ] **DoD-6** — The PR in the `pr` field links to this spec.
+- [x] **DoD-6** — The PR in the `pr` field links to this spec.
   **Proof:** PR body.
 
 ## Risks

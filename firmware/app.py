@@ -252,8 +252,11 @@ class MacroPad:
         key_state.blink = message.blink
         # A built-in Emoji ID switches the key back to the glyph table,
         # replacing any custom image it showed before — see "Set custom
-        # glyph" in docs/wire-protocol.md.
-        key_state.pixels = None
+        # glyph" in docs/wire-protocol.md. The sentinel names the image
+        # already in place, so keep it — this is how a plugin toggles
+        # blink on a custom image without resending it.
+        if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
+            key_state.pixels = None
         self._dirty.add(message.key_index)
         self._persist_key_state(message.key_index)
         return True

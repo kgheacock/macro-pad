@@ -129,7 +129,12 @@ them: the background `Palette`'s color is rewritten in place, the glyph
 (`emoji_id`, `pixels`, or — for a built-in emoji, whose bitmap bakes in
 `key_state.color` as its background, see task 0023 — `color`) actually
 changed, and a blink toggle flips the glyph `TileGrid`'s `hidden` flag
-rather than adding or removing it from the `Group`. Rebuilding a fresh
+rather than adding or removing it from the `Group`. A custom image with a
+transparent pixel is the one exception: its glyph `TileGrid` never
+hides, and a blink instead rewrites the background `Palette` between
+`key_state.color` and black — see [task
+0041](../tasks/ongoing/0041-color-and-blink-behind-custom-glyph.md).
+Rebuilding a fresh
 object graph on every call, as `render_key` did before, gives displayio
 nothing to diff against the last frame, so it always redraws the full
 128×128 panel; mutating the same objects in place lets its own

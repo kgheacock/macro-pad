@@ -292,9 +292,21 @@
   const EMOJI_REGEX = /\p{Extended_Pictographic}/u;
 
   // CUSTOM_GLYPH_SIZE matches transport.CustomGlyphWidth /
-  // transport.CustomGlyphHeight — the fixed size DecodePNGToRGB565
+  // transport.CustomGlyphHeight — the fixed size DecodePNGToRGBA4444
   // requires, checked before any bytes reach the wire.
   const CUSTOM_GLYPH_SIZE = 128;
+
+  // CUSTOM_GLYPH_SENTINEL_EMOJI_ID matches
+  // transport.CustomGlyphSentinelEmojiID / wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID.
+  // A setCustomGlyph message carries no emoji_id field of its own — the
+  // Set custom glyph message reaches only the image — but firmware sets
+  // the key's emoji_id to this sentinel internally once the image lands
+  // (see "Emoji IDs" in docs/wire-protocol.md). onSetCustomGlyph below
+  // reflects that into the row's own "Emoji ID" field so a later "Set"
+  // click, which always sends whatever that field holds, names the
+  // sentinel and keeps the image in place instead of clobbering it with
+  // a built-in Emoji ID.
+  const CUSTOM_GLYPH_SENTINEL_EMOJI_ID = 0xFE;
 
   // singleEmojiCodepoint returns value trimmed if it is exactly one
   // Unicode code point that tests as emoji, or null otherwise.
@@ -308,18 +320,20 @@
   }
 
   // renderEmojiToPNGDataURL rasterizes char onto an offscreen
-  // CUSTOM_GLYPH_SIZE×CUSTOM_GLYPH_SIZE canvas — black background,
-  // matching tools/render_emoji.py's letterboxing — using the browser's
-  // own emoji-covering font, and returns it as a PNG data URL. No
-  // daemon or Python round trip: the browser already has everything
-  // tools/render_emoji.py needs Apple Color Emoji for.
+  // CUSTOM_GLYPH_SIZE×CUSTOM_GLYPH_SIZE canvas — left transparent, matching
+  // tools/render_emoji.py since task 0041 — using the browser's own
+  // emoji-covering font, and returns it as a PNG data URL. No daemon or
+  // Python round trip: the browser already has everything
+  // tools/render_emoji.py needs Apple Color Emoji for. A transparent
+  // canvas lets the key's own color show through, and its transparent
+  // pixels' presence is what tells firmware to blink only the
+  // background instead of the whole glyph — see "Set custom glyph" in
+  // docs/wire-protocol.md.
   function renderEmojiToPNGDataURL(char) {
     const canvas = document.createElement("canvas");
     canvas.width = CUSTOM_GLYPH_SIZE;
     canvas.height = CUSTOM_GLYPH_SIZE;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, CUSTOM_GLYPH_SIZE, CUSTOM_GLYPH_SIZE);
     ctx.font = Math.round(CUSTOM_GLYPH_SIZE * 0.75) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -491,8 +505,11 @@
   // setCustomGlyph broadcast: an exact match against a "pending"
   // setCustomGlyph confirms it, a mismatch (or a row pending on
   // setKeyState instead) leaves the row alone, and any other row is set
-  // straight to "confirmed" — the image itself has no color/emoji-ID/
-  // blink fields to show, so those inputs are left untouched.
+  // straight to "confirmed". The image itself carries no color or blink
+  // field to show, so those inputs are left untouched, but its Emoji ID
+  // is always CUSTOM_GLYPH_SENTINEL_EMOJI_ID once this message lands —
+  // reflecting that into the row keeps a later "Set" click from
+  // clobbering the image with the "Emoji ID" field's stale value.
   function onSetCustomGlyph(payload) {
     if (!payload) return;
     const row = rows[payload.keyIndex];
@@ -506,6 +523,7 @@
       row.pendingPayload = null;
     }
 
+    row.emojiEl.value = CUSTOM_GLYPH_SENTINEL_EMOJI_ID;
     setRowStatus(row, "confirmed");
   }
 

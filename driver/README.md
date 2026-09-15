@@ -151,12 +151,13 @@ Every message on the connection is JSON, shaped by
 
 - **`setCustomGlyph`** — client to device. Becomes one
   `transport.Transport.SendCustomGlyph` call: the server decodes
-  `image`'s PNG bytes with `transport.DecodePNGToRGB565` and rejects it,
-  with no wire traffic, if it is not exactly 128×128. `image` is a plain
-  PNG file's bytes; `encoding/json` base64-encodes and decodes a `[]byte`
-  field automatically, so a plugin author never has to know the wire's
-  RGB565 pixel format. The server also rebroadcasts the message to every
-  connected client, matching `setKeyState`. See task 0030.
+  `image`'s PNG bytes with `transport.DecodePNGToRGBA4444` and rejects
+  it, with no wire traffic, if it is not exactly 128×128. `image` is a
+  plain PNG file's bytes; `encoding/json` base64-encodes and decodes a
+  `[]byte` field automatically, so a plugin author never has to know the
+  wire's RGBA4444 pixel format. The server also rebroadcasts the message
+  to every connected client, matching `setKeyState`. See task 0030 and
+  task 0041.
 
   ```json
   {"kind": "setCustomGlyph", "setCustomGlyph": {"keyIndex": 2, "image": "<base64 PNG bytes>"}}

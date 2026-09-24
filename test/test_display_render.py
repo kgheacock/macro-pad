@@ -1,6 +1,7 @@
 import displayio
 
 from firmware import glyphs
+from firmware import tracer as tracer_module
 from firmware.display_render import (
     KeyState,
     _rgb565_to_rgb888,
@@ -42,6 +43,19 @@ def _stub_emoji_lookup(emoji_id: str, color: int) -> displayio.TileGrid:
     return _emoji_tile_grid(displayio.Bitmap(1, 1, 1))
 
 
+class FakeTracer:
+    """Records every `record` call's arguments, in call order — task 0042
+    needs only the order and identity of the codes fired, not a real ring
+    buffer.
+    """
+
+    def __init__(self) -> None:
+        self.records = []
+
+    def record(self, code, key, payload, now_us) -> None:
+        self.records.append((code, key, payload, now_us))
+
+
 def test_fill_color():
     display = FakeDisplay()
     # 0xF81F is RGB565 magenta (R=0x1F, G=0, B=0x1F) — render_key must
@@ -54,6 +68,36 @@ def test_fill_color():
     background = list(display.shown_groups[-1])[0]
     assert background.pixel_shader[0] == 0xFF00FF
     assert display.refresh_count == 1
+
+
+def test_render_key_records_glyph_built_then_refresh_done():
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id="smile", color=0x0000)
+    tracer = FakeTracer()
+
+    render_key(display, key_state, _stub_emoji_lookup, tracer, key_index=3)
+
+    codes = [code for code, _, _, _ in tracer.records]
+    assert codes == [tracer_module.GLYPH_BUILT, tracer_module.REFRESH_DONE]
+    assert all(key == 3 for _, key, _, _ in tracer.records)
+
+
+def test_render_key_blink_only_update_skips_glyph_built():
+    """An update that only toggles blink visibility never calls
+    `_build_glyph` again, so it must not record a second `GLYPH_BUILT` —
+    only the rebuild that actually happened should count toward the
+    glyph-build stage's duration.
+    """
+    display = FakeDisplay()
+    key_state = KeyState(emoji_id="smile", color=0x0000, blink=True)
+    tracer = FakeTracer()
+
+    render_key(display, key_state, _stub_emoji_lookup, tracer, key_index=1)
+    tracer.records.clear()
+    render_key(display, key_state, _stub_emoji_lookup, tracer, key_index=1)
+
+    codes = [code for code, _, _, _ in tracer.records]
+    assert codes == [tracer_module.REFRESH_DONE]
 
 
 def test_rgb565_to_rgb888():

@@ -474,7 +474,9 @@ def test_press_trace_order():
     pad, switches, _, _, _, serial, _, _ = _build_pad(tracer=tr)
 
     pad.step(0)  # power-on: every switch's initial reading, not an edge
-    assert serial.written == b""
+    # Power-on also paints all six keys, tracing GLYPH_BUILT/REFRESH_DONE
+    # for each — this test only covers the switch-edge codes below, so
+    # that render noise is dropped rather than asserted empty.
     serial.written = bytearray()
 
     switches[0].value = False  # pull-up: closed switch reads low
@@ -618,6 +620,35 @@ def test_custom_glyph_applies_to_one_key():
     for index in (0, 1, 2, 4, 5):
         assert pad.key_states[index].pixels is None
         assert len(displays.per_key[index].shown_groups) == 1  # not redrawn
+
+
+def test_custom_glyph_paint_trace_order():
+    """DoD-1: one custom-glyph paint fires the four task-0042 trace codes,
+    in stage order, for the key the Set custom glyph message named.
+    """
+    tr = tracer_module.Tracer(capacity=32, enabled=True)
+    pad, _, _, _, _, serial, _, _ = _build_pad(tracer=tr)
+
+    pad.step(0)  # power-on paint of all six keys
+    serial.written = bytearray()
+
+    serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0xAB))
+    pad.step(1000)
+
+    frames = _parse_frames(bytes(serial.written))
+    trace_records = [
+        _decode_trace_record(payload)
+        for message_type, payload in frames
+        if message_type == wire.MESSAGE_TYPE_TRACE
+    ]
+    key3_codes = [code for code, key, _, _ in trace_records if key == 3]
+
+    assert key3_codes == [
+        tracer_module.CUSTOM_GLYPH_DECODED,
+        tracer_module.PERSIST_DONE,
+        tracer_module.GLYPH_BUILT,
+        tracer_module.REFRESH_DONE,
+    ]
 
 
 def test_custom_glyph_ignores_unknown_key_index():

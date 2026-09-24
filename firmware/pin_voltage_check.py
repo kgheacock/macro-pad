@@ -33,8 +33,8 @@ import digitalio
 # pins.py: pins.py does `from typing import NamedTuple`, a module
 # CircuitPython 10.2.1 does not ship, so importing it crashes the REPL.
 HEADER_PINS = [
-    "GP2", "GP3",  # SPI SCK / MOSI
-    "GP4", "GP5", "GP6", "GP7", "GP8", "GP9",  # 6x display CS
+    "GP2", "GP7",  # SPI SCK / MOSI
+    "GP3", "GP4", "GP5", "GP6", "GP8", "GP9",  # 6x display CS
     "GP10",  # shared DC
     "GP11",  # shared RST
     "GP13", "GP14", "GP15", "GP16", "GP17", "GP18",  # 6x KEY inputs

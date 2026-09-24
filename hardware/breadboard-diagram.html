@@ -92,6 +92,7 @@
   .sig-vcc  { background: #e5484d; color: #fff; }
   .sig-pwm  { background: #8b5cf6; color: #fff; }
   .sig-rst  { background: #8b5e3c; color: #fff; }
+  .sig-bulk { background: #0d9488; color: #fff; }
 </style>
 </head>
 <body>
@@ -104,7 +105,17 @@
   <code>hardware/README.md</code>. Pin rows run top to bottom in the same
   physical order as the two 20-pin edges on the Pico Plus 2's silkscreen
   (<code>docs/ppico_plus_2_pinout_diagram.pdf</code>) &mdash; GND and 3V3
-  are wired from the top-right power pins.
+  are wired from the top-right power pins. CLK (GP2) and DIN (GP7) sit on
+  non-adjacent rows: both are still hardware SPI0 pins (SCK and TX), but
+  GP3 &mdash; SPI0's other TX-capable pin &mdash; sat directly across
+  from the crowded VCC/BULK row, so DIN moved to GP7 and swapped places
+  with 4CSX, which is a single wire and doesn't mind the crowding. BULK
+  marks the single 10&micro;F aluminum electrolytic cap at the point
+  where 3V3/GND first land on the breadboard, bridging the rail before
+  it fans out to all 6 modules &mdash; it is not a GPIO connection. Each
+  module has its own onboard decoupling already, so no per-module cap is
+  added here. This part is polarized: the shorter/banded lead is
+  negative and goes to GND, the long lead to 3V3.
 </p>
 
 <fieldset class="legend">
@@ -118,6 +129,7 @@
   <span class="legend-item"><span class="swatch sig-vcc"></span>VCC</span>
   <span class="legend-item"><span class="swatch sig-pwm"></span>PWM</span>
   <span class="legend-item"><span class="swatch sig-rst"></span>RST</span>
+  <span class="legend-item"><span class="swatch sig-bulk"></span>BULK (10&micro;F electrolytic, at the 3V3/GND rail entry, polarized)</span>
 </fieldset>
 
 <div class="board">
@@ -173,20 +185,14 @@
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares">
-      <span class="square sig-din">1DIN</span>
-      <span class="square sig-din">2DIN</span>
-      <span class="square sig-din">3DIN</span>
-      <span class="square sig-din">4DIN</span>
-      <span class="square sig-din">5DIN</span>
-      <span class="square sig-din">6DIN</span>
-    </span>
+    <span class="squares"><span class="square sig-cs">4CSX</span></span>
     <span class="pin-name wired">GP3</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
     <span class="pin-name wired">3V3</span>
     <span class="squares">
+      <span class="square sig-bulk">BULK</span>
       <span class="square sig-vcc">1VCC</span>
       <span class="square sig-vcc">2VCC</span>
       <span class="square sig-vcc">3VCC</span>
@@ -234,7 +240,14 @@
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">4CSX</span></span>
+    <span class="squares">
+      <span class="square sig-din">1DIN</span>
+      <span class="square sig-din">2DIN</span>
+      <span class="square sig-din">3DIN</span>
+      <span class="square sig-din">4DIN</span>
+      <span class="square sig-din">5DIN</span>
+      <span class="square sig-din">6DIN</span>
+    </span>
     <span class="pin-name wired">GP7</span>
   </div>
   <div class="spine-cell"></div>

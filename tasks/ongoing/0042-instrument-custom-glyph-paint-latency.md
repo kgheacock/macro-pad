@@ -1,14 +1,14 @@
 ---
 id: "0042"
 title: "Instrument the custom-glyph paint pipeline to find the ~1s latency's source"
-status: "backlog"
+status: "ongoing"
 created: "2026-09-14"
-updated: "2026-09-14"
+updated: "2026-09-24"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0042-instrument-custom-glyph-paint-latency"
 related: ["0025", "0030", "0033", "0039", "0041"]
 tags: ["firmware", "display", "performance", "instrumentation"]
 ---

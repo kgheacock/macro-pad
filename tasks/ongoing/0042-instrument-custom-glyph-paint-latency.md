@@ -7,7 +7,7 @@ updated: "2026-09-24"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/42"
 branch: "0042-instrument-custom-glyph-paint-latency"
 related: ["0025", "0030", "0033", "0039", "0041"]
 tags: ["firmware", "display", "performance", "instrumentation"]
@@ -167,7 +167,7 @@ Files to change:
   placeholder — blocked on DoD-2.
 - [x] **DoD-6** — The full test suite passes. **Proof:** `.venv/bin/pytest
   test/ -q` passes (90 passed).
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
 
 ## Risks

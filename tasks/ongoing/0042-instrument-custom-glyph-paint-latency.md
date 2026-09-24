@@ -139,25 +139,34 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — The four new trace codes fire, in stage order, for one
+- [x] **DoD-1** — The four new trace codes fire, in stage order, for one
   custom-glyph paint. **Proof:** a `test/test_app.py` test feeds one Set
   custom glyph message through a fake tracer and asserts the recorded
-  code sequence.
+  code sequence. `test_custom_glyph_paint_trace_order` asserts key 3's
+  code sequence is `CUSTOM_GLYPH_DECODED, PERSIST_DONE, GLYPH_BUILT,
+  REFRESH_DONE`; `test/test_display_render.py` covers `render_key`'s
+  half directly.
 - [ ] **DoD-2** — A live capture on real hardware, for one custom-glyph
   Set through `keystate.html`, records a duration in milliseconds for
   each of: CDC transfer + decode, persist, glyph build, refresh.
   **Proof:** the JSONL capture file, or the derived figures, in this
-  spec's Notes.
+  spec's Notes. **Missing:** no board is attached in this environment
+  (no `/Volumes/CIRCUITPY`, no `/dev/cu.usbmodem*`); the instrumentation
+  is in place and `firmware/README.md`'s new "Custom-glyph paint
+  latency" section gives the capture steps, but no capture has been run.
 - [ ] **DoD-3** — This spec names the stage, or stages, that account for
   most of the observed ~1s. **Proof:** a stated conclusion in this spec's
-  Notes, backed by DoD-2's figures.
-- [ ] **DoD-4** — `docs/wire-protocol.md`'s trace code registry lists the
+  Notes, backed by DoD-2's figures. **Missing:** blocked on DoD-2.
+- [x] **DoD-4** — `docs/wire-protocol.md`'s trace code registry lists the
   four new codes. **Proof:** `docs/wire-protocol.md`, Trace record
   section.
 - [ ] **DoD-5** — `firmware/README.md` records the per-stage figures and
-  links this spec. **Proof:** `firmware/README.md`.
-- [ ] **DoD-6** — The full test suite passes. **Proof:** `.venv/bin/pytest
-  test/ -q` passes.
+  links this spec. **Proof:** `firmware/README.md`. **Missing:** the new
+  "Custom-glyph paint latency" section links this spec and gives the
+  capture recipe, but its figures are still the "Not yet measured"
+  placeholder — blocked on DoD-2.
+- [x] **DoD-6** — The full test suite passes. **Proof:** `.venv/bin/pytest
+  test/ -q` passes (90 passed).
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:**
   PR body.
 

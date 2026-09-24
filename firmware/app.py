@@ -188,13 +188,20 @@ class MacroPad:
         data = glyph_state.encode(
             key_state.color, key_state.emoji_id, key_state.blink, key_state.pixels
         )
-        if data == self._persisted[key_index]:
-            return
-        try:
-            self._storage.write(key_index, data)
-        except OSError:
-            return
-        self._persisted[key_index] = data
+        if data != self._persisted[key_index]:
+            try:
+                self._storage.write(key_index, data)
+                self._persisted[key_index] = data
+            except OSError:
+                pass
+
+        if self._tracer is not None:
+            self._tracer.record(
+                tracer_module.PERSIST_DONE,
+                key_index,
+                0,
+                time.monotonic_ns() // 1000,
+            )
 
     def step(self, now_us):
         """Run one iteration of the loop."""
@@ -272,6 +279,15 @@ class MacroPad:
         glyph = self._custom_glyph_reader.feed(self._serial)
         if glyph is None:
             return False
+
+        if self._tracer is not None:
+            self._tracer.record(
+                tracer_module.CUSTOM_GLYPH_DECODED,
+                glyph.key_index,
+                0,
+                time.monotonic_ns() // 1000,
+            )
+
         if glyph.key_index >= len(self.key_states):
             return False
 
@@ -375,7 +391,11 @@ class MacroPad:
                 self._active_key_index = index
 
             display_render.render_key(
-                self._active_display, key_state, self._emoji_lookup
+                self._active_display,
+                key_state,
+                self._emoji_lookup,
+                self._tracer,
+                index,
             )
             if key_state.blink:
                 self._next_blink_us[index] = now_us + BLINK_INTERVAL_US

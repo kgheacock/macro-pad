@@ -1,17 +1,23 @@
 """Fake `displayio` module. See ../README.md for how these stubs are used."""
 
 
-class Bitmap:
+class Bitmap(bytearray):
+    """A 16-bit bitmap, stored as its raw bytes.
+
+    This is a `bytearray` so `memoryview(bitmap)` works, as it does on
+    the board. The board's `memoryview` has one item per pixel and this
+    one has one per byte, so a test compares `bytes(memoryview(bitmap))`,
+    which is the same on both. Each pixel is 2 bytes, in the chip's
+    little-endian order, as on the board.
+    """
+
+    def __new__(cls, width, height, value_count):
+        return super().__new__(cls, width * height * 2)
+
     def __init__(self, width, height, value_count):
+        super().__init__(width * height * 2)
         self.width = width
         self.height = height
-        self._pixels = [0] * (width * height)
-
-    def __getitem__(self, index):
-        return self._pixels[index]
-
-    def __setitem__(self, index, value):
-        self._pixels[index] = value
 
 
 class Palette:

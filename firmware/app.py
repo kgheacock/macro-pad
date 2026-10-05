@@ -20,7 +20,6 @@ See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 import time
 
 import digitalio
-import displayio
 
 import display_render
 import glyph_state
@@ -79,51 +78,35 @@ def make_switch(pin):
     return switch
 
 
-def blank_glyph(emoji_id, color):
-    """Stand-in emoji lookup used until task 0023 generates the real one.
-
-    It returns an empty 1x1 tile so a board with no glyph table still
-    renders each key's background color instead of failing at import.
-    """
-    palette = displayio.Palette(1)
-    palette[0] = DEFAULT_COLOR
-    return displayio.TileGrid(displayio.Bitmap(1, 1, 1), pixel_shader=palette)
-
-
 class MacroPad:
-    """The whole device: six switches, one shared display bus, six
+    """The whole device: six switches, six panels on one shared SPI bus, six
     backlights.
 
     Every argument is injected rather than built here, which is what lets
-    a test drive `step` one iteration at a time with fakes. `build_display`
-    replaces a pre-built list of displays (task 0032): this board allows
-    only 1 concurrent display bus, so `build_display(key_index)` is
-    called to build one key's bus. Task 0040 changed when: the bus for
-    the key that currently owns it (`_active_key_index`) stays open
-    across repeat redraws of that same key, and is only released and
-    rebuilt when a different key's turn comes up — see
-    `_render_dirty_keys`.
+    a test drive `step` one iteration at a time with fakes. `panels` holds
+    one `st7735.Panel` for each key, already initialised by `code.py`
+    (task 0043). A redraw of one key pushes a frame to that key's panel
+    alone — it releases no bus, pulses no reset line, and sends no init
+    command, so the other five panels keep their image.
     """
 
     def __init__(
         self,
         switches,
-        build_display,
+        panels,
         backlights,
         hid_device,
         serial,
-        emoji_lookup,
         debounce_window_ms=7.5,
         idle_timer=None,
         tracer=None,
         storage=None,
     ):
         self._switches = switches
-        self._build_display = build_display
+        self._panels = panels
         self._backlights = backlights
         self._hid_device = hid_device
         self._serial = serial
-        self._emoji_lookup = emoji_lookup
         self._tracer = tracer
         self._storage = storage if storage is not None else glyph_state.FilesystemStorage()
         self._custom_glyph_reader = wire.CustomGlyphReader()
@@ -150,10 +133,6 @@ class MacroPad:
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
         self._dirty = set(range(len(self.key_states)))
-        # Which key's display bus is currently open, and that bus itself.
-        # Both `None` until the first redraw — see `_render_dirty_keys`.
-        self._active_key_index = None
-        self._active_display = None
 
     def _restore_key_state(self, key_index):
         """Build one key's starting `KeyState`: its last persisted state,
@@ -272,11 +251,16 @@ class MacroPad:
         """Decode one Set custom glyph message from the CDC channel and
         update its key.
 
-        Returns True when a key's state changed. A message naming a key
-        index this pad does not have is dropped, like
-        `_apply_host_report`.
+        Returns True when a key's state changed. A message of the wrong
+        length, or naming a key index this pad does not have, is dropped,
+        like `_apply_host_report`.
         """
-        glyph = self._custom_glyph_reader.feed(self._serial)
+        try:
+            glyph = self._custom_glyph_reader.feed(self._serial)
+        except ValueError:
+            # A glyph payload of the wrong length. The reader has already
+            # consumed the whole frame, so the next message starts clean.
+            return False
         if glyph is None:
             return False
 
@@ -359,43 +343,18 @@ class MacroPad:
         """Redraw the keys that changed, plus every blinking key whose
         BLINK_INTERVAL_US has elapsed since it last toggled.
 
-        `render_key` toggles a blinking key's visibility once per call
-        (see display_render.py), so gating that call on elapsed wall-clock
+        `render_key` toggles a blinking key's frame once per call (see
+        display_render.py), so gating that call on elapsed wall-clock
         time, not on `step`'s own iteration rate, is what makes the
         toggle a human-visible blink instead of a flicker.
-
-        This board allows only 1 concurrent display bus (task 0032), so
-        `_active_key_index`/`_active_display` track which key currently
-        owns the open bus. A redraw for that same key reuses the live
-        display, leaving its reset line untouched. A redraw for a
-        different key releases the current bus first, then builds the
-        new one — task 0040, replacing the old build-then-release-every-
-        redraw path, which pulsed the display's hardware reset on every
-        single redraw and made real hardware lose its color. Each key's
-        own `Group`/`Palette`/glyph `TileGrid` are unaffected either way:
-        `render_key` builds them once per key, on `self.key_states[index]`,
-        and mutates that same scene graph on every later call (task 0033),
-        so a redraw touches only the region that actually changed.
         """
         for index, key_state in enumerate(self.key_states):
             due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]
             if index not in self._dirty and not due_to_blink:
                 continue
 
-            if index != self._active_key_index:
-                if self._active_display is not None:
-                    displayio.release_displays()
-                    self._active_display = None
-                    self._active_key_index = None
-                self._active_display = self._build_display(index)
-                self._active_key_index = index
-
             display_render.render_key(
-                self._active_display,
-                key_state,
-                self._emoji_lookup,
-                self._tracer,
-                index,
+                self._panels[index], key_state, self._tracer, index
             )
             if key_state.blink:
                 self._next_blink_us[index] = now_us + BLINK_INTERVAL_US

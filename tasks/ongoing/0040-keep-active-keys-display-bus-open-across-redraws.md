@@ -3,17 +3,19 @@ id: "0040"
 title: "Keep the active key's display bus open across redraws instead of rebuilding it every time"
 status: "ongoing"
 created: "2026-09-13"
-updated: "2026-09-13"
+updated: "2026-10-05"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/38"
 branch: "0040-keep-active-keys-display-bus-open-across-redraws"
-related: ["0010", "0032", "0033"]
+related: ["0010", "0032", "0033", "0043"]
 tags: ["firmware", "display", "hardware", "bring-up"]
 ---
 
 # 0040 — Keep the active key's display bus open across redraws instead of rebuilding it every time
+
+> **Replaced by [task 0043](../ongoing/0043-raw-spi-panels-init-once.md):** there is no display bus to keep open. No key switch builds a bus, pulses RST, or reruns the panel init.
 
 ## Problem
 

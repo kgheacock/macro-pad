@@ -3,17 +3,19 @@ id: "0032"
 title: "Share the RP2350's single display bus across all 6 keys' displays"
 status: "ongoing"
 created: "2026-09-12"
-updated: "2026-09-13"
+updated: "2026-10-05"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/32"
 branch: "0032-share-one-display-bus-across-six-keys"
-related: ["0006", "0010", "0022"]
+related: ["0006", "0010", "0022", "0043"]
 tags: ["firmware", "display", "hardware", "bring-up"]
 ---
 
 # 0032 — Share the RP2350's single display bus across all 6 keys' displays
+
+> **Replaced by [task 0043](../ongoing/0043-raw-spi-panels-init-once.md):** its per-key-switch bus build is gone. Each panel is now initialised once at boot and shares the one SPI bus under its own CS line.
 
 ## Problem
 

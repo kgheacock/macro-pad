@@ -123,6 +123,11 @@ class MacroPad:
         # tasks/ongoing/0030-custom-glyph-upload-and-persistence.md's
         # Risks, "Flash wear."
         self._persisted = [None] * len(switches)
+        # Keys whose state changed since the last `step` persisted them.
+        # A flash write took 260 ms to 450 ms on the board, longer than
+        # composing and pushing the frame, so `step` persists these after
+        # `_render_dirty_keys`, not before it (task 0043's DoD-6).
+        self._persist_pending = set()
         self.key_states = [
             self._restore_key_state(key_index) for key_index in range(len(switches))
         ]
@@ -182,6 +187,14 @@ class MacroPad:
                 time.monotonic_ns() // 1000,
             )
 
+    def _persist_pending_keys(self):
+        """Write every key whose state changed this step. Runs after the
+        redraw, so a flash write never delays a key's new image.
+        """
+        for key_index in sorted(self._persist_pending):
+            self._persist_key_state(key_index)
+        self._persist_pending.clear()
+
     def step(self, now_us):
         """Run one iteration of the loop."""
         host_message = self._apply_host_report(now_us)
@@ -189,6 +202,7 @@ class MacroPad:
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys(now_us)
+        self._persist_pending_keys()
 
         if host_message or custom_glyph_message or key_event:
             self._idle_timer.touch(now_us)
@@ -244,7 +258,7 @@ class MacroPad:
         if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
             key_state.pixels = None
         self._dirty.add(message.key_index)
-        self._persist_key_state(message.key_index)
+        self._persist_pending.add(message.key_index)
         return True
 
     def _apply_custom_glyph(self):
@@ -279,7 +293,7 @@ class MacroPad:
         key_state.emoji_id = wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
         key_state.pixels = glyph.pixels
         self._dirty.add(glyph.key_index)
-        self._persist_key_state(glyph.key_index)
+        self._persist_pending.add(glyph.key_index)
         return True
 
     @staticmethod

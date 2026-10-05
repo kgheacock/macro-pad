@@ -136,13 +136,15 @@ ticked.
 - [x] **DoD-5** — The new firmware tests fail on `main`'s `firmware/`. The full
   suites pass here. **Proof:** `git checkout main -- firmware && pytest test/test_app.py test/test_st7735.py`
   fails, then `git checkout HEAD -- firmware && pytest test/ && (cd driver && go test ./...)` passes
-- [ ] **DoD-6** — On the board, a color change on a key that did not paint last
+- [x] **DoD-6** — On the board, a color change on a key that did not paint last
   takes at most 100 ms from `HOST_MESSAGE_DECODED` to `REFRESH_DONE`. A blink
   push takes at most 30 ms. **Proof:** run `macropadd --trace-file=/tmp/t.jsonl`,
   then read the two records in `/tmp/t.jsonl`
-  - Not confirmed: this needs the board. `REFRESH_DONE` also exists only on
-    task 0042's branch (PR #42), not on `main`. Rebase on 0042 once it
-    merges, then read the trace.
+  - Measured 2026-10-05 at 16 MHz, key 0 to 4, on the board: a color change
+    takes 46.5 ms to 54.4 ms, and a push of a cached frame takes 23.5 ms.
+    At 4 MHz, the rate `code.py` sets until DoD-7 confirms 16 MHz, a push
+    takes 81 ms, so these limits are met only at the faster rate. See
+    Notes.
 - [ ] **DoD-7** — At the baud rate set in `code.py`, key 0 shows the right color
   and a transparent glyph. The target is 16 MHz. A person records the rate.
   **Proof:** the Notes of this spec
@@ -204,3 +206,23 @@ Implementation notes, 2026-10-05. Nothing here ran on the board.
 - `code.py` sets 4 MHz until DoD-7 confirms a faster rate.
 - The driver and firmware must update together. An old driver's RGBA4444
   glyph has the right length, so firmware cannot refuse it.
+
+DoD-6 measurement, 2026-10-05, on the board. 0042 is merged, so the trace has
+`REFRESH_DONE`. `code.py` had a `Tracer` and 16 MHz set for the run, and both
+edits were reverted afterward. `macropadd --trace-file` recorded eight color
+changes across keys 0 to 3 and one blink on key 4. Device timestamps, from
+`HOST_MESSAGE_DECODED`:
+
+- Color change: `GLYPH_BUILT` at 23.5 ms to 31.4 ms, `REFRESH_DONE` at 46.5 ms
+  to 54.4 ms. The compose takes 23 ms and the push takes 23 ms.
+- Push of a cached frame, with no compose: 23.5 ms.
+- At 4 MHz, a first run, a push took 81 ms.
+- Flash persist took 240 ms to 450 ms. On that first run it sat between the
+  message and the redraw, so a color change took 365 ms to 555 ms. `app.py`
+  now persists after the redraw, in the same `step`. The 0042 trace order
+  changed to `GLYPH_BUILT`, `REFRESH_DONE`, `PERSIST_DONE`.
+- No panel was checked at 16 MHz, so DoD-7 stays open. Measured timings do
+  not depend on the panel, but a picture does.
+- Boot ran the six inits and the first paint before the board answered. The
+  Risks line about 4.6 s was not measured.
+

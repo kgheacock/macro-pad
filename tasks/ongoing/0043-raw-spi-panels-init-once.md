@@ -7,7 +7,7 @@ updated: "2026-10-05"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/43"
 branch: "0043-raw-spi-panels-init-once"
 related: ["0010", "0030", "0032", "0033", "0040", "0041", "0042"]
 tags: ["firmware", "display", "driver", "hardware", "performance"]
@@ -156,7 +156,7 @@ ticked.
 - [x] **DoD-9** — `firmware/README.md` and `docs/wire-protocol.md` describe the
   new design. Tasks 0032, 0033, and 0040 link here as their replacement.
   **Proof:** those five files
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

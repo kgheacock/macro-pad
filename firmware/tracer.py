@@ -15,13 +15,19 @@ decision, and docs/wire-protocol.md's "Trace record" section for the
 RECORD_SIZE = 12  # code (1) + key (1) + payload (2) + timestamp (8)
 
 # Trace code registry — mirrors docs/wire-protocol.md's "Trace record"
-# section. TRACE_DROPPED is emitted by `drain`, not by `record`; the other
-# four mark the points `firmware/app.py`'s `MacroPad.step` records at.
+# section. TRACE_DROPPED is emitted by `drain`, not by `record`. The next
+# four mark the points `firmware/app.py`'s `MacroPad.step` records at. The
+# last four mark the custom-glyph paint pipeline's stages — task 0042 —
+# recorded from `firmware/app.py` and `firmware/display_render.py`.
 TRACE_DROPPED = 0
 HOST_MESSAGE_DECODED = 1
 SWITCH_READ = 2
 DEBOUNCE_VERDICT = 3
 EVENT_WRITTEN = 4
+CUSTOM_GLYPH_DECODED = 5
+PERSIST_DONE = 6
+GLYPH_BUILT = 7
+REFRESH_DONE = 8
 
 
 class Tracer:

@@ -335,6 +335,58 @@ Record the result here as a line of the form:
 Measured per-key-switch display-bus latency: N.NNN ms (RP2350, one key, ST7735R init included)
 ```
 
+## Custom-glyph paint latency
+
+**Not yet measured.** Setting a key's image over "Set custom glyph" takes
+about 1 second to appear on the panel, and no measurement yet says which
+stage of that path — CDC transfer + decode, flash persist, glyph-build,
+SPI refresh — holds the time. `firmware/tracer.py`'s `CUSTOM_GLYPH_DECODED`,
+`PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE` trace codes mark the end
+of each of those four stages, in order, for one custom-glyph paint — see
+[`docs/wire-protocol.md`](../docs/wire-protocol.md#trace-record)'s trace
+code registry and [task
+0042](../tasks/ongoing/0042-instrument-custom-glyph-paint-latency.md) for
+the design decision.
+
+To capture one, the board needs tracing turned on, which `code.py` does
+not do by default. Temporarily add a `Tracer` to its `MacroPad(...)` call:
+
+```python
+import tracer as tracer_module
+# ...
+macro_pad = MacroPad(
+    # ...
+    tracer=tracer_module.Tracer(capacity=64, enabled=True),
+)
+```
+
+Run `make flash` to put the edited `code.py` on the board, then start
+`macropadd` with `--trace-file` set (see
+[`driver/README.md`](../driver/README.md#recording-a-trace-alongside-the-plugin-api)):
+
+```bash
+go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 \
+  --trace-file=/tmp/macropad-custom-glyph-trace.jsonl
+```
+
+With `macropadd` running, send one custom image to a key through
+`driver/plugin/web/keystate.html`, then stop `macropadd`. The JSONL file
+holds one line per trace record, each with the device's Timestamp and
+`driver/recorder`'s estimated host arrival time; diff consecutive
+`CUSTOM_GLYPH_DECODED` → `PERSIST_DONE` → `GLYPH_BUILT` → `REFRESH_DONE`
+Timestamps for the key that received the image to get each stage's
+duration. Revert the `code.py` edit above and run `make flash` again
+afterward — leaving tracing on is a deliberate choice, not a default (see
+task 0025's Design), and this task's Risks call for re-confirming the ~1s
+figure with tracing off so the reported bottleneck is not an artifact of
+tracing itself.
+
+Record the result here as a line of the form:
+
+```
+Measured custom-glyph paint latency: decode+transfer N.NNN ms, persist N.NNN ms, glyph build N.NNN ms, refresh N.NNN ms (RP2350)
+```
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

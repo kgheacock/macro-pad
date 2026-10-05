@@ -21,7 +21,11 @@ except ImportError:
 
     Callable = _Subscriptable()
 
+import time
+
 import displayio
+
+import tracer as tracer_module
 
 
 class DisplayLike(Protocol):
@@ -251,7 +255,12 @@ def _glyph_is_transparent(key_state: KeyState) -> bool:
     )
 
 
-def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
+def _build_scene(
+    key_state: KeyState,
+    emoji_lookup: EmojiLookup,
+    tracer=None,
+    key_index=None,
+) -> None:
     """Build a key's `Group`, background `Palette`, and glyph `TileGrid`
     for the first time, and store them on `key_state`.
 
@@ -259,6 +268,9 @@ def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
     `_update_scene` instead, which mutates these same objects rather than
     replacing them, so displayio's own per-`TileGrid` dirty tracking can
     shrink a later `refresh()` to the region that actually changed.
+
+    `tracer`/`key_index`, when both set, record a `GLYPH_BUILT` trace
+    record right after `_build_glyph` returns — see task 0042.
     """
     group = displayio.Group()
 
@@ -278,6 +290,10 @@ def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
         key_state._blink_visible = not key_state._blink_visible
 
     glyph_tile_grid = _build_glyph(key_state, emoji_lookup)
+    if tracer is not None:
+        tracer.record(
+            tracer_module.GLYPH_BUILT, key_index, 0, time.monotonic_ns() // 1000
+        )
     key_state._transparent_glyph = _glyph_is_transparent(key_state)
     if key_state._transparent_glyph:
         # The glyph layer never hides — its transparent pixels already
@@ -298,7 +314,12 @@ def _build_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
     key_state._rendered_pixels = key_state.pixels
 
 
-def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
+def _update_scene(
+    key_state: KeyState,
+    emoji_lookup: EmojiLookup,
+    tracer=None,
+    key_index=None,
+) -> None:
     """Mutate a previously built scene graph in place for the next frame.
 
     A blink-only toggle on an opaque glyph touches nothing but the glyph
@@ -326,6 +347,10 @@ def _update_scene(key_state: KeyState, emoji_lookup: EmojiLookup) -> None:
     # the whole panel and ignores key_state.color, so it does not.
     if glyph_source_changed or (not using_pixels and color_changed):
         new_glyph = _build_glyph(key_state, emoji_lookup)
+        if tracer is not None:
+            tracer.record(
+                tracer_module.GLYPH_BUILT, key_index, 0, time.monotonic_ns() // 1000
+            )
         index = list(key_state._group).index(key_state._glyph_tile_grid)
         key_state._group[index] = new_glyph
         key_state._glyph_tile_grid = new_glyph
@@ -355,6 +380,8 @@ def render_key(
     display: DisplayLike,
     key_state: KeyState,
     emoji_lookup: EmojiLookup,
+    tracer=None,
+    key_index=None,
 ) -> None:
     """Compose and push one frame for a key.
 
@@ -366,11 +393,21 @@ def render_key(
     — emoji asset sourcing is out of scope), otherwise. `emoji_lookup`
     also receives `key_state.color` (RGB565), so a glyph's own background
     can match the key's — see task 0023's Open questions.
+
+    `tracer`/`key_index`, when both set, record a `GLYPH_BUILT` trace
+    record when `_build_scene`/`_update_scene` (re)builds the glyph, and a
+    `REFRESH_DONE` record right after `display.refresh()` returns — see
+    task 0042.
     """
     if key_state._group is None:
-        _build_scene(key_state, emoji_lookup)
+        _build_scene(key_state, emoji_lookup, tracer, key_index)
     else:
-        _update_scene(key_state, emoji_lookup)
+        _update_scene(key_state, emoji_lookup, tracer, key_index)
 
     display.root_group = key_state._group
     display.refresh()
+
+    if tracer is not None:
+        tracer.record(
+            tracer_module.REFRESH_DONE, key_index, 0, time.monotonic_ns() // 1000
+        )

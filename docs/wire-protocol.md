@@ -225,6 +225,10 @@ for the design decision.
 | 2 | `SWITCH_READ` | `1` if the pin read pressed, `0` if released |
 | 3 | `DEBOUNCE_VERDICT` | `0` = accepted press, `1` = accepted release, `0xFF` = rejected as a bounce |
 | 4 | `EVENT_WRITTEN` | The Press/release event's Event type byte: `0` = press, `1` = release |
+| 5 | `CUSTOM_GLYPH_DECODED` | `0`, unused — the Key field already names the target key |
+| 6 | `PERSIST_DONE` | `0`, unused |
+| 7 | `GLYPH_BUILT` | `0`, unused |
+| 8 | `REFRESH_DONE` | `0`, unused |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last
@@ -234,6 +238,18 @@ was counted alongside. `SWITCH_READ` and
 reading changes from the previous `step` — not on every `step` for every
 switch — so a rejected bounce leaves the same pair of records a press
 does, distinguished by `DEBOUNCE_VERDICT`'s payload.
+
+`CUSTOM_GLYPH_DECODED`, `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE`
+mark the custom-glyph paint pipeline's stages, in that order, for one Set
+custom glyph message: CDC transfer and decode end at
+`CUSTOM_GLYPH_DECODED`; persisting the new state to flash ends at
+`PERSIST_DONE`; building the glyph `TileGrid` from the raw pixel buffer
+ends at `GLYPH_BUILT`; and the SPI push to the panel ends at
+`REFRESH_DONE`. Each Timestamp is its own point-in-time reading, not the
+`step` iteration's shared `now_us`, so the gap between two consecutive
+records is that stage's duration — see [task
+0042](../tasks/ongoing/0042-instrument-custom-glyph-paint-latency.md) for
+the design decision.
 
 ## Versioning
 

@@ -250,12 +250,14 @@ switch — so a rejected bounce leaves the same pair of records a press
 does, distinguished by `DEBOUNCE_VERDICT`'s payload.
 
 `CUSTOM_GLYPH_DECODED`, `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE`
-mark the custom-glyph paint pipeline's stages, in that order, for one Set
-custom glyph message: CDC transfer and decode end at
-`CUSTOM_GLYPH_DECODED`; persisting the new state to flash ends at
-`PERSIST_DONE`; building the glyph `TileGrid` from the raw pixel buffer
-ends at `GLYPH_BUILT`; and the SPI push to the panel ends at
-`REFRESH_DONE`. Each Timestamp is its own point-in-time reading, not the
+mark the custom-glyph paint pipeline's stages for one Set custom glyph
+message: CDC transfer and decode end at `CUSTOM_GLYPH_DECODED`; composing
+the key's cached frames from the raw pixel buffer ends at `GLYPH_BUILT`;
+the SPI push to the panel ends at `REFRESH_DONE`; and persisting the new
+state to flash ends at `PERSIST_DONE`. Persisting comes last, since task
+0043: a flash write took 260 ms to 450 ms, more than the rest of the
+paint. A Key state message records `HOST_MESSAGE_DECODED`, then the same
+last three codes. Each Timestamp is its own point-in-time reading, not the
 `step` iteration's shared `now_us`, so the gap between two consecutive
 records is that stage's duration — see [task
 0042](../tasks/ongoing/0042-instrument-custom-glyph-paint-latency.md) for

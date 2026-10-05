@@ -573,12 +573,33 @@ def test_custom_glyph_paint_trace_order():
     ]
     key3_codes = [code for code, key, _, _ in trace_records if key == 3]
 
+    # Persisting comes last: a flash write took 260 ms to 450 ms on the
+    # board, so it must not sit between the message and the new image.
     assert key3_codes == [
         tracer_module.CUSTOM_GLYPH_DECODED,
-        tracer_module.PERSIST_DONE,
         tracer_module.GLYPH_BUILT,
         tracer_module.REFRESH_DONE,
+        tracer_module.PERSIST_DONE,
     ]
+
+
+def test_state_is_persisted_after_the_redraw_in_the_same_step():
+    storage = FakeGlyphStorage()
+    events = []
+    panels = FakePanels(len(pins.KEYS))
+    original_push = panels.per_key[2].push
+    panels.per_key[2].push = lambda frame: (events.append("push"), original_push(frame))
+    original_write = storage.write
+    storage.write = lambda key, data: (events.append("write"), original_write(key, data))
+    pad, _, _, _, hid_device, _, _ = _build_pad(storage=storage, panels=panels)
+    pad.step(0)
+    events.clear()
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF81F, emoji_id=0))
+    pad.step(1000)
+
+    assert events == ["push", "write"]
+    assert storage._files[2] == glyph_state.encode(0xF81F, 0, False)
 
 
 def test_custom_glyph_ignores_unknown_key_index():

@@ -147,15 +147,19 @@ pixel and swaps no byte.
 Two frames for each of six keys use 384 KB of the board's heap, which has
 about 8 MB free.
 
-**Latency: not yet measured on the board.** The spikes measured a frame
-push at 21 ms (16 MHz), a fill and blit at 41 ms to 44 ms, and a color
-change at 66 ms in total. Task 0043's DoD-6 asks for at most 100 ms for a
-color change and 30 ms for a blink push, read from the trace of
-`macropadd --trace-file`. Record the result here as a line of the form:
+**Latency, measured on the board** from the trace of `macropadd
+--trace-file`, with `HOST_MESSAGE_DECODED` as the start:
 
 ```
-Measured color change: N ms, blink push: N ms (RP2350, key 0, N MHz)
+Measured color change: 46.5 ms to 54.4 ms to REFRESH_DONE, blink push: 23.5 ms (RP2350, key 0, 16 MHz, 2026-10-05)
 ```
+
+The 46 ms is a 23 ms compose (`GLYPH_BUILT`) and a 23 ms push. A push of a
+cached frame alone takes 23 ms. At 4 MHz, the rate `code.py` sets until
+DoD-7 confirms a faster one, a push takes 81 ms, so a color change takes
+about 105 ms and a blink push 81 ms. No panel was checked at 16 MHz.
+Persisting to flash takes 240 ms to 360 ms and runs after the redraw, in
+the same `step`, so it delays the next `step` and not the new image.
 
 ## Custom glyphs and persisted state
 
@@ -299,8 +303,8 @@ Measured loop period: N.NNN ms (RP2350, displays absent, 1000 iterations)
 
 **Not yet measured.** Setting a key's image over "Set custom glyph" takes
 about 1 second to appear on the panel, and no measurement yet says which
-stage of that path — CDC transfer + decode, flash persist, glyph-build,
-SPI refresh — holds the time. `firmware/tracer.py`'s `CUSTOM_GLYPH_DECODED`,
+stage of that path — CDC transfer + decode, glyph-build, SPI refresh, flash
+persist — holds the time. `firmware/tracer.py`'s `CUSTOM_GLYPH_DECODED`,
 `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE` trace codes mark the end
 of each of those four stages, in order, for one custom-glyph paint — see
 [`docs/wire-protocol.md`](../docs/wire-protocol.md#trace-record)'s trace
@@ -333,7 +337,7 @@ With `macropadd` running, send one custom image to a key through
 `driver/plugin/web/keystate.html`, then stop `macropadd`. The JSONL file
 holds one line per trace record, each with the device's Timestamp and
 `driver/recorder`'s estimated host arrival time; diff consecutive
-`CUSTOM_GLYPH_DECODED` → `PERSIST_DONE` → `GLYPH_BUILT` → `REFRESH_DONE`
+`CUSTOM_GLYPH_DECODED` → `GLYPH_BUILT` → `REFRESH_DONE` → `PERSIST_DONE`
 Timestamps for the key that received the image to get each stage's
 duration. Revert the `code.py` edit above and run `make flash` again
 afterward — leaving tracing on is a deliberate choice, not a default (see

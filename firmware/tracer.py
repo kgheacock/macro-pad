@@ -18,7 +18,9 @@ RECORD_SIZE = 12  # code (1) + key (1) + payload (2) + timestamp (8)
 # section. TRACE_DROPPED is emitted by `drain`, not by `record`. The next
 # four mark the points `firmware/app.py`'s `MacroPad.step` records at. The
 # last four mark the custom-glyph paint pipeline's stages — task 0042 —
-# recorded from `firmware/app.py` and `firmware/display_render.py`.
+# recorded from `firmware/app.py` and `firmware/display_render.py`. Task
+# 0043 moved `PERSIST_DONE` after `REFRESH_DONE`: persisting follows the
+# redraw.
 TRACE_DROPPED = 0
 HOST_MESSAGE_DECODED = 1
 SWITCH_READ = 2

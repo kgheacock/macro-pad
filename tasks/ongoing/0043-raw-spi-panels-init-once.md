@@ -123,30 +123,37 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — After boot, redrawing keys 0, 1, 0 sends no init command and
+- [x] **DoD-1** — After boot, redrawing keys 0, 1, 0 sends no init command and
   makes no RST change. **Proof:** `pytest test/test_app.py::test_key_switch_sends_no_init_or_reset`
-- [ ] **DoD-2** — A blink toggle pushes a cached frame and calls no fill or
+- [x] **DoD-2** — A blink toggle pushes a cached frame and calls no fill or
   blit. A color change rebuilds the frames once. **Proof:**
   `pytest test/test_display_render.py::test_blink_uses_cached_frame test/test_display_render.py::test_color_change_rebuilds_once`
-- [ ] **DoD-3** — A glyph message of the wrong length, or for an unknown key,
+- [x] **DoD-3** — A glyph message of the wrong length, or for an unknown key,
   is dropped. A legacy RGBA4444 flash record loads as color only. **Proof:**
   `pytest test/test_wire.py test/test_glyph_state.py::test_legacy_record_is_color_only`
-- [ ] **DoD-4** — The driver writes `0x0000` for a transparent pixel, `0x0001`
+- [x] **DoD-4** — The driver writes `0x0000` for a transparent pixel, `0x0001`
   for black, and big-endian RGB565. **Proof:** `cd driver && go test ./transport/...`
-- [ ] **DoD-5** — The new firmware tests fail on `main`'s `firmware/`. The full
+- [x] **DoD-5** — The new firmware tests fail on `main`'s `firmware/`. The full
   suites pass here. **Proof:** `git checkout main -- firmware && pytest test/test_app.py test/test_st7735.py`
   fails, then `git checkout HEAD -- firmware && pytest test/ && (cd driver && go test ./...)` passes
 - [ ] **DoD-6** — On the board, a color change on a key that did not paint last
   takes at most 100 ms from `HOST_MESSAGE_DECODED` to `REFRESH_DONE`. A blink
   push takes at most 30 ms. **Proof:** run `macropadd --trace-file=/tmp/t.jsonl`,
   then read the two records in `/tmp/t.jsonl`
+  - Not confirmed: this needs the board. `REFRESH_DONE` also exists only on
+    task 0042's branch (PR #42), not on `main`. Rebase on 0042 once it
+    merges, then read the trace.
 - [ ] **DoD-7** — At the baud rate set in `code.py`, key 0 shows the right color
   and a transparent glyph. The target is 16 MHz. A person records the rate.
   **Proof:** the Notes of this spec
+  - Not confirmed: needs a person at a wired key. `code.py` still sets 4 MHz,
+    the last rate confirmed with `displayio`. Raise it to 16 MHz, then record
+    the rate that works in the Notes.
 - [ ] **DoD-8** — With two keys wired, ten color changes on key 1 leave key 0's
   image unchanged. **Proof:** a person watches both panels and records the
   result in the Notes of this spec
-- [ ] **DoD-9** — `firmware/README.md` and `docs/wire-protocol.md` describe the
+  - Not confirmed: only one key is wired. Needs a second key (task 0010).
+- [x] **DoD-9** — `firmware/README.md` and `docs/wire-protocol.md` describe the
   new design. Tasks 0032, 0033, and 0040 link here as their replacement.
   **Proof:** those five files
 - [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
@@ -179,3 +186,21 @@ Spike results come from the board on 2026-10-05, with stock CircuitPython
 - Cached frame push: 21.3 ms at 16 MHz.
 - Fill plus blit of a glyph: 44 ms. The check found 0 wrong pixels of 16,384.
 - One 32 KB frame over USB and SPI: 94 ms (72 ms USB read).
+
+Implementation notes, 2026-10-05. Nothing here ran on the board.
+
+- The `displayio`-free path calls `bitmaptools.arrayblit` with an
+  `array.array("H")` built from the glyph bytes, then `bitmaptools.blit`
+  with `skip_source_index=0`, and `memoryview(Bitmap)` for the push. The
+  spikes measured those calls. The `array("H", bytes)` step is new, so
+  check it on the first board run.
+- A glyph with a transparent pixel is found with `bytes.find` for two
+  zero bytes at an even offset, not a Python loop over 16,384 pixels.
+- A key with no glyph now blinks between its color and black. Before, its
+  blink changed nothing the eye could see.
+- A first paint of a blinking key shows the "on" frame.
+- `emoji_lookup`, `glyphs.py`, and the `adafruit_st7735r` library are gone.
+  Every Emoji ID draws no glyph, as task 0039 left it.
+- `code.py` sets 4 MHz until DoD-7 confirms a faster rate.
+- The driver and firmware must update together. An old driver's RGBA4444
+  glyph has the right length, so firmware cannot refuse it.

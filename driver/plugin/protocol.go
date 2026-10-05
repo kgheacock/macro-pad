@@ -106,7 +106,7 @@ type InjectEventPayload struct {
 // base64-encodes and decodes a []byte field automatically, so a plugin
 // author supplies ordinary PNG bytes with no wire-specific pixel format
 // to learn. The server decodes and converts it with
-// transport.DecodePNGToRGBA4444. See task 0030 and task 0041.
+// transport.DecodePNGToRGB565. See task 0030 and task 0041.
 type SetCustomGlyphPayload struct {
 	KeyIndex byte   `json:"keyIndex"`
 	Image    []byte `json:"image"`
@@ -196,17 +196,17 @@ func (p *InjectEventPayload) toEvent() (transport.Event, error) {
 }
 
 // toPixels decodes a setCustomGlyph message's PNG image into the
-// key index and raw RGBA4444 pixel buffer
+// key index and raw RGB565 pixel buffer
 // transport.Transport.SendCustomGlyph expects. Returns
 // errMissingCustomGlyphPayload when p is nil, or whatever error
-// transport.DecodePNGToRGBA4444 returns for an unreadable or wrong-sized
+// transport.DecodePNGToRGB565 returns for an unreadable or wrong-sized
 // image — including transport.ErrInvalidGlyphSize, checked before any
 // bytes reach the wire.
 func (p *SetCustomGlyphPayload) toPixels() (keyIndex byte, pixels []byte, err error) {
 	if p == nil {
 		return 0, nil, errMissingCustomGlyphPayload
 	}
-	pixels, err = transport.DecodePNGToRGBA4444(p.Image)
+	pixels, err = transport.DecodePNGToRGB565(p.Image)
 	if err != nil {
 		return 0, nil, err
 	}

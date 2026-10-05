@@ -173,3 +173,36 @@ def test_write_frame_prefixes_type_and_length():
     # driver/transport/wire.go's writeFrame.
     assert header == bytes((wire.MESSAGE_TYPE_EVENT, wire.EVENT_SIZE, 0))
     assert writer.written[wire.FRAME_HEADER_SIZE :] == payload
+
+
+def test_custom_glyph_reader_consumes_a_wrong_length_frame_before_raising():
+    """A glyph frame of the wrong length raises `ValueError`, and the
+    frame is already out of the buffer, so the next frame still decodes.
+    """
+    writer = FakeWriter()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_SET_CUSTOM_GLYPH,
+        _custom_glyph_payload(key_index=1)[:-2],
+    )
+    wire.write_frame(
+        writer, wire.MESSAGE_TYPE_SET_CUSTOM_GLYPH, _custom_glyph_payload(key_index=2)
+    )
+
+    class AllAtOnceReader:
+        def __init__(self, data):
+            self._data = data
+            self.in_waiting = len(data)
+
+        def read(self, size):
+            chunk, self._data = self._data[:size], self._data[size:]
+            self.in_waiting = len(self._data)
+            return chunk
+
+    reader = AllAtOnceReader(bytes(writer.written))
+    custom_glyph_reader = wire.CustomGlyphReader()
+
+    with pytest.raises(ValueError):
+        custom_glyph_reader.feed(reader)
+
+    assert custom_glyph_reader.feed(reader).key_index == 2

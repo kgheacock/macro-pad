@@ -7,7 +7,7 @@ updated: "2026-10-06"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/45"
 branch: "0044-blink-independence-persist-off-blink-path"
 related: ["0030", "0042", "0043"]
 tags: ["firmware", "blink", "latency"]
@@ -145,7 +145,7 @@ ticked.
   **Proof:** `git grep "TEMPORARY (blink spike)"` returns nothing
   The edit is gone: `git grep "TEMPORARY (blink spike)" -- firmware tools Makefile driver` finds nothing. The
   proof as written still finds this line of the spec, so it cannot return nothing.
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec.
+- [x] **DoD-10** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
 
 ## Risks

@@ -44,7 +44,7 @@ def render(char, output_path):
     # A fully transparent canvas, not a black one: the key's own color
     # shows through the glyph's transparent pixels instead of a baked-in
     # black background — see task 0041's Design.
-    # driver/transport/glyph.go's DecodePNGToRGBA4444 reads this alpha
+    # driver/transport/glyph.go's DecodePNGToRGB565 reads this alpha
     # channel back out when it encodes the PNG for the wire.
     canvas = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
     offset = ((CANVAS_SIZE - width) // 2, (CANVAS_SIZE - height) // 2)

@@ -13,7 +13,7 @@ python3 -m venv .venv
 ## CircuitPython hardware mocks
 
 Firmware imports CircuitPython-only modules (`board`, `digitalio`,
-`usb_hid`, `usb_cdc`, `audiobusio`, `displayio`) that do not exist on a dev
+`usb_hid`, `usb_cdc`, `audiobusio`, `displayio`, `bitmaptools`) that do not exist on a dev
 machine. Hand-written fakes for these live in [`stubs/`](stubs/), one file
 per module. `conftest.py` puts `stubs/` on `sys.path` before any test
 collects, so firmware code can `import board` (etc.) unmodified in a test.
@@ -24,6 +24,12 @@ calls — see [`tasks/ongoing/0001-test-harness-circuitpython-mocks.md`](
 decision behind hand-writing them instead of adopting Adafruit-Blinka.
 When firmware code starts calling a stub method that doesn't exist yet, add
 it to the relevant file in `stubs/`.
+
+`test/spibus.py` is not a stub. It is a fake shared SPI bus with DC, RST, and
+per-panel CS lines, for the tests of `firmware/st7735.py` and of
+`MacroPad` driving real `st7735.Panel`s. It checks that a write happens
+under the bus lock with exactly one CS line low, and it records the
+commands and frames each panel received.
 
 ## Importing firmware modules
 

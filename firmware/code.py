@@ -1,32 +1,24 @@
 """CircuitPython's entry point: it runs this file after `boot.py`.
 
-This file only builds the real hardware objects and hands them to
-`app.MacroPad`. The loop itself lives in `app.py`, where it runs under
-pytest against the stubs in `test/stubs/` with no board attached.
+This file only builds the real hardware objects, initialises the panels
+once, and hands everything to `app.MacroPad`. The loop itself lives in
+`app.py`, where it runs under pytest against the stubs in `test/stubs/`
+with no board attached.
 
 See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 """
 
 import board
 import busio
+import digitalio
 import displayio
-import fourwire
 import pwmio
 import usb_cdc
 import usb_hid
 
-import display_render
-import glyphs
 import pins
+import st7735
 from app import Backlight, MacroPad, make_switch
-
-try:
-    from adafruit_st7735r import ST7735R
-except ImportError as error:
-    raise ImportError(
-        "adafruit_st7735r is missing. Copy it into CIRCUITPY/lib from the "
-        "Adafruit CircuitPython bundle, then reset the board."
-    ) from error
 
 DISPLAY_WIDTH = 128
 DISPLAY_HEIGHT = 128
@@ -40,16 +32,16 @@ DISPLAY_HEIGHT = 128
 DISPLAY_COLSTART = 2
 DISPLAY_ROWSTART = 3
 
-# fourwire.FourWire's own default (24MHz) visibly wipes top-to-bottom on
-# a full-panel redraw — every render_key call repaints the whole 128x128
-# panel, so this is hit on every state change, not just occasionally.
-# 32MHz was tried experimentally (task 0031's key-0 bring-up) but
-# confirmed live, testing task 0030's custom glyph upload, to leave the
-# panel showing no visible content at all — writes reported success with
-# no error, but nothing reached the glass. 4MHz confirmed live as
-# reliable on this board's breadboard wiring.
+# 4MHz confirmed live as reliable on this board's breadboard wiring, for
+# the old `displayio` driver. 24MHz (its default) wiped visibly top to
+# bottom, and 32MHz showed no content at all. Task 0043's raw SPI driver
+# targets 16MHz (a frame push takes 21ms, against 80ms at 4MHz), but no
+# panel has been checked at that rate yet — see that task's DoD-7. Raise
+# this to 16_000_000 once a wired key renders correctly at it.
 DISPLAY_BAUDRATE = 4_000_000
 
+# `displayio` claims the display pins at boot. Release them so the raw SPI
+# driver can use them.
 displayio.release_displays()
 
 spi = busio.SPI(
@@ -57,60 +49,47 @@ spi = busio.SPI(
     MOSI=getattr(board, pins.SPI_MOSI),
 )
 
+
+def _output(pin_name, value):
+    pin = digitalio.DigitalInOut(getattr(board, pin_name))
+    pin.switch_to_output(value=value)
+    return pin
+
+
+# DC and RST are shared by all six panels. Each panel has its own CS.
+dc = _output(pins.DISPLAY_DC, False)
+rst = _output(pins.DISPLAY_RST, True)
+
+panels = [
+    st7735.Panel(
+        spi,
+        dc,
+        _output(key.display_cs_pin, True),
+        DISPLAY_BAUDRATE,
+        width=DISPLAY_WIDTH,
+        height=DISPLAY_HEIGHT,
+        colstart=DISPLAY_COLSTART,
+        rowstart=DISPLAY_ROWSTART,
+    )
+    for key in pins.KEYS
+]
+
+# The one RST pulse and the one init of each panel. Nothing after this
+# pulses RST or sends an init command (task 0043).
+st7735.init_panels(rst, panels)
+
 switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
 
 backlights = [
     Backlight(pwmio.PWMOut(getattr(board, key.backlight_pin))) for key in pins.KEYS
 ]
 
-
-def build_display(key_index):
-    """Build one key's `ST7735R` display bus.
-
-    This board allows only 1 concurrent `displayio` display bus, so this
-    is called just before one key's redraw and released again right
-    after (task 0032) — never held open across two keys at once.
-    """
-    key = pins.KEYS[key_index]
-    return ST7735R(
-        fourwire.FourWire(
-            spi,
-            command=getattr(board, pins.DISPLAY_DC),
-            chip_select=getattr(board, key.display_cs_pin),
-            reset=getattr(board, pins.DISPLAY_RST),
-            baudrate=DISPLAY_BAUDRATE,
-        ),
-        width=DISPLAY_WIDTH,
-        height=DISPLAY_HEIGHT,
-        colstart=DISPLAY_COLSTART,
-        rowstart=DISPLAY_ROWSTART,
-        auto_refresh=False,
-        # Confirmed live: magenta (0xFF00FF) rendered as its exact
-        # complement, green (0x00FF00) — this panel's INVON/INVOFF
-        # polarity is the opposite of the driver's default.
-        invert=True,
-    )
-
-
-EMOJI_FOREGROUND = 0xFFFFFF  # white
-
-
-def emoji_lookup(emoji_id, color):
-    """The real glyph table (task 0023), backgrounded to match the key's
-    own color so a glyph blends into it instead of painting a fixed-color
-    square over the whole panel — see task 0023's Open questions.
-    """
-    background = display_render._rgb565_to_rgb888(color)
-    return glyphs.lookup(emoji_id, foreground=EMOJI_FOREGROUND, background=background)
-
-
 macro_pad = MacroPad(
     switches=switches,
-    build_display=build_display,
+    panels=panels,
     backlights=backlights,
     hid_device=usb_hid.devices[0],
     serial=usb_cdc.data,
-    emoji_lookup=emoji_lookup,
 )
 
 macro_pad.run()

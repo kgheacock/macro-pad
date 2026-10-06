@@ -15,7 +15,21 @@ app.py's module docstring.
 
 import wire
 
-_HEADER_SIZE = 4  # color (2 bytes) + emoji_id (1 byte) + blink (1 byte)
+# A record is a header, then, for a custom glyph, the glyph's pixels.
+#
+# Header: format (1 byte) + color (2 bytes) + emoji_id (1 byte) + blink (1
+# byte). The format byte says how to read the pixels. Task 0043 changed the
+# pixel format from little-endian RGBA4444 to big-endian RGB565, with 0x0000
+# as the transparent value, and added the format byte at the same time.
+#
+# A legacy record has no format byte, so its header is 4 bytes: color,
+# emoji_id, blink. A legacy record is 4 bytes, or 4 + 32,768 bytes with
+# RGBA4444 pixels. A current record is at least 5 bytes, so a length alone
+# tells the two apart.
+FORMAT_RGB565 = 1
+
+_HEADER_SIZE = 5
+_LEGACY_HEADER_SIZE = 4
 
 
 def encode(color, emoji_id, blink, pixels=None):
@@ -37,13 +51,47 @@ def encode(color, emoji_id, blink, pixels=None):
         raise ValueError("pixels given for a non-custom emoji_id {}".format(emoji_id))
 
     buffer = bytearray(_HEADER_SIZE)
-    buffer[0] = color & 0xFF
-    buffer[1] = (color >> 8) & 0xFF
-    buffer[2] = emoji_id
-    buffer[3] = 1 if blink else 0
+    buffer[0] = FORMAT_RGB565
+    buffer[1] = color & 0xFF
+    buffer[2] = (color >> 8) & 0xFF
+    buffer[3] = emoji_id
+    buffer[4] = 1 if blink else 0
     if is_custom:
         buffer.extend(pixels)
     return bytes(buffer)
+
+
+def _is_legacy(data):
+    """True when `data` is a record from before task 0043.
+
+    A length alone is not enough for a custom glyph. A current custom
+    record cut short by one byte, for example by a power loss during a
+    write, is as long as a legacy custom record. The two differ in where
+    the custom-glyph sentinel sits: a legacy header holds the Emoji ID at
+    offset 2, a current one at offset 3. A legacy Blink flag is 0 or 1, so
+    the sentinel cannot also sit at offset 3 of a legacy record.
+    """
+    if len(data) == _LEGACY_HEADER_SIZE:
+        return True
+    return (
+        len(data) == _LEGACY_HEADER_SIZE + wire.CUSTOM_GLYPH_PIXELS_SIZE
+        and data[2] == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+        and data[3] != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+    )
+
+
+def _decode_legacy(data):
+    """Unpack a record from before task 0043 as color and blink only.
+
+    A legacy custom glyph holds RGBA4444 pixels, which the board cannot
+    show now and does not convert. The key keeps its color and blink, and
+    drops to the power-on Emoji ID. The driver resends the glyph.
+    """
+    color = data[0] | (data[1] << 8)
+    emoji_id = data[2]
+    if emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
+        emoji_id = 0
+    return color, emoji_id, data[3] != 0, None
 
 
 def decode(data):
@@ -51,20 +99,28 @@ def decode(data):
     pixels)`. `pixels` is `None` unless `emoji_id` is the custom-glyph
     sentinel.
 
-    Raises `ValueError` when `data` is too short to hold a header, or
-    (for a custom-glyph record) too short to hold the pixel buffer its
-    `emoji_id` implies.
+    A legacy record (see the format note above) loads as its color and
+    blink alone, with no pixels.
+
+    Raises `ValueError` when `data` is too short to hold a header, has a
+    format byte this build does not know, or (for a custom-glyph record)
+    is too short to hold the pixel buffer its `emoji_id` implies.
     """
+    if _is_legacy(data):
+        return _decode_legacy(data)
+
     if len(data) < _HEADER_SIZE:
         raise ValueError(
             "glyph state record is {} bytes, want at least {}".format(
                 len(data), _HEADER_SIZE
             )
         )
+    if data[0] != FORMAT_RGB565:
+        raise ValueError("glyph state record has unknown format {}".format(data[0]))
 
-    color = data[0] | (data[1] << 8)
-    emoji_id = data[2]
-    blink = data[3] != 0
+    color = data[1] | (data[2] << 8)
+    emoji_id = data[3]
+    blink = data[4] != 0
 
     pixels = None
     if emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:

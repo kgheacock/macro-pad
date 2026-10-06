@@ -79,31 +79,42 @@ entirely — there is no way to patch part of it. Framed per
 | Offset | Size | Field | Description |
 |---|---|---|---|
 | 0 | 1 | Key index | 0-based index of the target key |
-| 1 | 32,768 | Pixels | 128×128 image, row-major, RGBA4444, 2 bytes per pixel, little-endian |
+| 1 | 32,768 | Pixels | 128×128 image, row-major, RGB565, 2 bytes per pixel, big-endian; `0x0000` is a transparent pixel |
 
 32,768 bytes is 128 × 128 pixels × 2 bytes per pixel — the whole image in
 one frame, under the frame header's `uint16` `Length` field's limit, so
 this message needs no multi-frame reassembly on either side. The driver
-decodes the source PNG and converts its colors to RGBA4444 itself;
-firmware never parses an image format, it only copies length-prefixed
-bytes into a bitmap and a file. See
+decodes the source PNG and converts its colors to RGB565 itself;
+firmware never parses an image format or converts a pixel, it only
+copies the bytes into a bitmap and a file. See
 [task 0030](../tasks/ongoing/0030-custom-glyph-upload-and-persistence.md)
 for the design decision, including why this task keeps the source PNG's
 fidelity a driver-side concern instead of an on-device one.
 
-Each pixel packs a 4-bit alpha nibble (bits 15-12), then 4 bits each of
-red, green, and blue (bits 11-8, 7-4, 3-0). Alpha is one bit wide in
-practice, not four: the driver collapses every source pixel to either
-fully opaque (nibble `0xF`) or fully transparent (nibble `0x0`) before it
-reaches the wire — there is no blended transparency. A driver-rendered
-emoji ([task 0034](../tasks/complete/0034-emoji-character-to-custom-glyph-image.md))
+Each pixel packs 5 bits of red (bits 15-11), 6 of green (bits 10-5), and
+5 of blue (bits 4-0), and the two bytes of a pixel go out high byte first.
+That is the byte order the panel reads, so firmware writes the buffer to
+the panel with no byte swap. Task 0043 changed this format from
+little-endian RGBA4444. Transparency is one bit wide: the driver collapses
+every source pixel to either opaque or transparent before it reaches the
+wire — there is no blended transparency. The value `0x0000` marks a
+transparent pixel. An opaque pixel whose own RGB565 value is `0x0000`
+(pure black) is sent as `0x0001` instead, a black the panel cannot tell
+apart. A driver-rendered emoji
+([task 0034](../tasks/complete/0034-emoji-character-to-custom-glyph-image.md))
 keeps its glyph's real transparent pixels; a plain photo upload (task
 0030's Approach A path) has no transparent pixels at all, since a source
 image with no alpha channel decodes as fully opaque everywhere. See
-[task 0041](../tasks/ongoing/0041-color-and-blink-behind-custom-glyph.md)
+[task 0041](../tasks/complete/0041-color-and-blink-behind-custom-glyph.md)
 for the design decision, including why this task chose a wire
 pixel-format change over baking the key's color into the image at render
-time.
+time, and [task 0043](../tasks/ongoing/0043-raw-spi-panels-init-once.md)
+for why the pixel format changed again.
+
+A firmware build that reads this format cannot read the old one. A
+Set custom glyph message from a driver built before task 0043 carries the
+right number of bytes, so firmware cannot refuse it, and it draws as
+noise. Update the driver and firmware together.
 
 A transparent pixel shows the key's own Color underneath it, set by the
 same Key state message that names this image's key — see [Key
@@ -133,18 +144,17 @@ value is unreserved, for a later task's emoji set.
 | `0x00` | Blank — a plain background-colored tile, drawn for any ID this table does not reserve |
 | `0xFE` | This key's last custom image — set internally once a Set custom glyph message is applied. A Key state message may also name it, to toggle Color or Blink on the image already in place, without resending it. What Blink does to the image depends on whether it has a transparent pixel — see [Set custom glyph](#set-custom-glyph-cdc-host--device) |
 
-`firmware/glyphs.py` draws a plain background-colored tile for any Emoji
-ID a Key state message carries, `0x00` included — it holds no glyph
-bitmap of its own. A key first reaches `0xFE` by way of a [Set custom
-glyph](#set-custom-glyph-cdc-host--device) message, which bypasses
-`firmware/glyphs.py` entirely. A driver may then send an ordinary Key
-state message naming `0xFE` to toggle that key's Blink or Color while
-keeping the image; firmware keeps `pixels` set instead of clearing it, as
-it would for a built-in Emoji ID. Sending `0xFE` for a key with no stored
-image is defined, not an error: with no pixels to show, the key falls
-through to `firmware/glyphs.py` like any other unreserved ID, and renders
-blank. See [`firmware/README.md`](../firmware/README.md#glyphs) for how a
-glyph reaches a key.
+Firmware has no glyph table (task 0039), so a Key state message draws no
+glyph for any Emoji ID it carries, `0x00` included: the key shows its
+Color. A key first reaches `0xFE` by way of a [Set custom
+glyph](#set-custom-glyph-cdc-host--device) message. A driver may then send
+an ordinary Key state message naming `0xFE` to toggle that key's Blink or
+Color while keeping the image; firmware keeps `pixels` set instead of
+clearing it, as it would for a built-in Emoji ID. Sending `0xFE` for a key
+with no stored image is defined, not an error: with no pixels to show, the
+key shows only its Color. See
+[`firmware/README.md`](../firmware/README.md#cached-frames) for how
+firmware draws a key.
 
 ### Press/release event (CDC, device → host)
 
@@ -240,12 +250,14 @@ switch — so a rejected bounce leaves the same pair of records a press
 does, distinguished by `DEBOUNCE_VERDICT`'s payload.
 
 `CUSTOM_GLYPH_DECODED`, `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE`
-mark the custom-glyph paint pipeline's stages, in that order, for one Set
-custom glyph message: CDC transfer and decode end at
-`CUSTOM_GLYPH_DECODED`; persisting the new state to flash ends at
-`PERSIST_DONE`; building the glyph `TileGrid` from the raw pixel buffer
-ends at `GLYPH_BUILT`; and the SPI push to the panel ends at
-`REFRESH_DONE`. Each Timestamp is its own point-in-time reading, not the
+mark the custom-glyph paint pipeline's stages for one Set custom glyph
+message: CDC transfer and decode end at `CUSTOM_GLYPH_DECODED`; composing
+the key's cached frames from the raw pixel buffer ends at `GLYPH_BUILT`;
+the SPI push to the panel ends at `REFRESH_DONE`; and persisting the new
+state to flash ends at `PERSIST_DONE`. Persisting comes last, since task
+0043: a flash write took 260 ms to 450 ms, more than the rest of the
+paint. A Key state message records `HOST_MESSAGE_DECODED`, then the same
+last three codes. Each Timestamp is its own point-in-time reading, not the
 `step` iteration's shared `now_us`, so the gap between two consecutive
 records is that stage's duration — see [task
 0042](../tasks/ongoing/0042-instrument-custom-glyph-paint-latency.md) for

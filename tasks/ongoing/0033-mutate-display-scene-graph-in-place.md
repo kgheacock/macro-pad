@@ -3,17 +3,19 @@ id: "0033"
 title: "Mutate the display scene graph in place instead of rebuilding it every render_key call"
 status: "ongoing"
 created: "2026-09-13"
-updated: "2026-09-13"
+updated: "2026-10-05"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/33"
 branch: "0033-mutate-display-scene-graph-in-place"
-related: ["0006", "0022", "0031"]
+related: ["0006", "0022", "0031", "0043"]
 tags: ["firmware", "display", "performance", "bring-up"]
 ---
 
 # 0033 — Mutate the display scene graph in place instead of rebuilding it every render_key call
+
+> **Replaced by [task 0043](../ongoing/0043-raw-spi-panels-init-once.md):** there is no `displayio` scene graph now. A key keeps cached frames and a blink pushes the other one.
 
 ## Problem
 

@@ -110,11 +110,13 @@ under that panel's CS line, sets the draw window with the panel's column
 and row offsets, and writes the frame. It sends no init command and
 touches no RST, so a key's update never reaches another panel.
 
-`DISPLAY_BAUDRATE` in `code.py` is 4 MHz, the rate confirmed live with
-`displayio` on this board's breadboard wiring. A frame push takes about
-80 ms at 4 MHz and 21 ms at 16 MHz, the target. Raise it once a wired key
-renders correctly at the higher rate; task 0043's DoD-7 records the rate
-that works.
+`DISPLAY_BAUDRATE` in `code.py` is 16 MHz. A frame push takes 21 ms at
+16 MHz and 79 ms at 4 MHz. On 2026-10-06 a test pattern of color bars and
+1 px columns rendered cleanly on all six wired panels at 4, 8, 12, 16, and
+20 MHz. The RP2350 steps its SPI clock down from 150 MHz, so 16 MHz runs at
+15 MHz. Above about 19 MHz a push stays near 17 ms, because the CPU that
+feeds the FIFO is the limit, not the wire. A higher rate buys little unless
+a DMA transfer does the feeding.
 
 See [`tasks/ongoing/0043-raw-spi-panels-init-once.md`](../tasks/ongoing/0043-raw-spi-panels-init-once.md)
 for the design decision. It replaces
@@ -155,9 +157,9 @@ Measured color change: 46.5 ms to 54.4 ms to REFRESH_DONE, blink push: 23.5 ms (
 ```
 
 The 46 ms is a 23 ms compose (`GLYPH_BUILT`) and a 23 ms push. A push of a
-cached frame alone takes 23 ms. At 4 MHz, the rate `code.py` sets until
-DoD-7 confirms a faster one, a push takes 81 ms, so a color change takes
-about 105 ms and a blink push 81 ms. No panel was checked at 16 MHz.
+cached frame alone takes 23 ms. At 4 MHz a push takes 81 ms, so a color
+change takes about 105 ms and a blink push 81 ms. `code.py` now sets 16 MHz,
+so the figures above apply.
 Persisting to flash takes 240 ms to 360 ms and runs after the redraw, in
 the same `step`, so it delays the next `step` and not the new image.
 

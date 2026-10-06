@@ -162,3 +162,115 @@ def test_fake_storage_round_trip():
     storage.write(0, data)
 
     assert storage.read(0) == data
+
+
+class FakeNvm:
+    """`microcontroller.nvm`: 4096 erased bytes, and a count of the writes."""
+
+    def __init__(self):
+        self._bytes = bytearray(b"\xff" * 4096)
+        self.writes = 0
+
+    def __getitem__(self, index):
+        return self._bytes[index]
+
+    def __setitem__(self, index, value):
+        self._bytes[index] = bytes(value)
+        self.writes += 1
+
+
+class FakePixelFiles:
+    def __init__(self):
+        self.files = {}
+        self.fail = False
+
+    def read(self, key_index):
+        return self.files.get(key_index)
+
+    def write(self, key_index, data):
+        if self.fail:
+            raise OSError("read-only filesystem")
+        self.files[key_index] = data
+
+
+def test_nvm_storage_reads_nothing_from_erased_nvm():
+    storage = glyph_state.NvmStorage(nvm=FakeNvm(), pixel_files=FakePixelFiles())
+
+    assert all(storage.read(key) is None for key in range(6))
+
+
+def test_nvm_storage_restores_every_key_after_a_reboot():
+    nvm = FakeNvm()
+    storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
+    headers = {
+        0: glyph_state.encode_header(0x001F, 0, False),
+        3: glyph_state.encode_header(0xF800, 0xF2, True),
+        5: glyph_state.encode_header(0x07E0, 7, False),
+    }
+
+    written = storage.write_many(headers, {})
+
+    assert written == {0, 3, 5}
+    assert nvm.writes == 1
+    rebooted = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
+    assert glyph_state.decode(rebooted.read(0)) == (0x001F, 0, False, None)
+    assert glyph_state.decode(rebooted.read(3)) == (0xF800, 0xF2, True, None)
+    assert glyph_state.decode(rebooted.read(5)) == (0x07E0, 7, False, None)
+    assert rebooted.read(1) is None
+
+
+def test_nvm_storage_with_a_bad_magic_byte_reads_the_default():
+    nvm = FakeNvm()
+    storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
+    storage.write_many({2: glyph_state.encode_header(0x001F, 0, False)}, {})
+    nvm._bytes[0] = glyph_state.NvmStorage.MAGIC ^ 0xFF
+
+    rebooted = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
+
+    assert all(rebooted.read(key) is None for key in range(6))
+
+
+def test_nvm_storage_keeps_a_custom_glyph_in_files():
+    nvm = FakeNvm()
+    files = FakePixelFiles()
+    storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=files)
+    pixels = bytes(range(256)) * (wire.CUSTOM_GLYPH_PIXELS_SIZE // 256)
+    header = glyph_state.encode_header(0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, True)
+
+    storage.write_many({1: header}, {1: pixels})
+
+    assert files.files == {1: pixels}
+    rebooted = glyph_state.NvmStorage(nvm=nvm, pixel_files=files)
+    assert glyph_state.decode(rebooted.read(1)) == (
+        0x001F,
+        wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+        True,
+        pixels,
+    )
+
+
+def test_nvm_storage_with_a_missing_pixel_file_is_a_corrupt_record():
+    nvm = FakeNvm()
+    storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
+    header = glyph_state.encode_header(0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, False)
+    storage.write_many({1: header}, {})
+
+    with pytest.raises(ValueError):
+        glyph_state.decode(storage.read(1))
+
+
+def test_nvm_storage_skips_the_header_of_a_key_whose_pixels_failed_to_write():
+    nvm = FakeNvm()
+    files = FakePixelFiles()
+    files.fail = True
+    storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=files)
+    custom = glyph_state.encode_header(0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, False)
+    steady = glyph_state.encode_header(0xF800, 0, False)
+
+    written = storage.write_many(
+        {1: custom, 2: steady}, {1: bytes(wire.CUSTOM_GLYPH_PIXELS_SIZE)}
+    )
+
+    assert written == {2}
+    assert storage.read(1) is None
+    assert storage.read(2) == steady

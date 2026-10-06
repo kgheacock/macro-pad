@@ -2,12 +2,19 @@
 image, color, and blink — so it survives a power cycle with no driver
 connected.
 
-A firmware reflash (`make flash`) resets this by design: `glyph_state/`
-lives outside the source tree `make flash`'s `rsync --delete` syncs from,
-so that command wipes it on every run, with no logic in this module or
-the Makefile aware of reflashing at all. See
-tasks/ongoing/0030-custom-glyph-upload-and-persistence.md for the design
-decision.
+A key's 5-byte header (color, Emoji ID, blink) lives in the board's
+`microcontroller.nvm`. One `nvm` write of all six headers takes about
+50 ms, against 320 ms to 590 ms for a 5-byte file write, so `app.py` can
+persist inside the gap between two blinks without freezing a blinking key
+(task 0044). The 32,768 bytes of a custom glyph's pixels do not fit in the
+4,096-byte `nvm`, so they stay one file per key under `glyph_state_files/`.
+
+`nvm` survives a firmware reflash, unlike a file the reflash deletes. So
+`make flash` no longer resets the state of a key. A magic byte at the start
+of `nvm` rejects bytes that another layout left there. See
+tasks/ongoing/0044-blink-independence-persist-off-blink-path.md for the
+design decision, and tasks/ongoing/0030-custom-glyph-upload-and-persistence.md
+for the earlier file-only design.
 
 Imported flat (`import wire`), like every other module here — see
 app.py's module docstring.
@@ -30,6 +37,15 @@ FORMAT_RGB565 = 1
 
 _HEADER_SIZE = 5
 _LEGACY_HEADER_SIZE = 4
+
+
+def encode_header(color, emoji_id, blink):
+    """Pack the 5-byte header of one key's state: the part `NvmStorage`
+    keeps in `nvm`.
+    """
+    return bytes(
+        (FORMAT_RGB565, color & 0xFF, (color >> 8) & 0xFF, emoji_id, 1 if blink else 0)
+    )
 
 
 def encode(color, emoji_id, blink, pixels=None):
@@ -174,3 +190,92 @@ class FilesystemStorage:
             pass  # the directory already exists
         with open(self._path(key_index), "wb") as f:
             f.write(data)
+
+
+class NvmStorage:
+    """Keeps every key's header in `microcontroller.nvm`, and a custom
+    glyph's pixels in files.
+
+    Layout of `nvm`: one magic byte, then one 5-byte header for each key,
+    key 0 first, so key `k`'s header starts at offset `1 + 5 * k`. A header
+    is what `glyph_state.encode_header` builds. A slot whose format byte is
+    0 holds no state. A first byte other than `MAGIC` means `nvm` holds
+    bytes from another layout, so every key reads as the power-on default.
+
+    `write_many` rewrites the whole header block in one `nvm` write, however
+    many keys changed. The time of an `nvm` write does not depend on its
+    length, so one write costs the same for 5 bytes or 31.
+
+    `nvm` and `pixel_files` are injected so a test can use fakes. `pixel_files`
+    needs `read(key_index)` and `write(key_index, data)`, like
+    `FilesystemStorage`, which is the default.
+    """
+
+    MAGIC = 0xA5
+
+    def __init__(self, nvm=None, pixel_files=None, key_count=6):
+        if nvm is None:
+            import microcontroller
+
+            nvm = microcontroller.nvm
+        self._nvm = nvm
+        self._pixel_files = pixel_files if pixel_files is not None else FilesystemStorage()
+        self._key_count = key_count
+        self._size = 1 + _HEADER_SIZE * key_count
+
+        # A copy of the header block, so a write of one key's header keeps
+        # the other keys' bytes without reading `nvm` again.
+        if nvm[0] == self.MAGIC:
+            self._image = bytearray(nvm[0 : self._size])
+        else:
+            self._image = bytearray(self._size)
+            self._image[0] = self.MAGIC
+
+    def _slot(self, key_index):
+        start = 1 + _HEADER_SIZE * key_index
+        return start, start + _HEADER_SIZE
+
+    def read(self, key_index):
+        """Return the record `decode` reads for `key_index`, or `None` when
+        no state was saved for it.
+
+        A custom glyph's record is its header followed by its pixels. When
+        the pixel file is missing or has the wrong length, the record is
+        the header alone, which `decode` rejects as a custom record with no
+        pixels.
+        """
+        start, end = self._slot(key_index)
+        header = bytes(self._image[start:end])
+        if header[0] == 0:
+            return None
+        if header[3] != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
+            return header
+        pixels = self._pixel_files.read(key_index)
+        if pixels is None or len(pixels) != wire.CUSTOM_GLYPH_PIXELS_SIZE:
+            return header
+        return header + pixels
+
+    def write_many(self, headers, pixels):
+        """Persist `headers`, a dict of key index to 5-byte header, in one
+        `nvm` write, and `pixels`, a dict of key index to glyph pixels, to
+        the pixel files. Return the set of key indexes now persisted.
+
+        The pixel files go first. A power loss between the two leaves the
+        old header beside the new pixels, which shows the new image under
+        the old color — not a corrupt key. A key whose pixel file fails to
+        write keeps its old header and is left out of the result, so the
+        caller does not record it as persisted.
+        """
+        written = set(headers)
+        for key_index in sorted(pixels):
+            try:
+                self._pixel_files.write(key_index, pixels[key_index])
+            except OSError:
+                written.discard(key_index)
+
+        for key_index in written:
+            start, end = self._slot(key_index)
+            self._image[start:end] = headers[key_index]
+        if written:
+            self._nvm[0 : self._size] = self._image
+        return written

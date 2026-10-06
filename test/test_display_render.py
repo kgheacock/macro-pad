@@ -363,3 +363,26 @@ def test_render_key_records_nothing_without_a_tracer():
     render_key(panel, KeyState(emoji_id=0, color=0x0000))
 
     assert len(panel.frames) == 1
+
+
+def test_redraw_without_toggle_keeps_the_frame_a_blinking_key_showed():
+    panel = FakePanel()
+    key = KeyState(emoji_id=0, color=0x001F, blink=True)
+
+    render_key(panel, key)  # first paint: "on"
+    render_key(panel, key)  # toggle: "off"
+    key.color = 0xF800
+    render_key(panel, key, toggle=False)  # a state change: still "off"
+    render_key(panel, key)  # toggle: "on", in the new color
+
+    assert _pixel(panel.frames[2], 0) == 0x0000
+    assert _pixel(panel.frames[3], 0) == 0xF800
+
+
+def test_first_paint_without_toggle_shows_the_on_frame_of_a_blinking_key():
+    panel = FakePanel()
+    key = KeyState(emoji_id=0, color=0x001F, blink=True)
+
+    render_key(panel, key, toggle=False)
+
+    assert _pixel(panel.frames[0], 0) == 0x001F

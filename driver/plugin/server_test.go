@@ -556,15 +556,22 @@ func TestServer_SlowClientDoesNotBlockOthers(t *testing.T) {
 	// More than enough events to fill slow's queue and push it past
 	// maxDrops, so the test also proves the healthy client is unaffected
 	// by the slow one being disconnected mid-stream.
+	//
+	// One event at a time, each waited for on the healthy client before the
+	// next. The server drops a message when a client's queue is full, by
+	// design, so a loop that injects faster than the healthy client's write
+	// goroutine runs drops from healthy too, and the test fails on
+	// scheduling. In lockstep healthy's queue never holds more than one
+	// message, while slow's fills and overflows.
 	const n = clientQueueSize + maxDrops + 5
 	for i := 0; i < n; i++ {
 		ev := transport.Event{KeyIndex: byte(i % 6), Type: transport.EventPress, Timestamp: uint64(i)}
 		if err := dev.InjectEvent(ev); err != nil {
 			t.Fatalf("InjectEvent %d: %v", i, err)
 		}
+		want := i + 1
+		waitForCondition(t, time.Second, func() bool { return len(healthy.rawMessages()) >= want })
 	}
-
-	waitForCondition(t, time.Second, func() bool { return len(healthy.rawMessages()) >= n })
 }
 
 func TestServer_DisconnectsStalledClient(t *testing.T) {
@@ -922,14 +929,22 @@ func TestServer_SlowAudioClientDoesNotBlockOthers(t *testing.T) {
 	// More than enough chunks to fill slow's audio queue and push it past
 	// maxDrops, so the test also proves the healthy client is unaffected
 	// by the slow one being disconnected mid-stream.
+	//
+	// One chunk at a time, each waited for on the healthy client before the
+	// next. The server drops a frame when a client's queue is full, by
+	// design, so a loop that injects faster than the healthy client's write
+	// goroutine runs drops from healthy too, and the test fails on
+	// scheduling. In lockstep healthy's queue never holds more than one
+	// frame, while slow's fills and overflows.
 	const n = audioQueueSize + maxDrops + 5
 	for i := 0; i < n; i++ {
 		chunk := transport.AudioChunk{StreamID: 1, PCM: []byte{byte(i)}, Final: i == n-1}
 		if err := dev.InjectAudioChunk(chunk); err != nil {
 			t.Fatalf("InjectAudioChunk %d: %v", i, err)
 		}
+		want := i + 1
+		waitForCondition(t, time.Second, func() bool { return len(healthy.audioMessages()) >= want })
 	}
-	waitForCondition(t, time.Second, func() bool { return len(healthy.audioMessages()) >= n })
 
 	// The event path stays healthy too: a stuck audio subscriber must
 	// not stall the shared client-registry lock or event delivery.

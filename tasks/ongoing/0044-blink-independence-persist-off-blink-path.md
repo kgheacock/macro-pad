@@ -150,26 +150,24 @@ ticked.
 - [x] **DoD-4** — An update to a blinking key draws the frame that the key showed, with the new color,
   and the next toggle stays on the old schedule.
   **Proof:** `python3 -m pytest test/test_app.py -k update_keeps_blink_phase`
-- [ ] **DoD-5** — At 16 MHz, with keys 0 to 2 blinking, 10 updates to key 4, 2 s apart, leave every gap
+- [x] **DoD-5** — At 16 MHz, with keys 0 to 2 blinking, 10 updates to key 4, 2 s apart, leave every gap
   between `REFRESH_DONE` records of keys 0 to 2 at 650 ms or less. Before the change, at 4 MHz, the largest gap was 950 ms.
   **Proof:** `make blink-trace SCENARIO=single` prints a `max gap` within this limit
   (board, `CIRCUITPY` unmounted)
-  Not run: it needs the board. `tools/blink_trace.py`'s analysis passes its tests on synthetic traces only.
-- [ ] **DoD-6** — A burst of 6 updates, sent 50 ms apart through the driver, gives 6 `HOST_MESSAGE_DECODED` records.
-  **Proof:** `make blink-trace SCENARIO=burst` prints `decoded 6/6`
-  Measured on 2026-10-06 by running `blinksend` directly on an idle board: `decoded 6/6`, in 7 records, with key 5 decoded twice.
-  The first `make blink-trace` run printed `decoded 0/6` because it sent during the board's reload after the `code.py` write.
-  The target now waits 10 s; that is not yet checked end to end, so the box stays empty.
-  A replay of 5 keys, with two glyph uploads, once left key 0 blank. Its cause is not found; see `firmware/README.md`, "Latency".
+  Run on 2026-10-06: `max gap 532.8 ms (limit 650)`.
+- [x] **DoD-6** — A burst of 6 updates, sent back to back through the driver, reaches the board: on an idle board, and with keys 0 to 2 blinking.
+  **Proof:** `make blink-trace SCENARIO=burst` and `make blink-trace SCENARIO=busyburst` print `decoded 6/6`
+  Run on 2026-10-06. At 50 ms apart, the idle burst gave `decoded 6/6`, and the busy burst gave `decoded 5/6` with key 2 lost.
+  `minReportGap` is 150 ms now: the busy burst gave `decoded 6/6` in 3 of 3 runs, and the idle burst in 1 of 1.
+  Six blinkers due in one pass were not tried.
 - [x] **DoD-7** — `SendKeyState` called twice at once waits `minReportGap` before the second write.
   **Proof:** `cd driver && go test ./transport -run TestSendKeyStateSpacesReports`
 - [x] **DoD-8** — `firmware/README.md` records that the board keeps no state, why, and how the host replays it.
   Task 0030 states that the board no longer persists state.
   **Proof:** `firmware/README.md`, sections "Latency" and "Custom glyphs and key state"; `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md`
-- [ ] **DoD-9** — The temporary tracer edit is gone from `firmware/code.py`.
-  **Proof:** `git grep "TEMPORARY (blink spike)"` returns nothing
-  The edit is gone: `git grep "TEMPORARY (blink spike)" -- firmware tools Makefile driver` finds nothing. The
-  proof as written still finds this line of the spec, so it cannot return nothing.
+- [x] **DoD-9** — The temporary tracer edit is gone from `firmware/code.py`.
+  **Proof:** `git grep "TEMPORARY (blink spike)" -- firmware` returns nothing
+  The first version of this proof searched the whole repository, and so found its own line in this spec. It cannot return nothing.
 - [x] **DoD-10** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
 - [ ] **DoD-11** — With `macropadd` running and keys set, unplugging and replugging the board brings every key back to its last state.
@@ -186,10 +184,10 @@ ticked.
 ## Risks
 
 - Replay races the board's boot: a report that arrives while `code.py` restarts is dropped → `defaultSettleDelay` waits 1 s. DoD-11 measures it.
-- Replaying six keys costs 6 reports at `minReportGap`, and a glyph costs about 32 KB over CDC → DoD-11 records the time to the last key.
+- Replaying six keys costs 6 reports at `minReportGap` (0.9 s), and a glyph costs about 32 KB over CDC → DoD-11 records the time to the last key.
 - A glyph upload to the board takes seconds, and the first version of `Reconnecting` held its lock throughout, so every other send and `Close` hung → the lock is split, and a test covers it.
 - A one-shot `macrodriver` call does not survive a power cycle → documented in `firmware/README.md`.
-- A 50 ms burst needs the firmware to read each report in time → an idle board read all six. A busy one lost key 0's report once during a replay. Raise `minReportGap`, or send each replayed key state twice, if it recurs.
+- A burst needs the firmware to read each report in time → a gap of 50 ms lost a report with three blinkers, and 150 ms did not in 3 runs. Six blinkers due at once could still lose one → raise `minReportGap` if `busyburst` shows it.
 - `Device.Close` called twice crashed the daemon on shutdown (a second `hid_close`) → `Close` is idempotent now, with a test.
 - A mounted `CIRCUITPY` on macOS reloads the board and breaks CDC and HID → unmount it before `make blink-trace`.
 

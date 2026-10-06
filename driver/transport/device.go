@@ -29,11 +29,16 @@ const defaultPollInterval = 250 * time.Millisecond
 // minReportGap is the least time between two HID output reports. The board
 // holds one report: a second one that arrives before the firmware's loop
 // reads the first overwrites it, and a burst of 6 reports in 250 ms decoded
-// only 2 (task 0044). 50 ms is a starting value, not a measured one: the
-// board's loop reads a report once per `step`, and a round of blink pushes
-// can hold a `step` for 126 ms. Raise it if `make blink-trace
-// SCENARIO=burst` prints fewer than 6 decoded.
-const minReportGap = 50 * time.Millisecond
+// only 2 (task 0044).
+//
+// The firmware reads one report per loop pass, and a pass that redraws a key
+// takes about 46 ms, plus about 21 ms for each blinking key that is due. On
+// an idle board, 6 reports 50 ms apart all arrived. With keys 0 to 2
+// blinking, the same burst lost key 2's report (2026-10-06, `make blink-trace
+// SCENARIO=busyburst`). 150 ms is above the longest pass with three blinkers
+// due. Six blinkers due at once could take longer; raise it if
+// `SCENARIO=busyburst` prints fewer than 6 decoded.
+const minReportGap = 150 * time.Millisecond
 
 // ErrAmbiguousDevice is returned by Open when more than one attached
 // device matches Options.VendorID and Options.ProductID, and

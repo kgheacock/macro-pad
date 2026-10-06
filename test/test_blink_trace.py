@@ -74,6 +74,39 @@ def test_burst_with_a_repeated_decode_still_passes():
     assert "7 records" in out.getvalue()
 
 
+def _decoded(key, payload, device_us):
+    return json.dumps(
+        {
+            "type": "trace",
+            "code": blink_trace.HOST_MESSAGE_DECODED,
+            "key_index": key,
+            "payload": payload,
+            "device_us": device_us,
+        }
+    )
+
+
+def test_busy_burst_counts_only_the_tagged_reports():
+    base = blink_trace.BUSY_BURST_EMOJI_BASE
+    setup = [_decoded(key, 0, 1000 * key) for key in range(3)]
+    burst = [_decoded(key, base + key, 1_000_000 + 50_000 * key) for key in range(6)]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(setup + burst), "busyburst", out) is True
+    assert "decoded 6/6" in out.getvalue()
+
+
+def test_busy_burst_names_the_keys_whose_report_was_lost():
+    base = blink_trace.BUSY_BURST_EMOJI_BASE
+    setup = [_decoded(key, 0, 1000 * key) for key in range(3)]
+    burst = [_decoded(key, base + key, 1_000_000 + 50_000 * key) for key in (0, 1, 3, 4, 5)]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(setup + burst), "busyburst", out) is False
+    assert "decoded 5/6" in out.getvalue()
+    assert "lost the reports of keys [2]" in out.getvalue()
+
+
 def test_traced_code_adds_a_tracer_to_the_real_code_py():
     code = (Path(blink_trace._REPO_ROOT) / "firmware" / "code.py").read_text()
 

@@ -181,32 +181,44 @@ A blinking key keeps its phase when an update arrives: the redraw shows the
 frame the key showed, in the new color, and the next toggle stays on its old
 500 ms schedule. Only a due blink toggles the frame.
 
-**Burst of 6 reports, 50 ms apart** (task 0044's DoD-6, RP2350, 2026-10-06,
-idle board, no blinkers):
+**Reports in a burst** (task 0044's DoD-6, RP2350, 2026-10-06). The board holds
+one HID report, and its loop reads one per pass, so a report that arrives
+before the pass that follows the last one overwrites it. A pass that redraws a
+key takes about 46 ms, plus about 21 ms for each blinking key that is due.
+
+| Run                                               | Gap    | Result                          |
+|---------------------------------------------------|--------|---------------------------------|
+| `SCENARIO=burst`, idle board                      | 50 ms  | `decoded 6/6` (7 records, one repeat) |
+| `SCENARIO=busyburst`, keys 0 to 2 blinking        | 50 ms  | `decoded 5/6`, key 2 lost       |
+| `SCENARIO=busyburst`, keys 0 to 2 blinking        | 150 ms | `decoded 6/6`, in 3 runs of 3   |
+| `SCENARIO=burst`, idle board                      | 150 ms | `decoded 6/6`                   |
+
+The lost report was a key's background color, seen on the board as a missing
+background. `transport.minReportGap` is 150 ms because of it. Six blinkers
+due in one pass could take longer than 150 ms; that case was not run. The
+first `make blink-trace` runs printed `decoded 0/6`, or an unreadable
+first trace record, when the board had just reloaded `code.py`. The target
+now waits 10 s and then opens the board once, with no traffic, before it
+measures; every run after that worked.
+
+**Blink gap while key 4 updates** (task 0044's DoD-5, `SCENARIO=single`, keys 0
+to 2 blinking, 10 updates 2 s apart, 16 MHz):
 
 ```
-decoded 6/6
-(7 records: a report was decoded more than once)
+max gap 532.8 ms (limit 650)
 ```
 
-All six reports reached the board. One decoded twice, which is harmless. A
-first run printed `decoded 0/6`: it sent 1 s after writing `code.py`, while the
-board was reloading, and a report sent during a reload is dropped. The make
-target now waits 10 s. That wait is not yet checked end to end. 50 ms is
-therefore enough for an idle board. It is not known to be enough for a busy one:
-after a replug, a replay of 5 keys with two glyph uploads once left key 0
-blank and not blinking, and re-sending its state fixed it. The cause was not
-found. The trace of that replay was unreadable, because the daemon started
-reading the trace stream in the middle of a frame.
+At 4 MHz with a flash write the largest gap was 950 ms.
 
-**Not yet measured with `make blink-trace`:** the largest gap between blink
-pushes while key 4 updates (`SCENARIO=single`, DoD-5 of task 0044).
-Record the line it prints here.
+A blinking glyph with a transparent background flips the background between
+the key's color and black. With a black key color both frames look the same, so
+the key does not appear to blink.
 
-`make blink-trace SCENARIO=single` or `SCENARIO=burst`, run from the repo root,
-puts a tracing `code.py` on the board, unmounts `CIRCUITPY`, sends the
-scripted run with `driver/cmd/blinksend`, and prints `tools/blink_trace.py`'s
-figures. Run `make flash` afterward to restore the real `code.py`.
+`make blink-trace SCENARIO=single`, `burst`, or `busyburst`, run from the repo
+root, puts a tracing `code.py` on the board, unmounts `CIRCUITPY` for the run,
+sends the scripted run with `driver/cmd/blinksend`, prints
+`tools/blink_trace.py`'s figures, and mounts the volume again. Run `make
+flash` afterward to restore the real `code.py`.
 
 ## Custom glyphs and key state
 

@@ -3,7 +3,7 @@
 
 `make blink-trace` runs `install`, sends a scripted run with
 `driver/cmd/blinksend`, then runs `report` on the JSONL file that command
-wrote. See tasks/ongoing/0044-blink-independence-persist-off-blink-path.md.
+wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
     blink_trace.py report --scenario single|burst|busyburst TRACE_FILE

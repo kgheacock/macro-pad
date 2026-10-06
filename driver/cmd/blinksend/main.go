@@ -1,7 +1,7 @@
 // Command blinksend sends one scripted run of key-state updates to the
 // macro pad and records the board's trace of it to a JSONL file. `make
 // blink-trace` runs it, then reads the file with tools/blink_trace.py. See
-// tasks/ongoing/0044-blink-independence-persist-off-blink-path.md.
+// tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 //
 // The board must run firmware with tracing on; `tools/blink_trace.py
 // install` puts such a code.py on it.

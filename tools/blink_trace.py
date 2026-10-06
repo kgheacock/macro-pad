@@ -6,7 +6,7 @@
 wrote. See tasks/ongoing/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -32,6 +32,11 @@ MAX_GAP_LIMIT_MS = 650
 
 # DoD-6: how many updates the burst sends, one to each key from 0.
 BURST_UPDATES = 6
+
+# The busy burst tags key k's update with Emoji ID BUSY_BURST_EMOJI_BASE + k,
+# which the board's HOST_MESSAGE_DECODED record carries as its payload, so a
+# burst report can be told from the setup that makes keys 0 to 2 blink.
+BUSY_BURST_EMOJI_BASE = 0x20
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -109,8 +114,25 @@ def decoded_keys(records):
     return set(keys), len(keys)
 
 
+def busy_burst_keys(records):
+    """Return the keys whose tagged busy-burst report was decoded."""
+    return {
+        key
+        for code, key, payload, _ in records
+        if code == HOST_MESSAGE_DECODED and payload == BUSY_BURST_EMOJI_BASE + key
+    }
+
+
 def report(records, scenario, out):
     """Print the run's figures to `out`. Return True when they meet the limits."""
+    if scenario == "busyburst":
+        keys = busy_burst_keys(records)
+        print("decoded {}/{}".format(len(keys), BURST_UPDATES), file=out)
+        missing = sorted(set(range(BURST_UPDATES)) - keys)
+        if missing:
+            print("lost the reports of keys {}".format(missing), file=out)
+        return len(keys) == BURST_UPDATES
+
     if scenario == "burst":
         keys, records_seen = decoded_keys(records)
         print("decoded {}/{}".format(len(keys), BURST_UPDATES), file=out)
@@ -135,7 +157,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

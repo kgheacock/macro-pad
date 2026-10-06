@@ -47,7 +47,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single or burst")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, or warmup (send nothing)")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
 	if err := fs.Parse(args); err != nil {
@@ -63,8 +63,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		script = sendSingle
 	case "burst":
 		script = sendBurst
+	case "busyburst":
+		script = sendBusyBurst
+	case "warmup":
+		// Sends nothing. The first connection after the board reloads
+		// code.py has given an unreadable trace stream and no decoded
+		// reports, and the next connection has worked every time, so
+		// `make blink-trace` opens the board once before it measures.
+		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single or burst\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst or warmup\n", *scenario)
 		return 2
 	}
 
@@ -150,6 +158,34 @@ func sendSingle(dev transport.Transport) error {
 func sendBurst(dev transport.Transport) error {
 	for i := 0; i < burstUpdates; i++ {
 		if err := dev.SendKeyState(keyState(byte(i), uint16(0x0800*(i+1)), false)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// busyBurstEmojiBase tags each report of the busy burst: key k carries Emoji
+// ID busyBurstEmojiBase+k, which the board's HOST_MESSAGE_DECODED record
+// repeats as its payload, so tools/blink_trace.py can tell a burst report
+// from a setup report.
+const busyBurstEmojiBase = 0x20
+
+// sendBusyBurst makes keys 0 to 2 blink, then sends one update to each of
+// the six keys back to back while they do. A blinking key costs the board a
+// push every 500 ms, so its loop is slower than when idle, and a report that
+// arrives before the loop reads the last one overwrites it.
+func sendBusyBurst(dev transport.Transport) error {
+	for key := byte(0); key < 3; key++ {
+		if err := dev.SendKeyState(keyState(key, 0xF800, true)); err != nil {
+			return err
+		}
+	}
+	time.Sleep(settle)
+
+	for key := byte(0); key < burstUpdates; key++ {
+		ks := keyState(key, uint16(0x0800*(int(key)+1)), key < 3)
+		ks.EmojiID = busyBurstEmojiBase + key
+		if err := dev.SendKeyState(ks); err != nil {
 			return err
 		}
 	}

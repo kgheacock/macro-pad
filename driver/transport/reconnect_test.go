@@ -397,3 +397,35 @@ func TestReconnecting_ASlowGlyphUploadDoesNotBlockCloseOrTheSavedState(t *testin
 		t.Fatal("Close blocked behind a glyph upload")
 	}
 }
+
+func TestReconnecting_SixGlyphsAreSavedAndReplayedInKeyOrder(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := connected(t, dir, nil)
+	for k := byte(0); k < 6; k++ {
+		r.SendCustomGlyph(k, fullGlyph(0x10+k))
+		r.SendKeyState(key(k, uint16(k), CustomGlyphSentinelEmojiID, k == 0))
+	}
+	r.Close()
+
+	for k := byte(0); k < 6; k++ {
+		pixels, err := os.ReadFile(filepath.Join(dir, glyphFileName(k)))
+		if err != nil || !bytes.Equal(pixels, fullGlyph(0x10+k)) {
+			t.Fatalf("glyph-%d.bin: err %v, want the key's own glyph", k, err)
+		}
+	}
+
+	r2, board := connected(t, dir, nil)
+	defer r2.Close()
+	waitFor(t, "the replay", func() bool { return len(board.sent()) >= 12 })
+
+	var want []string
+	for k := 0; k < 6; k++ {
+		want = append(want,
+			fmt.Sprintf("glyph %d 32768 bytes", k),
+			fmt.Sprintf("key %d color %#04x emoji 254 blink %v", k, k, k == 0),
+		)
+	}
+	if got := board.sent(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay = %q, want %q", got, want)
+	}
+}

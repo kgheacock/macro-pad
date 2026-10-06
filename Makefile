@@ -74,6 +74,8 @@ blink-trace: check-circuitpy
 	python3 tools/blink_trace.py install $(CIRCUITPY_VOLUME)
 	sync
 	diskutil unmount $(CIRCUITPY_VOLUME)
+	@echo "Waiting for the board to reload code.py: a report sent during the reload is dropped."
+	sleep 10
 	cd driver && go run ./cmd/blinksend --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID) \
 		--scenario=$(SCENARIO) --trace-file=$(BLINK_TRACE_FILE)
 	python3 tools/blink_trace.py report --scenario=$(SCENARIO) $(BLINK_TRACE_FILE)

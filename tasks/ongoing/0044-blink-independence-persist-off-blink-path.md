@@ -157,7 +157,10 @@ ticked.
   Not run: it needs the board. `tools/blink_trace.py`'s analysis passes its tests on synthetic traces only.
 - [ ] **DoD-6** — A burst of 6 updates, sent 50 ms apart through the driver, gives 6 `HOST_MESSAGE_DECODED` records.
   **Proof:** `make blink-trace SCENARIO=burst` prints `decoded 6/6`
-  Not run: it needs the board. `minReportGap` is 50 ms, a starting value and not a measured one.
+  Measured on 2026-10-06 by running `blinksend` directly on an idle board: `decoded 6/6`, in 7 records, with key 5 decoded twice.
+  The first `make blink-trace` run printed `decoded 0/6` because it sent during the board's reload after the `code.py` write.
+  The target now waits 10 s; that is not yet checked end to end, so the box stays empty.
+  A replay of 5 keys, with two glyph uploads, once left key 0 blank. Its cause is not found; see `firmware/README.md`, "Latency".
 - [x] **DoD-7** — `SendKeyState` called twice at once waits `minReportGap` before the second write.
   **Proof:** `cd driver && go test ./transport -run TestSendKeyStateSpacesReports`
 - [x] **DoD-8** — `firmware/README.md` records that the board keeps no state, why, and how the host replays it.
@@ -186,7 +189,8 @@ ticked.
 - Replaying six keys costs 6 reports at `minReportGap`, and a glyph costs about 32 KB over CDC → DoD-11 records the time to the last key.
 - A glyph upload to the board takes seconds, and the first version of `Reconnecting` held its lock throughout, so every other send and `Close` hung → the lock is split, and a test covers it.
 - A one-shot `macrodriver` call does not survive a power cycle → documented in `firmware/README.md`.
-- A 50 ms burst needs the firmware to read each report in time → DoD-6 measures it. Raise `minReportGap` if it fails.
+- A 50 ms burst needs the firmware to read each report in time → an idle board read all six. A busy one lost key 0's report once during a replay. Raise `minReportGap`, or send each replayed key state twice, if it recurs.
+- `Device.Close` called twice crashed the daemon on shutdown (a second `hid_close`) → `Close` is idempotent now, with a test.
 - A mounted `CIRCUITPY` on macOS reloads the board and breaks CDC and HID → unmount it before `make blink-trace`.
 
 ## Open questions

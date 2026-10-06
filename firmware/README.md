@@ -181,10 +181,27 @@ A blinking key keeps its phase when an update arrives: the redraw shows the
 frame the key showed, in the new color, and the next toggle stays on its old
 500 ms schedule. Only a due blink toggles the frame.
 
+**Burst of 6 reports, 50 ms apart** (task 0044's DoD-6, RP2350, 2026-10-06,
+idle board, no blinkers):
+
+```
+decoded 6/6
+(7 records: a report was decoded more than once)
+```
+
+All six reports reached the board. One decoded twice, which is harmless. A
+first run printed `decoded 0/6`: it sent 1 s after writing `code.py`, while the
+board was reloading, and a report sent during a reload is dropped. The make
+target now waits 10 s. That wait is not yet checked end to end. 50 ms is
+therefore enough for an idle board. It is not known to be enough for a busy one:
+after a replug, a replay of 5 keys with two glyph uploads once left key 0
+blank and not blinking, and re-sending its state fixed it. The cause was not
+found. The trace of that replay was unreadable, because the daemon started
+reading the trace stream in the middle of a frame.
+
 **Not yet measured with `make blink-trace`:** the largest gap between blink
-pushes while key 4 updates (`SCENARIO=single`, DoD-5 of task 0044), and how
-many of 6 reports 50 ms apart reach the board (`SCENARIO=burst`, DoD-6).
-Record the two lines it prints here.
+pushes while key 4 updates (`SCENARIO=single`, DoD-5 of task 0044).
+Record the line it prints here.
 
 `make blink-trace SCENARIO=single` or `SCENARIO=burst`, run from the repo root,
 puts a tracing `code.py` on the board, unmounts `CIRCUITPY`, sends the

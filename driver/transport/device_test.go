@@ -285,6 +285,26 @@ func TestSendKeyStateSpacesReports(t *testing.T) {
 	}
 }
 
+// countingWriteCloser counts Close calls.
+type countingWriteCloser struct {
+	nopWriteCloser
+	closes int
+}
+
+func (c *countingWriteCloser) Close() error { c.closes++; return nil }
+
+func TestDevice_CloseTwiceClosesTheHandlesOnce(t *testing.T) {
+	hid := &countingWriteCloser{}
+	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+
+	d.Close()
+	d.Close()
+
+	if hid.closes != 1 {
+		t.Fatalf("HID handle closed %d times, want once: a second hid_close crashes the process", hid.closes)
+	}
+}
+
 func TestDevice_SendCustomGlyph(t *testing.T) {
 	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
 	d := newDevice(nopWriteCloser{}, serialConn)

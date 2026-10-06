@@ -78,9 +78,31 @@ the board if it is not attached, and sends that state again every time the
 board connects, including after a replug. A send while the board is absent
 is remembered and replayed. A key keeps showing the default between a power
 cut and the replay, which takes the board's boot time plus about 1 s of
-settling and one report per key. The memory lives in the daemon, so a
-daemon restart loses it until the plugins send again. Code that holds a
-`Device` directly, such as `macrodriver`, gets no replay.
+settling and one report per key. Code that holds a `Device` directly, such
+as `macrodriver`, gets no replay.
+
+**State files.** The daemon also saves what it remembers on the host, on
+every change, so a daemon restart or a host reboot loses nothing. `--state-dir`
+names the directory; the default is `macro-pad` under the user's config
+directory, `~/Library/Application Support/macro-pad` on macOS, and an empty
+value keeps the state in memory only. It holds:
+
+- `keys.json`: each key's `key_index`, `color` (RGB565), `emoji_id`, and
+  `blink`, in key order.
+- `glyph-N.bin`: key N's custom glyph as the raw 32,768 bytes the board
+  receives, 128×128 big-endian RGB565. A built-in Emoji ID in a later key
+  state deletes the file.
+
+Files are written to a temporary name and renamed, so a crash leaves the old
+file or the new one. A `keys.json` that does not parse is moved to
+`keys.json.bad` and the daemon starts with no state. A key that names a glyph
+whose file is missing or the wrong size keeps its color and blink and shows no
+glyph. Each of these is logged.
+
+A glyph takes about 3 s to cross to the board with the daemon's other replay
+(measured once on the real board: 4 keys and one glyph, from start to
+connected). While one crosses, other sends wait their turn, but a state
+update still reaches the files at once and `Close` does not wait.
 
 ## Connectivity check
 

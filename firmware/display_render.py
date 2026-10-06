@@ -41,14 +41,13 @@ class KeyState:
     """One key's render target: which glyph, which background color, and
     whether it should blink.
 
-    `color` is 16-bit RGB565, matching the wire protocol and
-    `glyph_state.py`'s persisted format.
+    `color` is 16-bit RGB565, matching the wire protocol.
 
     `pixels`, when not `None`, is the glyph: 128x128 big-endian RGB565, 2
     bytes per pixel, with `TRANSPARENT_PIXEL` marking a transparent pixel.
-    `emoji_id` is still tracked while `pixels` is set, so persistence
-    (`glyph_state.py`) can tell a custom image apart from a built-in one
-    with no second flag. A key with no `pixels` shows only its color.
+    `emoji_id` is still tracked while `pixels` is set, so a key state that
+    names the custom-glyph sentinel keeps the image in place. A key with no
+    `pixels` shows only its color.
     """
 
     def __init__(

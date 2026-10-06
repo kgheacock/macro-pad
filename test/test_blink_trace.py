@@ -15,10 +15,8 @@ def _trace_line(code, key, device_us):
     )
 
 
-def _single_run(blink_period_us, write_us):
-    """Keys 0 to 2 blink for 3 s. Key 4 is updated at 1 s, and the write
-    follows its redraw.
-    """
+def _single_run(blink_period_us):
+    """Keys 0 to 2 blink for 3 s. Key 4 is updated at 1 s."""
     lines = [json.dumps({"offset_us": 0, "samples": 1, "estimator": "x"})]
     t = 0
     while t <= 3_000_000:
@@ -27,27 +25,19 @@ def _single_run(blink_period_us, write_us):
         t += blink_period_us
     lines.append(_trace_line(blink_trace.HOST_MESSAGE_DECODED, 4, 1_000_000))
     lines.append(_trace_line(blink_trace.REFRESH_DONE, 4, 1_060_000))
-    lines.append(_trace_line(blink_trace.PERSIST_DONE, 4, 1_060_000 + write_us))
     return lines
 
 
-def test_single_run_within_the_limits_passes():
-    records = blink_trace.load_trace(_single_run(500_000, 50_000))
+def test_single_run_within_the_limit_passes():
+    records = blink_trace.load_trace(_single_run(500_000))
     out = io.StringIO()
 
     assert blink_trace.report(records, "single", out) is True
     assert "max gap 500.0 ms" in out.getvalue()
-    assert "max persist 50.0 ms" in out.getvalue()
 
 
 def test_single_run_with_a_frozen_blink_fails():
-    records = blink_trace.load_trace(_single_run(950_000, 50_000))
-
-    assert blink_trace.report(records, "single", io.StringIO()) is False
-
-
-def test_single_run_with_a_slow_write_fails():
-    records = blink_trace.load_trace(_single_run(500_000, 320_000))
+    records = blink_trace.load_trace(_single_run(950_000))
 
     assert blink_trace.report(records, "single", io.StringIO()) is False
 

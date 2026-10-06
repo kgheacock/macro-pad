@@ -22,7 +22,6 @@ import time
 import digitalio
 
 import display_render
-import glyph_state
 import tracer as tracer_module
 import wire
 from debounce import Debouncer
@@ -39,18 +38,6 @@ DEFAULT_EMOJI_ID = 0
 # a blink. Confirmed live during task 0031's key-0 bring-up. 500ms gives
 # a 1Hz blink.
 BLINK_INTERVAL_US = 500_000
-
-# `step` persists changed keys when no blink is due within this long, so the
-# write happens in the idle gap between two rounds of blink pushes. An `nvm`
-# write of all six headers took 48 ms to 53 ms on the board; 100 ms leaves
-# room for it (task 0044).
-PERSIST_BUDGET_US = 100_000
-
-# A change waits for an idle gap at most this long. Then `step` writes
-# anyway and freezes the blinking keys for one `nvm` write. Without a limit,
-# blinkers that are out of phase can leave no idle gap for ever, and a power
-# cut would lose every change made meanwhile.
-PERSIST_MAX_WAIT_US = 2_000_000
 
 
 class Backlight:
@@ -112,7 +99,6 @@ class MacroPad:
         debounce_window_ms=7.5,
         idle_timer=None,
         tracer=None,
-        storage=None,
     ):
         self._switches = switches
         self._panels = panels
@@ -120,11 +106,6 @@ class MacroPad:
         self._hid_device = hid_device
         self._serial = serial
         self._tracer = tracer
-        self._storage = (
-            storage
-            if storage is not None
-            else glyph_state.NvmStorage(key_count=len(switches))
-        )
         self._custom_glyph_reader = wire.CustomGlyphReader()
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
@@ -134,21 +115,12 @@ class MacroPad:
         self._last_raw = [not switch.value for switch in switches]
         self._idle_timer = idle_timer if idle_timer is not None else IdleTimer()
 
-        # `_persisted_header` mirrors the header last written for each key,
-        # and `_persisted_pixels` the glyph last written. A later state that
-        # encodes identically is not written again — see
-        # tasks/ongoing/0030-custom-glyph-upload-and-persistence.md's
-        # Risks, "Flash wear." Pixels compare by identity, as in
-        # display_render.py: a new glyph is a new bytes object.
-        self._persisted_header = [None] * len(switches)
-        self._persisted_pixels = [None] * len(switches)
-        # Keys whose state changed since the last `step` persisted them, and
-        # when the oldest of those changes happened. `step` writes them in
-        # an idle gap, or once the oldest has waited PERSIST_MAX_WAIT_US.
-        self._persist_pending = set()
-        self._persist_since_us = None
+        # Every key starts at the power-on default. The board keeps no state
+        # across a power cycle: the host driver replays each key's last state
+        # when it reconnects (task 0044).
         self.key_states = [
-            self._restore_key_state(key_index) for key_index in range(len(switches))
+            display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
+            for _ in switches
         ]
         # Next `now_us` at which a blinking key is allowed to toggle
         # visibility again; see BLINK_INTERVAL_US. `None` while the key does
@@ -159,94 +131,6 @@ class MacroPad:
         # up showing.
         self._dirty = set(range(len(self.key_states)))
 
-    def _restore_key_state(self, key_index):
-        """Build one key's starting `KeyState`: its last persisted state,
-        or the power-on default when none was saved, or the saved record
-        is corrupt.
-        """
-        saved = self._storage.read(key_index)
-        if saved is None:
-            return display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
-
-        try:
-            color, emoji_id, blink, pixels = glyph_state.decode(saved)
-        except ValueError:
-            return display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
-
-        self._persisted_header[key_index] = glyph_state.encode_header(color, emoji_id, blink)
-        self._persisted_pixels[key_index] = pixels
-        return display_render.KeyState(
-            emoji_id=emoji_id, color=color, blink=blink, pixels=pixels
-        )
-
-    def _blink_due_within(self, now_us, span_us):
-        """True when a blinking key's next toggle falls within `span_us`."""
-        for index, key_state in enumerate(self.key_states):
-            next_blink_us = self._next_blink_us[index]
-            if key_state.blink and next_blink_us is not None:
-                if next_blink_us - now_us <= span_us:
-                    return True
-        return False
-
-    def _persist_pending_keys(self, now_us):
-        """Write every key whose state changed, in one `nvm` write.
-
-        Runs after the redraw, so a write never delays a key's new image.
-        It waits while a blink is due within PERSIST_BUDGET_US: the write
-        freezes the loop, and a frozen loop is a late blink. A change that
-        has waited PERSIST_MAX_WAIT_US is written regardless.
-
-        A write failure (for example the filesystem going read-only for a
-        glyph's pixels, or a `make flash` sync landing on the same file at
-        the same instant — see `boot.py`'s `storage.remount` comment) is
-        dropped rather than raised: the key still keeps its new state in
-        RAM and on its display, it just won't survive the next power cycle.
-        """
-        if not self._persist_pending:
-            return
-        if self._persist_since_us is None:
-            self._persist_since_us = now_us
-
-        overdue = now_us - self._persist_since_us >= PERSIST_MAX_WAIT_US
-        if not overdue and self._blink_due_within(now_us, PERSIST_BUDGET_US):
-            return
-
-        headers = {}
-        pixels = {}
-        for key_index in sorted(self._persist_pending):
-            key_state = self.key_states[key_index]
-            header = glyph_state.encode_header(
-                key_state.color, key_state.emoji_id, key_state.blink
-            )
-            glyph_changed = (
-                key_state.pixels is not None
-                and key_state.pixels is not self._persisted_pixels[key_index]
-            )
-            if header != self._persisted_header[key_index] or glyph_changed:
-                headers[key_index] = header
-            if glyph_changed:
-                pixels[key_index] = key_state.pixels
-
-        if headers:
-            try:
-                written = self._storage.write_many(headers, pixels)
-            except OSError:
-                written = ()
-            for key_index in written:
-                self._persisted_header[key_index] = headers[key_index]
-                self._persisted_pixels[key_index] = self.key_states[key_index].pixels
-
-        if self._tracer is not None:
-            for key_index in sorted(self._persist_pending):
-                self._tracer.record(
-                    tracer_module.PERSIST_DONE,
-                    key_index,
-                    0,
-                    time.monotonic_ns() // 1000,
-                )
-        self._persist_pending.clear()
-        self._persist_since_us = None
-
     def step(self, now_us):
         """Run one iteration of the loop."""
         host_message = self._apply_host_report(now_us)
@@ -254,7 +138,6 @@ class MacroPad:
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys(now_us)
-        self._persist_pending_keys(now_us)
 
         if host_message or custom_glyph_message or key_event:
             self._idle_timer.touch(now_us)
@@ -310,7 +193,6 @@ class MacroPad:
         if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
             key_state.pixels = None
         self._dirty.add(message.key_index)
-        self._persist_pending.add(message.key_index)
         return True
 
     def _apply_custom_glyph(self):
@@ -345,7 +227,6 @@ class MacroPad:
         key_state.emoji_id = wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
         key_state.pixels = glyph.pixels
         self._dirty.add(glyph.key_index)
-        self._persist_pending.add(glyph.key_index)
         return True
 
     @staticmethod

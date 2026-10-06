@@ -1,6 +1,6 @@
 ---
 id: "0044"
-title: "Keep blinking keys independent: persist key state with one cheap nvm write in an idle gap"
+title: "Keep blinking keys independent: keep no key state on the board, and replay it from the host"
 status: "ongoing"
 created: "2026-10-06"
 updated: "2026-10-06"
@@ -13,7 +13,7 @@ related: ["0030", "0042", "0043"]
 tags: ["firmware", "blink", "latency"]
 ---
 
-# 0044 — Keep blinking keys independent: persist key state with one cheap nvm write in an idle gap
+# 0044 — Keep blinking keys independent: keep no key state on the board, and replay it from the host
 
 ## Problem
 
@@ -29,7 +29,8 @@ keeps one HID report. An update to a blinking key flips it to the opposite frame
 ## Goals
 
 - An update to one key delays no other blinking key by more than 150 ms.
-- Every update stays durable. No rule blocks a write because a key blinks.
+- After a power cut or a replug while the host runs, every key shows its last state again. The host restores it.
+- The board wears no flash for key state.
 - Every report in a burst of updates reaches the board.
 - An update to a blinking key keeps that key on its 500 ms toggle schedule.
 
@@ -42,7 +43,7 @@ keeps one HID report. An update to a blinking key flips it to the opposite frame
 
 ## Approaches considered
 
-Three approaches follow. Each one solves the freeze in a different way.
+Four approaches follow. Each one solves the freeze in a different way.
 
 ### Approach A — Write only while no key blinks
 
@@ -75,23 +76,39 @@ The 5-byte header of each key lives in `nvm`. A write of all six headers takes a
   no longer resets the state of a key (task 0030, DoD-7).
 - Bad, because custom-glyph pixels do not fit in the 4096-byte `nvm`. They stay in files, and a glyph upload still stalls.
 
+### Approach D — Keep no state on the board, and replay it from the host
+
+The board holds key state in RAM only. `macropadd` remembers each key's last key state and custom glyph.
+When the board connects, it sends them again.
+
+- Good, because the board never writes flash. The freeze and the wear are gone, and so is the gap rule.
+- Good, because the board loses a whole storage format, `glyph_state.py`, and `boot.py` no longer remounts the filesystem for writing.
+- Good, because it fits the Stream Deck portability goal of task 0013: a Stream Deck keeps no state either.
+- Bad, because with no driver running, a power cycle leaves every key at the power-on default.
+  A one-shot `macrodriver` call lasts only until the next power cycle.
+- Bad, because the keys show the default for a few seconds after a replug, until the board has booted and the driver has replayed.
+- Bad, because a daemon restart or a host reboot loses the memory, unless the daemon saves it to disk. This task does not.
+
 ## Decision
 
-Chosen: **Approach C — One `nvm` write, placed in an idle gap**.
+Chosen: **Approach D — Keep no state on the board, and replay it from the host**.
 
-It keeps every update durable, which is the cost that the owner refused in Approach A.
-At 16 MHz, six in-phase blinkers push for 126 ms of each 500 ms. The measured 50 ms write fits the 370 ms gap.
-But blinkers that were updated at different times are out of phase, and one of them can be due every 83 ms.
-Then no 100 ms gap exists, and the 2 s limit forces the write. The decision accepts a 50 ms freeze in that
-case, and the change of `make flash` behavior. Issue 2 (one shared phase) removes the case.
+The owner chose it after Approach C, on 2026-10-06, because of flash wear. An `nvm` write is one sector erase with no wear leveling.
+At an assumed 100,000 erase cycles, a plugin that changes a key every few seconds would use them in days.
+Approach C also needed a gap rule and still forced a 50 ms freeze when blinkers were out of phase.
+The decision accepts that the board shows the default until a driver connects.
+Approach C was built first, reviewed, and removed.
 
 ## Design
 
-`glyph_state.py` gets `NvmStorage`. It holds one 5-byte header per key at offset `5 * key`, behind a magic byte.
-A bad magic reads as the power-on default. Pixel data of a custom glyph stays in `glyph_state_files/`.
+The board writes nothing. `MacroPad` starts every key at the power-on default. `glyph_state.py`, its tests, the `storage`
+argument, and the persist gate are gone. `boot.py` no longer remounts the filesystem.
 
-`MacroPad._persist_pending_keys` runs when no blink is due in the next `PERSIST_BUDGET_US` (100 ms),
-or when the oldest pending change is older than `PERSIST_MAX_WAIT_US` (2 s). It writes all pending headers in one `nvm` write.
+`transport.Reconnecting` wraps the real device. It opens the board, waits `defaultSettleDelay` (1 s, a starting value
+that no measurement backs), and sends each key's last state: its custom glyph first, then its key state. It reads the board's
+messages for as long as the board stays connected, and opens it again when it goes. It remembers the state the board holds:
+a custom glyph sets the key to the sentinel Emoji ID, and a built-in Emoji ID ends the key's glyph. A send while no board is connected is
+remembered, reports success, and is replayed. `macropadd` uses it in place of `transport.Open`.
 
 Two smaller fixes ride along:
 
@@ -102,13 +119,13 @@ Two smaller fixes ride along:
 
 Files to change:
 
-- `firmware/glyph_state.py` — `NvmStorage`, magic byte
-- `firmware/app.py` — gate and batch `_persist_pending_keys`, keep the blink schedule on a state redraw
+- `firmware/app.py`, `firmware/boot.py`, `firmware/glyph_state.py` (deleted) — no persistence, no remount
 - `firmware/display_render.py` — `render_key(..., toggle=True)`
+- `driver/transport/reconnect.go`, `driver/cmd/macropadd/main.go` — `Reconnecting`
 - `driver/transport/device.go` — `minReportGap`
 - `tools/blink_trace.py`, `driver/cmd/blinksend/main.go`, `Makefile` — `make blink-trace`
-- `test/test_app.py`, `test/test_glyph_state.py`, `driver/transport/device_test.go` — new tests
-- `firmware/README.md`, `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md` — record the change
+- `test/test_app.py`, `test/test_display_render.py`, `driver/transport/reconnect_test.go`, `driver/transport/device_test.go` — tests
+- `firmware/README.md`, `docs/wire-protocol.md`, `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md` — record the change
 
 ## Definition of done
 
@@ -116,20 +133,19 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [x] **DoD-1** — Any number of pending keys cost one `nvm` write in one `step`.
-  **Proof:** `python3 -m pytest test/test_app.py -k persist_batches_one_nvm_write`
-- [x] **DoD-2** — A new `MacroPad` on the same `nvm` restores color, Emoji ID, and blink of every key.
-  A bad magic byte gives the power-on default.
-  **Proof:** `python3 -m pytest test/test_glyph_state.py -k nvm`
-- [x] **DoD-3** — With a blink due in 50 ms, `step` does not write. When the change is 2 s old, it writes.
-  **Proof:** `python3 -m pytest test/test_app.py -k persist_waits_for_idle_gap`
+- [x] **DoD-1** — The board code writes no key state: no `nvm`, no state file, no filesystem remount.
+  **Proof:** `git grep -n "nvm\|glyph_state\|remount" -- 'firmware/*.py'` returns nothing
+- [x] **DoD-2** — After a reconnect, `Reconnecting` sends each key's last key state, and a custom glyph before its key state.
+  A built-in Emoji ID ends a key's glyph.
+  **Proof:** `cd driver && go test ./transport -run 'TestReconnecting_Replays|TestReconnecting_ABuiltIn'`
+- [x] **DoD-3** — A send while the board is absent reports success and is replayed on the next connect.
+  **Proof:** `cd driver && go test ./transport -run TestReconnecting_ASendWhileTheBoardIsAbsentIsReplayed`
 - [x] **DoD-4** — An update to a blinking key draws the frame that the key showed, with the new color,
   and the next toggle stays on the old schedule.
   **Proof:** `python3 -m pytest test/test_app.py -k update_keeps_blink_phase`
 - [ ] **DoD-5** — At 16 MHz, with keys 0 to 2 blinking, 10 updates to key 4, 2 s apart, leave every gap
-  between `REFRESH_DONE` records of keys 0 to 2 at 650 ms or less, and every write between `REFRESH_DONE` and
-  `PERSIST_DONE` at 100 ms or less. Before the change, at 4 MHz, the largest gap was 950 ms.
-  **Proof:** `make blink-trace SCENARIO=single` prints `max gap` and `max persist` within these limits
+  between `REFRESH_DONE` records of keys 0 to 2 at 650 ms or less. Before the change, at 4 MHz, the largest gap was 950 ms.
+  **Proof:** `make blink-trace SCENARIO=single` prints a `max gap` within this limit
   (board, `CIRCUITPY` unmounted)
   Not run: it needs the board. `tools/blink_trace.py`'s analysis passes its tests on synthetic traces only.
 - [ ] **DoD-6** — A burst of 6 updates, sent 50 ms apart through the driver, gives 6 `HOST_MESSAGE_DECODED` records.
@@ -137,28 +153,35 @@ ticked.
   Not run: it needs the board. `minReportGap` is 50 ms, a starting value and not a measured one.
 - [x] **DoD-7** — `SendKeyState` called twice at once waits `minReportGap` before the second write.
   **Proof:** `cd driver && go test ./transport -run TestSendKeyStateSpacesReports`
-- [x] **DoD-8** — `firmware/README.md` records the `nvm` layout, the gap rule, and the measured times.
-  Task 0030 states that `make flash` no longer resets key state.
-  **Proof:** `firmware/README.md`, section "Latency"; `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md`
-  The times recorded are the spike's `nvm` and file write times. The figures of DoD-5 and DoD-6 are not there yet.
+- [x] **DoD-8** — `firmware/README.md` records that the board keeps no state, why, and how the host replays it.
+  Task 0030 states that the board no longer persists state.
+  **Proof:** `firmware/README.md`, sections "Latency" and "Custom glyphs and key state"; `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md`
 - [ ] **DoD-9** — The temporary tracer edit is gone from `firmware/code.py`.
   **Proof:** `git grep "TEMPORARY (blink spike)"` returns nothing
   The edit is gone: `git grep "TEMPORARY (blink spike)" -- firmware tools Makefile driver` finds nothing. The
   proof as written still finds this line of the spec, so it cannot return nothing.
 - [x] **DoD-10** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
+- [ ] **DoD-11** — With `macropadd` running and keys set, unplugging and replugging the board brings every key back to its last state.
+  **Proof:** on the board: set a color on key 0 and a blinking color on key 1, replug the USB cable, and see both keys return
+  without a new call. Record the time from replug to the last key in `firmware/README.md`, and set `defaultSettleDelay` from it.
+  Not run: it needs the board.
 
 ## Risks
 
-- `nvm` survives `make flash`, so an old layout can reach new firmware → the magic byte rejects it.
-- `nvm` wears out like flash → a write happens only when a header changed, and at most once per 2 s. Estimate the cycles in DoD-8.
+- Replay races the board's boot: a report that arrives while `code.py` restarts is dropped → `defaultSettleDelay` waits 1 s. DoD-11 measures it.
+- Replaying six keys costs 6 reports at `minReportGap`, and a glyph costs about 32 KB over CDC → DoD-11 records the time to the last key.
+- A daemon restart or a host reboot loses the memory → keys show the default until plugins send again. Saving the memory to disk is an open question.
+- A one-shot `macrodriver` call does not survive a power cycle → documented in `firmware/README.md`.
 - A 50 ms burst needs the firmware to read each report in time → DoD-6 measures it. Raise `minReportGap` if it fails.
 - A mounted `CIRCUITPY` on macOS reloads the board and breaks CDC and HID → unmount it before `make blink-trace`.
 
 ## Open questions
 
-- [ ] Is a 2 s limit right? A longer limit raises the loss on power cut and lowers wear. — owner
-- [ ] Should `make flash` still reset key state? It needs a boot-time or `boot.py` rule. — owner
+- [ ] Should `macropadd` save its memory to disk, so a host reboot also restores the keys? — owner
+- [ ] Is a default-color power-on acceptable with no driver running, for example on a wall charger? — owner
+- [x] Is a 2 s limit right? Moot: the board no longer writes.
+- [x] Should `make flash` still reset key state? Moot: it behaves like a power cycle.
 
 ## Notes
 
@@ -170,6 +193,7 @@ ticked.
   16 MHz, and 17 ms to 18 ms at 20 MHz and above. The CPU that feeds the FIFO limits a push above about 19 MHz.
   The RP2350 steps its SPI clock down from 150 MHz, so 16 MHz runs at 15 MHz. A color change at 16 MHz is about
   55 ms: a 23 ms compose and a push of 21 ms or more. A DMA push could go below 17 ms. See the native-core spike.
+- Approach C was built and measured in part, then removed. Its numbers stay above in the spike note.
 - The PIO spike showed a PIO blink keeps time through flash writes. It gates the backlight, so it hides the
   whole key. This task does not use it.
 - Run `go run ./driver/cmd/macropadd` instead of a built binary. A binary built in the scratchpad exited with code 137.

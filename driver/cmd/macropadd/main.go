@@ -43,17 +43,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		emu := transport.NewEmulator()
 		dev, injector = emu, emu
 	} else {
-		d, err := transport.Open(ctx, transport.Options{
+		// The board keeps no key state across a power cycle (task 0044), so
+		// this transport remembers each key's last state and replays it
+		// every time the board connects. It also waits for a board that is
+		// not attached yet, and survives a replug.
+		dev = transport.NewReconnecting(transport.Options{
 			VendorID:     uint16(*vendorID),
 			ProductID:    uint16(*productID),
 			SerialNumber: *serialNumber,
 			CDCPort:      *cdcPort,
+		}, func(format string, args ...any) {
+			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
 		})
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		dev = d
 	}
 
 	// dev.ReadMessage supports exactly one caller. plugin.Server and, when

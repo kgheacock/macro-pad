@@ -158,25 +158,34 @@ def _build_frames(key_state: KeyState, tracer=None, key_index=None) -> None:
             key_state._off_frame = _compose(key_state.color, None)
 
 
-def render_key(panel, key_state: KeyState, tracer=None, key_index=None) -> None:
+def render_key(
+    panel, key_state: KeyState, tracer=None, key_index=None, toggle=True
+) -> None:
     """Push one frame for a key to its panel.
 
     Rebuilds the key's cached frames first when its color, glyph, or blink
     flag changed since they were built. Then pushes the "on" frame, or for
-    a blinking key, whichever of "on" and "off" it did not push last.
+    a blinking key, the frame it should show now.
+
+    `toggle` says why the key is drawn. A due blink passes `True` and the
+    key flips to the frame it did not push last. A redraw caused by a state
+    change passes `False` and the key keeps the frame it showed, so an
+    update to a blinking key leaves its blink phase alone (task 0044). The
+    first paint of a blinking key shows "on" either way.
 
     `tracer`/`key_index`, when `tracer` is set, record a `GLYPH_BUILT`
     record when the frames are rebuilt, and a `REFRESH_DONE` record right
     after the push returns — see task 0042.
     """
+    first_paint = key_state._on_frame is None
     _build_frames(key_state, tracer, key_index)
 
-    # A steady key always shows "on". A blinking key flips on each call, and
+    # A steady key always shows "on". A blinking key flips on a toggle, and
     # starts from "off" so its first paint shows "on".
-    if key_state.blink:
-        key_state._blink_visible = not key_state._blink_visible
-    else:
+    if not key_state.blink or (first_paint and not toggle):
         key_state._blink_visible = True
+    elif toggle:
+        key_state._blink_visible = not key_state._blink_visible
 
     frame = key_state._on_frame if key_state._blink_visible else key_state._off_frame
     panel.push(frame)

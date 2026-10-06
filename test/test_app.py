@@ -3,6 +3,7 @@ import bitmaptools
 import pytest
 
 # Imported flat, under the names the board uses. See conftest.py.
+import app as app_module
 import display_render
 import glyph_state
 import pins
@@ -103,20 +104,49 @@ class FakeHID:
         return self.queued.pop(0)
 
 
-class FakeGlyphStorage:
-    """In-memory stand-in for `glyph_state.FilesystemStorage`. Passing the
-    same instance to two `_build_pad` calls simulates a reboot: the
-    second `MacroPad` reads whatever the first one wrote.
+class FakeNvm:
+    """`microcontroller.nvm`, with a count of the writes it took. A slice
+    assignment is one write, as it is on the board.
     """
 
     def __init__(self):
-        self._files = {}
+        self._bytes = bytearray(b"\xff" * 4096)
+        self.writes = 0
+
+    def __getitem__(self, index):
+        return self._bytes[index]
+
+    def __setitem__(self, index, value):
+        self._bytes[index] = bytes(value)
+        self.writes += 1
+
+
+class FakePixelFiles:
+    """In-memory stand-in for the files that hold a custom glyph's pixels."""
+
+    def __init__(self):
+        self.files = {}
 
     def read(self, key_index):
-        return self._files.get(key_index)
+        return self.files.get(key_index)
 
     def write(self, key_index, data):
-        self._files[key_index] = data
+        self.files[key_index] = data
+
+
+class FakeStorage(glyph_state.NvmStorage):
+    """A real `NvmStorage` over a fake `nvm` and fake pixel files.
+    `reboot()` returns a second `NvmStorage` on the same `nvm` and files:
+    a power cycle, which keeps both and forgets everything else.
+    """
+
+    def __init__(self, nvm=None, files=None):
+        self.nvm = nvm if nvm is not None else FakeNvm()
+        self.files = files if files is not None else FakePixelFiles()
+        super().__init__(nvm=self.nvm, pixel_files=self.files, key_count=len(pins.KEYS))
+
+    def reboot(self):
+        return FakeStorage(self.nvm, self.files)
 
 
 def _build_pad(idle_timer=None, tracer=None, storage=None, panels=None):
@@ -125,7 +155,7 @@ def _build_pad(idle_timer=None, tracer=None, storage=None, panels=None):
     backlights = [FakeBacklight() for _ in pins.KEYS]
     hid_device = FakeHID()
     serial = FakeSerial()
-    storage = storage if storage is not None else FakeGlyphStorage()
+    storage = storage if storage is not None else FakeStorage()
 
     pad = MacroPad(
         switches=switches,
@@ -584,13 +614,16 @@ def test_custom_glyph_paint_trace_order():
 
 
 def test_state_is_persisted_after_the_redraw_in_the_same_step():
-    storage = FakeGlyphStorage()
+    storage = FakeStorage()
     events = []
     panels = FakePanels(len(pins.KEYS))
     original_push = panels.per_key[2].push
     panels.per_key[2].push = lambda frame: (events.append("push"), original_push(frame))
-    original_write = storage.write
-    storage.write = lambda key, data: (events.append("write"), original_write(key, data))
+    original_write = storage.write_many
+    storage.write_many = lambda headers, pixels: (
+        events.append("write"),
+        original_write(headers, pixels),
+    )[1]
     pad, _, _, _, hid_device, _, _ = _build_pad(storage=storage, panels=panels)
     pad.step(0)
     events.clear()
@@ -599,7 +632,7 @@ def test_state_is_persisted_after_the_redraw_in_the_same_step():
     pad.step(1000)
 
     assert events == ["push", "write"]
-    assert storage._files[2] == glyph_state.encode(0xF81F, 0, False)
+    assert storage.reboot().read(2) == glyph_state.encode(0xF81F, 0, False)
 
 
 def test_custom_glyph_ignores_unknown_key_index():
@@ -793,7 +826,7 @@ def test_custom_glyph_wakes_backlight():
 
 
 def test_reboot_restores_persisted_state():
-    storage = FakeGlyphStorage()
+    storage = FakeStorage()
     pad, _, _, _, hid_device, serial, _ = _build_pad(storage=storage)
 
     pad.step(0)
@@ -803,7 +836,7 @@ def test_reboot_restores_persisted_state():
     pad.step(2000)
 
     # A fresh MacroPad, same storage: the reboot.
-    rebooted, _, panels, _, _, _, _ = _build_pad(storage=storage)
+    rebooted, _, panels, _, _, _, _ = _build_pad(storage=storage.reboot())
 
     assert rebooted.key_states[4].color == 0xF800
     assert rebooted.key_states[4].emoji_id == 0xF2
@@ -826,11 +859,15 @@ def test_reboot_with_a_legacy_record_shows_its_color_only():
     """A record from before task 0043 holds RGBA4444 pixels the board
     cannot show. The key keeps its color and blink and shows no glyph.
     """
-    storage = FakeGlyphStorage()
     legacy = bytes((0x1F, 0xF8, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, 0)) + bytes(
         wire.CUSTOM_GLYPH_PIXELS_SIZE
     )
-    storage.write(2, legacy)
+
+    class LegacyStorage:
+        def read(self, key_index):
+            return legacy if key_index == 2 else None
+
+    storage = LegacyStorage()
 
     pad, _, panels, _, _, _, _ = _build_pad(storage=storage)
     pad.step(0)
@@ -841,7 +878,7 @@ def test_reboot_with_a_legacy_record_shows_its_color_only():
 
 
 def test_second_state_leaves_no_trace_of_first():
-    storage = FakeGlyphStorage()
+    storage = FakeStorage()
     pad, _, _, _, _, serial, _ = _build_pad(storage=storage)
 
     pad.step(0)
@@ -850,14 +887,98 @@ def test_second_state_leaves_no_trace_of_first():
     serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0x22))
     pad.step(2000)
 
-    rebooted, _, _, _, _, _, _ = _build_pad(storage=storage)
+    rebooted, _, _, _, _, _, _ = _build_pad(storage=storage.reboot())
 
     assert rebooted.key_states[3].pixels == _custom_glyph_pixels(0x22)
-    # Exactly one stored record for the key — no trace of the first state.
-    assert len(storage._files) == 1
-    assert storage._files[3] == glyph_state.encode(
+    # Exactly one stored pixel file for the key — no trace of the first state.
+    assert list(storage.files.files) == [3]
+    assert storage.files.files[3] == _custom_glyph_pixels(0x22)
+    assert storage.reboot().read(3) == glyph_state.encode(
         rebooted.key_states[3].color,
         wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
         False,
         _custom_glyph_pixels(0x22),
     )
+
+
+def test_persist_batches_one_nvm_write(monkeypatch):
+    """Keys changed while a blink is due wait in RAM. The first idle gap
+    writes all of them in one `nvm` write, however many there are.
+    """
+    storage = FakeStorage()
+    pad, _, _, _, hid_device, _, _ = _build_pad(storage=storage)
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=0, color=0x001F, emoji_id=0, blink=True))
+    pad.step(1000)  # key 0 blinks next at 501_000: the gap is open, so this writes
+    assert storage.nvm.writes == 1
+
+    # Five more keys change in the 100 ms before key 0's blink is due.
+    for step_index, key_index in enumerate((1, 2, 3, 4, 5)):
+        now_us = 410_000 + step_index * 1000
+        hid_device.feed(_key_state_report(key_index=key_index, color=0xF800, emoji_id=0))
+        pad.step(now_us)
+    assert storage.nvm.writes == 1  # all five waited
+
+    pad.step(1000 + BLINK_INTERVAL_US)  # the blink toggles, then the gap opens
+    assert storage.nvm.writes == 2  # one write for five keys
+
+    rebooted, _, _, _, _, _, _ = _build_pad(storage=storage.reboot())
+    assert [rebooted.key_states[i].color for i in range(6)] == [
+        0x001F, 0xF800, 0xF800, 0xF800, 0xF800, 0xF800,
+    ]
+
+
+def test_persist_waits_for_idle_gap(monkeypatch):
+    """A blink due within PERSIST_BUDGET_US holds the write back. The write
+    still happens once the oldest change has waited PERSIST_MAX_WAIT_US.
+    """
+    monkeypatch.setattr(app_module, "BLINK_INTERVAL_US", 50_000)  # always due soon
+    storage = FakeStorage()
+    pad, _, _, _, hid_device, _, _ = _build_pad(storage=storage)
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=0, color=0x001F, emoji_id=0, blink=True))
+    pad.step(1000)  # key 0 blinks next in 50 ms
+
+    now_us = 1000
+    while now_us + 50_000 < 1000 + app_module.PERSIST_MAX_WAIT_US:
+        now_us += 50_000
+        pad.step(now_us)
+        assert storage.nvm.writes == 0
+
+    pad.step(1000 + app_module.PERSIST_MAX_WAIT_US)  # the change is 2 s old
+    assert storage.nvm.writes == 1
+    assert storage.reboot().read(0) == glyph_state.encode(0x001F, 0, True)
+
+
+def test_update_keeps_blink_phase():
+    """An update to a blinking key draws the frame the key showed, with the
+    new color. The next toggle stays on the old schedule.
+    """
+    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=5, color=0x001F, emoji_id=0, blink=True))
+    pad.step(1000)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x001F)  # "on"
+    pad.step(1000 + BLINK_INTERVAL_US)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)  # "off"
+    shown = len(panels.per_key[5].frames)
+
+    # An update while "off": the key stays "off", in the new color.
+    hid_device.feed(_key_state_report(key_index=5, color=0xF800, emoji_id=0, blink=True))
+    pad.step(1000 + BLINK_INTERVAL_US + 200_000)
+    assert len(panels.per_key[5].frames) == shown + 1
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)
+
+    # No toggle until the old schedule, then "on" in the new color.
+    pad.step(1000 + 2 * BLINK_INTERVAL_US - 1)
+    assert len(panels.per_key[5].frames) == shown + 1
+    pad.step(1000 + 2 * BLINK_INTERVAL_US)
+    assert len(panels.per_key[5].frames) == shown + 2
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0xF800)
+
+    # An update while "on": the key stays "on".
+    hid_device.feed(_key_state_report(key_index=5, color=0x07E0, emoji_id=0, blink=True))
+    pad.step(1000 + 2 * BLINK_INTERVAL_US + 100_000)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x07E0)
+    pad.step(1000 + 3 * BLINK_INTERVAL_US)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)

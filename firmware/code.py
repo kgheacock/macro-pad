@@ -35,10 +35,13 @@ DISPLAY_ROWSTART = 3
 # 4MHz confirmed live as reliable on this board's breadboard wiring, for
 # the old `displayio` driver. 24MHz (its default) wiped visibly top to
 # bottom, and 32MHz showed no content at all. Task 0043's raw SPI driver
-# targets 16MHz (a frame push takes 21ms, against 80ms at 4MHz), but no
-# panel has been checked at that rate yet — see that task's DoD-7. Raise
-# this to 16_000_000 once a wired key renders correctly at it.
-DISPLAY_BAUDRATE = 4_000_000
+# runs at 16MHz: a frame push takes 21ms, against 79ms at 4MHz. Confirmed
+# live on all six wired panels (2026-10-06): a labeled test pattern of
+# color bars and 1px columns rendered cleanly at 4, 8, 12, 16, and 20MHz.
+# The RP2350 steps its SPI clock down from 150MHz, so 16MHz runs at an
+# actual 15MHz. Above about 19MHz a push stays near 17ms, because the CPU
+# feeding the FIFO is the limit, not the wire, so a higher rate buys little.
+DISPLAY_BAUDRATE = 16_000_000
 
 # `displayio` claims the display pins at boot. Release them so the raw SPI
 # driver can use them.

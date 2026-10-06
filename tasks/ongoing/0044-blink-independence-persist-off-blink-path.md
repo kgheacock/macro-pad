@@ -1,14 +1,14 @@
 ---
 id: "0044"
 title: "Keep blinking keys independent: persist key state with one cheap nvm write in an idle gap"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-06"
 updated: "2026-10-06"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0044-blink-independence-persist-off-blink-path"
 related: ["0030", "0042", "0043"]
 tags: ["firmware", "blink", "latency"]
 ---

@@ -61,6 +61,83 @@ def test_decode_rejects_short_custom_glyph_record():
         glyph_state.decode(truncated)
 
 
+def _legacy_record(color, emoji_id, blink, pixels=None):
+    """A record as `glyph_state.encode` wrote it before task 0043: a
+    4-byte header with no format byte, then RGBA4444 pixels for a custom
+    glyph.
+    """
+    header = bytes((color & 0xFF, color >> 8, emoji_id, 1 if blink else 0))
+    return header + (pixels if pixels is not None else b"")
+
+
+def test_encode_starts_with_the_format_byte():
+    data = glyph_state.encode(color=0xF800, emoji_id=0xF3, blink=True)
+
+    assert data == bytes((glyph_state.FORMAT_RGB565, 0x00, 0xF8, 0xF3, 1))
+
+
+def test_decode_rejects_unknown_format():
+    data = bytearray(glyph_state.encode(color=0xF800, emoji_id=0xF3, blink=True))
+    data[0] = 0x7F
+
+    with pytest.raises(ValueError):
+        glyph_state.decode(bytes(data))
+
+
+def test_legacy_record_is_color_only():
+    """A legacy custom-glyph record holds RGBA4444 pixels. It loads as its
+    color and blink, with no pixels and the power-on Emoji ID.
+    """
+    legacy = _legacy_record(
+        color=0xF81F,
+        emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+        blink=True,
+        pixels=bytes([0xAB]) * wire.CUSTOM_GLYPH_PIXELS_SIZE,
+    )
+
+    color, emoji_id, blink, pixels = glyph_state.decode(legacy)
+
+    assert color == 0xF81F
+    assert emoji_id == 0
+    assert blink is True
+    assert pixels is None
+
+
+def test_legacy_built_in_record_still_loads():
+    color, emoji_id, blink, pixels = glyph_state.decode(
+        _legacy_record(color=0x07E0, emoji_id=0xF3, blink=False)
+    )
+
+    assert (color, emoji_id, blink, pixels) == (0x07E0, 0xF3, False, None)
+
+
+def test_legacy_record_with_a_color_byte_equal_to_the_format_byte():
+    legacy = _legacy_record(
+        color=0x0001,
+        emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+        blink=False,
+        pixels=bytes(wire.CUSTOM_GLYPH_PIXELS_SIZE),
+    )
+
+    assert glyph_state.decode(legacy)[0] == 0x0001
+
+
+def test_current_custom_record_cut_short_by_one_byte_is_not_read_as_legacy():
+    """It is as long as a legacy custom record, so only the sentinel's
+    offset tells them apart.
+    """
+    truncated = glyph_state.encode(
+        color=0x1234,
+        emoji_id=wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
+        blink=False,
+        pixels=bytes(wire.CUSTOM_GLYPH_PIXELS_SIZE),
+    )[:-1]
+    assert len(truncated) == 4 + wire.CUSTOM_GLYPH_PIXELS_SIZE
+
+    with pytest.raises(ValueError):
+        glyph_state.decode(truncated)
+
+
 class FakeGlyphStorage:
     """In-memory stand-in for `glyph_state.FilesystemStorage`, so a test
     can inspect exactly what would have been written without touching a

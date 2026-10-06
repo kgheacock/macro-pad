@@ -30,15 +30,15 @@ apart from `modules/`, `__pycache__/`, `lib/`, and this `README.md`.
 `--delete` means any other file on the drive that isn't in `firmware/`
 is removed, including test data or logs a developer added on the board
 directly. `lib/` is excluded so a CircuitPython library installed there
-with `circup` — `adafruit_st7735r`, for the real display driver — survives
-a reflash. The target fails with a clear error if `CIRCUITPY` isn't
+with `circup` survives a reflash. The firmware needs none: `st7735.py`
+drives the panels itself, so `adafruit_st7735r` is no longer required. The target fails with a clear error if `CIRCUITPY` isn't
 mounted.
 
 ## Scope
 
 The firmware runs on the microcontroller only. It does the following:
 
-- Renders the emoji, background color, and blink state for each key.
+- Renders the glyph, background color, and blink state for each key.
 - Debounces the switch input (5 ms to 10 ms).
 - Emits raw, timestamped press and release events. It does not classify
   single, double, or long presses — the host does that.
@@ -61,10 +61,11 @@ the byte layout of every message sent or received over these channels.
 CircuitPython runs `boot.py` first, then `code.py`. `code.py` is this
 firmware's entry point.
 
-`code.py` only builds the real hardware objects — switches, a
-display-bus builder, backlights, the HID device, and the CDC data
-channel — and passes them to `app.MacroPad`, then calls `run()`. It
-holds no loop logic of its own.
+`code.py` only builds the real hardware objects — switches, six
+`st7735.Panel`s, backlights, the HID device, and the CDC data channel —
+pulses the shared reset line once and initialises each panel once (see
+"Panels," below), and passes everything to `app.MacroPad`, then calls
+`run()`. It holds no loop logic of its own.
 
 The loop lives in `app.py`. `MacroPad` takes every hardware object as a
 constructor argument, so the same loop runs under pytest against the
@@ -78,8 +79,7 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
 3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
 4. Redraw the keys that changed, plus every key that blinks — see
-   "Display bus," below, for when a redraw reuses the open bus and when
-   it releases and rebuilds it.
+   "Panels" and "Cached frames," below.
 5. Set each backlight from the idle timer.
 
 `wire.py` encodes and decodes the messages in
@@ -92,115 +92,103 @@ Modules under `firmware/` import each other flat (`import wire`, not
 `from firmware import wire`), because this folder's contents are copied
 to the root of the `CIRCUITPY` drive, where no `firmware` package exists.
 
-## Display bus
+## Panels
 
-This board's CircuitPython build allows only 1 concurrent `displayio`
-display bus — a 2nd `fourwire.FourWire` raises `RuntimeError: Too many
-display busses`, confirmed live during task 0010's bring-up. All 6
-keys' displays share one `busio.SPI` bus with a distinct chip-select
-pin each, so only one key's `fourwire.FourWire`/`ST7735R` pair can
-exist at a time.
+All six panels share one `busio.SPI` bus and one DC line and one RST line.
+Each panel has its own chip-select line. This board's CircuitPython build
+allows only 1 concurrent `displayio` display bus, so `displayio` had to
+release the bus and build a new one on every key switch. Each build
+pulsed the shared RST line and reran the panel's 763 ms init, so an
+update to one key blanked all six. Tasks 0032 and 0040 worked within that
+limit, and 0040 only fixed repeat redraws of the same key.
 
-`code.py` reflects this: it holds no persistent list of display
-objects. Instead, its `build_display(key_index)` builds one key's bus
-on demand, and `app.MacroPad` tracks which key currently owns the open
-bus in `_active_key_index`/`_active_display`. A redraw for that same
-key reuses the live display and calls `display_render.render_key`
-directly — no rebuild, no `displayio.release_displays()` call, so the
-key's hardware reset line stays untouched. A redraw for a different key
-releases the current bus first, then builds the new one, before
-`render_key` runs. See
-[`tasks/ongoing/0032-share-one-display-bus-across-six-keys.md`](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md)
-for why the one-bus-at-a-time limit exists, and
-[`tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md`](../tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md)
-for why a redraw of the same key no longer pays a rebuild at all: on
-real hardware, rebuilding the bus on every redraw pulsed the reset line
-each time, and a key's color did not reliably hold across repeat
-redraws. Switching from one key to a different key still pulses that
-shared reset line — see 0040's Non-goals for why that cost remains.
+Task 0043 drops `displayio` for the panels. `st7735.py` has one `Panel`
+for each key. `code.py` pulses RST once at boot, holds it high, and runs
+each panel's init once (`st7735.init_panels`). After that the only thing
+the firmware sends a panel is `Panel.push(frame)`: it takes the shared bus
+under that panel's CS line, sets the draw window with the panel's column
+and row offsets, and writes the frame. It sends no init command and
+touches no RST, so a key's update never reaches another panel.
 
-## Persistent display scene graph
+`DISPLAY_BAUDRATE` in `code.py` is 4 MHz, the rate confirmed live with
+`displayio` on this board's breadboard wiring. A frame push takes about
+80 ms at 4 MHz and 21 ms at 16 MHz, the target. Raise it once a wired key
+renders correctly at the higher rate; task 0043's DoD-7 records the rate
+that works.
 
-`display_render.render_key` builds each key's `displayio.Group`,
-background `Palette`, and glyph `TileGrid` once, on that key's `KeyState`,
-and mutates those same objects on every later call instead of replacing
-them: the background `Palette`'s color is rewritten in place, the glyph
-`TileGrid` is swapped for a freshly built one only when its source
-(`emoji_id`, `pixels`, or — for a built-in emoji, whose bitmap bakes in
-`key_state.color` as its background, see task 0023 — `color`) actually
-changed, and a blink toggle flips the glyph `TileGrid`'s `hidden` flag
-rather than adding or removing it from the `Group`. A custom image with a
-transparent pixel is the one exception: its glyph `TileGrid` never
-hides, and a blink instead rewrites the background `Palette` between
-`key_state.color` and black — see [task
-0041](../tasks/ongoing/0041-color-and-blink-behind-custom-glyph.md).
-Rebuilding a fresh
-object graph on every call, as `render_key` did before, gives displayio
-nothing to diff against the last frame, so it always redraws the full
-128×128 panel; mutating the same objects in place lets its own
-per-`TileGrid` dirty tracking shrink a blink-only redraw to the glyph's
-own area. See
-[`tasks/ongoing/0033-mutate-display-scene-graph-in-place.md`](../tasks/ongoing/0033-mutate-display-scene-graph-in-place.md)
-for the design decision.
+See [`tasks/ongoing/0043-raw-spi-panels-init-once.md`](../tasks/ongoing/0043-raw-spi-panels-init-once.md)
+for the design decision. It replaces
+[0032](../tasks/ongoing/0032-share-one-display-bus-across-six-keys.md),
+[0033](../tasks/ongoing/0033-mutate-display-scene-graph-in-place.md), and
+[0040](../tasks/ongoing/0040-keep-active-keys-display-bus-open-across-redraws.md).
 
-**Blink redraw latency: not yet measured on hardware.** Task 0033's
-Design assumes this CircuitPython build's `BusDisplay.refresh()` redraws
-only a `TileGrid`'s own dirty bounds rather than the union of every
-dirty `TileGrid` in the `Group` — its Open questions flags this as
-unconfirmed. Task 0040 means a blinking key's own `BusDisplay` now
-stays open across its consecutive blink toggles (as long as no other
-key's redraw takes the bus in between), the same persistent `Group`
-attached throughout, rather than a fresh `BusDisplay` on every call —
-but whether `refresh()`'s dirty-bounds behavior itself holds is still
-unconfirmed. Confirm both with the real board: reuse task 0031's
-`time.monotonic_ns()` probe around `display.refresh()`, but on a
-blinking key whose glyph is smaller than the full panel (not emoji ID
-`0x00`, whose full-panel placeholder glyph's cost this task does not
-change by design), across several consecutive blink toggles once the
-scene graph is already built.
+## Cached frames
 
-Record the result here as a line of the form:
+`display_render.render_key` keeps two cached 128×128 frames for each key
+on its `KeyState`: an "on" frame, and an "off" frame while the key
+blinks. A frame is a 16-bit `displayio.Bitmap` used as a plain pixel
+buffer; `displayio` never shows it. The board builds a frame with
+`bitmaptools`: it fills the key's color, then blits the glyph over it and
+skips the transparent value `0x0000`.
+
+The board rebuilds the frames only when the key's color or glyph changes,
+or when the key starts blinking. A blink toggle pushes the other cached
+frame and calls no fill or blit. The host driver converts a glyph to the
+panel's big-endian RGB565 before it sends it, so the board converts no
+pixel and swaps no byte.
+
+- "On" frame: the key's color with the glyph over it.
+- "Off" frame, for a glyph with a transparent pixel, or for a key with no
+  glyph: the same frame over black. The glyph stays and the color behind
+  it blinks. A key with no glyph blinks between its color and black.
+- "Off" frame, for a glyph with no transparent pixel: the key's color
+  alone, so the whole glyph blinks.
+
+Two frames for each of six keys use 384 KB of the board's heap, which has
+about 8 MB free.
+
+**Latency, measured on the board** from the trace of `macropadd
+--trace-file`, with `HOST_MESSAGE_DECODED` as the start:
 
 ```
-Measured blink redraw latency: N.NNN ms (RP2350, <emoji id>, glyph smaller than full panel)
+Measured color change: 46.5 ms to 54.4 ms to REFRESH_DONE, blink push: 23.5 ms (RP2350, key 0, 16 MHz, 2026-10-05)
 ```
 
-## Glyphs
-
-`firmware/glyphs.py` renders a plain background-colored tile for any
-emoji ID — it holds no glyph bitmap of its own.
-`display_render.render_key` draws through it via the `emoji_lookup`
-callable, so this module never appears in the render loop directly. See
-[`docs/wire-protocol.md`](../docs/wire-protocol.md#emoji-ids) for the
-reserved IDs.
-
-Rendering any other glyph — an emoji character or an arbitrary image —
-happens on the driver side and reaches a key as a [Set custom
-glyph](../docs/wire-protocol.md#set-custom-glyph-cdc-host--device)
-message. See [task
-0039](../tasks/complete/0039-remove-built-in-firmware-glyph-table.md) for
-the design decision.
+The 46 ms is a 23 ms compose (`GLYPH_BUILT`) and a 23 ms push. A push of a
+cached frame alone takes 23 ms. At 4 MHz, the rate `code.py` sets until
+DoD-7 confirms a faster one, a push takes 81 ms, so a color change takes
+about 105 ms and a blink push 81 ms. No panel was checked at 16 MHz.
+Persisting to flash takes 240 ms to 360 ms and runs after the redraw, in
+the same `step`, so it delays the next `step` and not the new image.
 
 ## Custom glyphs and persisted state
 
 A driver call can send an arbitrary 128×128 image for one key over CDC —
 "Set custom glyph" in [`docs/wire-protocol.md`](../docs/wire-protocol.md)
-— instead of one of `firmware/glyphs.py`'s built-in IDs. `wire.py`'s
-`CustomGlyphReader` buffers this message's bytes across as many `step`
-calls as it takes to arrive, since at up to 32,769 bytes it is too large
-to read in one iteration without stalling the switch scan.
-`display_render.raw_bitmap_tile_grid` renders the result the same way
-`glyphs.lookup` renders a built-in one.
+— instead of a plain color. `wire.py`'s `CustomGlyphReader` buffers this
+message's bytes across as many `step` calls as it takes to arrive, since
+at up to 32,769 bytes it is too large to read in one iteration without
+stalling the switch scan. A message of the wrong length, or for a key
+this pad does not have, is dropped. The pixels are 128×128 big-endian
+RGB565, with `0x0000` for a transparent pixel and `0x0001` for real
+black; see "Set custom glyph" in the wire protocol. Every Emoji ID draws
+no glyph: the board has no built-in glyph table (task 0039), so a key
+shows its color until a custom glyph arrives.
 
 `glyph_state.py` persists each key's last state — built-in or custom,
-color, and blink — to one file per key under `glyph_state/`, so a key
+color, and blink — to one file per key under `glyph_state_files/`, so a key
 redraws its own last state after a power cycle with no driver connected.
 A firmware reflash (`make flash`) resets this: `glyph_state/` is not part
 of the source tree that command syncs from (see its `.gitignore` entry),
 so its `rsync --delete` removes the directory from the board on every
 run. `MacroPad`'s `storage` constructor argument injects a fake for this
-in tests, the same way `emoji_lookup` and the other hardware arguments
-do; `code.py` relies on the real `glyph_state.FilesystemStorage` default.
+in tests, the same way `panels` and the other hardware arguments do;
+`code.py` relies on the real `glyph_state.FilesystemStorage` default.
+
+A record starts with a format byte (task 0043). A record from before
+that task has none and holds RGBA4444 pixels, which the board cannot
+show: it loads as its color and blink alone, and the driver resends the
+glyph.
 
 ## Connectivity check
 
@@ -254,12 +242,11 @@ import time
 
 import board
 import pins
-from app import MacroPad, blank_glyph, make_switch
+from app import MacroPad, make_switch
 
 
-class NullDisplay:
-    def show(self, group): pass
-    def refresh(self, **kwargs): return True
+class NullPanel:
+    def push(self, frame): pass
 
 
 class NullBacklight:
@@ -276,11 +263,10 @@ class NullHID:
 
 pad = MacroPad(
     switches=[make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS],
-    build_display=lambda key_index: NullDisplay(),
+    panels=[NullPanel() for _ in pins.KEYS],
     backlights=[NullBacklight() for _ in pins.KEYS],
     hid_device=NullHID(),
     serial=NullSerial(),
-    emoji_lookup=blank_glyph,
 )
 
 ITERATIONS = 1000
@@ -313,34 +299,12 @@ Record the result here as a line of the form:
 Measured loop period: N.NNN ms (RP2350, displays absent, 1000 iterations)
 ```
 
-## Per-key-switch display-bus latency
-
-**Not yet measured.** `build_display(key_index)` constructs a fresh
-`fourwire.FourWire` and `ST7735R`, which runs the panel's full init
-sequence — a cost the held-open display list task 0032 replaced never
-paid. Task 0040 changed when this cost is paid: `app.MacroPad` only
-calls `build_display` when a redraw's key differs from
-`_active_key_index`, not on every redraw of the same key, so it lands
-once per key switch instead of once per redraw. This needs the real
-board to measure: time one `build_display` call end to end with a
-console attached (see "Loop period," above, for how to reach the
-console), and record how many key switches can happen in one main-loop
-tick before that latency, multiplied by the number of keys switching
-in, threatens task 0022's loop-period budget — several different keys
-blinking in turn is the worst case named in task 0032's Risks.
-
-Record the result here as a line of the form:
-
-```
-Measured per-key-switch display-bus latency: N.NNN ms (RP2350, one key, ST7735R init included)
-```
-
 ## Custom-glyph paint latency
 
 **Not yet measured.** Setting a key's image over "Set custom glyph" takes
 about 1 second to appear on the panel, and no measurement yet says which
-stage of that path — CDC transfer + decode, flash persist, glyph-build,
-SPI refresh — holds the time. `firmware/tracer.py`'s `CUSTOM_GLYPH_DECODED`,
+stage of that path — CDC transfer + decode, glyph-build, SPI refresh, flash
+persist — holds the time. `firmware/tracer.py`'s `CUSTOM_GLYPH_DECODED`,
 `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE` trace codes mark the end
 of each of those four stages, in order, for one custom-glyph paint — see
 [`docs/wire-protocol.md`](../docs/wire-protocol.md#trace-record)'s trace
@@ -373,7 +337,7 @@ With `macropadd` running, send one custom image to a key through
 `driver/plugin/web/keystate.html`, then stop `macropadd`. The JSONL file
 holds one line per trace record, each with the device's Timestamp and
 `driver/recorder`'s estimated host arrival time; diff consecutive
-`CUSTOM_GLYPH_DECODED` → `PERSIST_DONE` → `GLYPH_BUILT` → `REFRESH_DONE`
+`CUSTOM_GLYPH_DECODED` → `GLYPH_BUILT` → `REFRESH_DONE` → `PERSIST_DONE`
 Timestamps for the key that received the image to get each stage's
 duration. Revert the `code.py` edit above and run `make flash` again
 afterward — leaving tracing on is a deliberate choice, not a default (see

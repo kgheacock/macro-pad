@@ -26,8 +26,12 @@ firmware/modules/$(CIRCUITPYTHON_UF2):
 
 .PHONY: check-circuitpy
 check-circuitpy:
-	diskutil info $(CIRCUITPY_VOLUME) 2>/dev/null | grep -q '^ *Volume Name: *CIRCUITPY$$' || \
-		(echo "error: CIRCUITPY volume not found at $(CIRCUITPY_VOLUME)" >&2; exit 1)
+	@if diskutil info $(CIRCUITPY_VOLUME) 2>/dev/null | grep -q '^ *Volume Name: *CIRCUITPY$$'; then \
+		echo "OK"; \
+	else \
+		echo "Error: CIRCUITPY volume not found at $(CIRCUITPY_VOLUME)" >&2; \
+		exit 1; \
+	fi
 
 .PHONY: flash
 flash: check-circuitpy

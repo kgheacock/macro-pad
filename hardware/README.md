@@ -61,7 +61,7 @@ pin connections in one diagram.
 pin, but on the breadboard it sits directly across from the 3V3 row
 (VCC/BULK squares) and would have added a 6-wire DIN fan-out to an
 already crowded row. GP7 is also SPI0 TX, so it swapped places with
-4CSX, which is a single wire and doesn't mind sitting across from that
+4CS, which is a single wire and doesn't mind sitting across from that
 row. SCK stays on GP2 &mdash; its own opposite row (RESET) has nothing
 else wired to it.
 

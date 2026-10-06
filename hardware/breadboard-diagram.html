@@ -55,6 +55,15 @@
     white-space: nowrap;
   }
   .pin-name.wired { color: inherit; font-weight: 600; }
+  .coord {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .68rem;
+    font-weight: 700;
+    padding: .05rem .3rem;
+    border-radius: 3px;
+    background: rgba(128, 128, 128, .22);
+    white-space: nowrap;
+  }
   .spine-cell {
     background: #3a3a3a;
     color: #eee;
@@ -83,15 +92,15 @@
     flex: none;
     box-sizing: border-box;
   }
-  .sig-key  { background: #2f6fed; color: #fff; }
-  .sig-dc   { background: #f2c94c; color: #111; }
-  .sig-cs   { background: #f2994a; color: #111; }
-  .sig-clk  { background: #14b8a6; color: #111; }
-  .sig-din  { background: #9aa0a6; color: #111; }
-  .sig-gnd  { background: #111111; color: #fff; }
-  .sig-vcc  { background: #e5484d; color: #fff; }
-  .sig-pwm  { background: #8b5cf6; color: #fff; }
-  .sig-rst  { background: #8b5e3c; color: #fff; }
+  .sig-key  { background: #f2c94c; color: #111; } /* yellow */
+  .sig-dc   { background: #111111; color: #fff; } /* black */
+  .sig-cs   { background: #e5484d; color: #fff; } /* red */
+  .sig-clk  { background: #f5f5f5; color: #111; } /* white */
+  .sig-din  { background: #2f6fed; color: #fff; } /* blue */
+  .sig-gnd  { background: #2ea043; color: #fff; } /* green */
+  .sig-vcc  { background: #f2c94c; color: #111; } /* yellow */
+  .sig-pwm  { background: #111111; color: #fff; } /* black */
+  .sig-rst  { background: #e5484d; color: #fff; } /* red */
   .sig-bulk { background: #0d9488; color: #fff; }
 </style>
 </head>
@@ -100,16 +109,21 @@
 <p class="subtitle">
   All 6 GPIO pin connections for the Waveshare 0.85&quot; ScreenKey
   <em>Module</em> variant (9-pin SPI Control Interface) wired to the
-  Pimoroni Pico Plus 2. Colors and labels match
+  Pimoroni Pico Plus 2. Labels match
   <code>firmware/pins.py</code> and the Pinout table in
-  <code>hardware/README.md</code>. Pin rows run top to bottom in the same
+  <code>hardware/README.md</code>; colors match the wire harness in use
+  (see the legend). Each Pico pin carries a breadboard coordinate:
+  rows run C to V (20 rows, one per pin on each Pico edge, top to
+  bottom) and columns run 1 to 8 left to right, so the left edge of the
+  Pico sits in column 1 and the right edge in column 8 (e.g. GP0 is
+  C1, VBUS is C8, GP15 is V1). Pin rows run top to bottom in the same
   physical order as the two 20-pin edges on the Pico Plus 2's silkscreen
   (<code>docs/ppico_plus_2_pinout_diagram.pdf</code>) &mdash; GND and 3V3
   are wired from the top-right power pins. CLK (GP2) and DIN (GP7) sit on
   non-adjacent rows: both are still hardware SPI0 pins (SCK and TX), but
   GP3 &mdash; SPI0's other TX-capable pin &mdash; sat directly across
   from the crowded VCC/BULK row, so DIN moved to GP7 and swapped places
-  with 4CSX, which is a single wire and doesn't mind the crowding. BULK
+  with 4CS, which is a single wire and doesn't mind the crowding. BULK
   marks the single 10&micro;F aluminum electrolytic cap at the point
   where 3V3/GND first land on the breadboard, bridging the rail before
   it fans out to all 6 modules &mdash; it is not a GPIO connection. Each
@@ -120,15 +134,15 @@
 
 <fieldset class="legend">
   <legend>Signals</legend>
-  <span class="legend-item"><span class="swatch sig-key"></span>KEY</span>
-  <span class="legend-item"><span class="swatch sig-dc"></span>DCX</span>
-  <span class="legend-item"><span class="swatch sig-cs"></span>CSX</span>
-  <span class="legend-item"><span class="swatch sig-clk"></span>CLK</span>
-  <span class="legend-item"><span class="swatch sig-din"></span>DIN</span>
-  <span class="legend-item"><span class="swatch sig-gnd"></span>GND</span>
-  <span class="legend-item"><span class="swatch sig-vcc"></span>VCC</span>
-  <span class="legend-item"><span class="swatch sig-pwm"></span>PWM</span>
-  <span class="legend-item"><span class="swatch sig-rst"></span>RST</span>
+  <span class="legend-item"><span class="swatch sig-key"></span>KEY (Yellow)</span>
+  <span class="legend-item"><span class="swatch sig-dc"></span>DC (Black)</span>
+  <span class="legend-item"><span class="swatch sig-cs"></span>CS (Red)</span>
+  <span class="legend-item"><span class="swatch sig-clk"></span>CLK (White)</span>
+  <span class="legend-item"><span class="swatch sig-din"></span>DIN (Blue)</span>
+  <span class="legend-item"><span class="swatch sig-gnd"></span>GND (Green)</span>
+  <span class="legend-item"><span class="swatch sig-vcc"></span>VCC (Yellow)</span>
+  <span class="legend-item"><span class="swatch sig-pwm"></span>PWM (Black)</span>
+  <span class="legend-item"><span class="swatch sig-rst"></span>RST (Red)</span>
   <span class="legend-item"><span class="swatch sig-bulk"></span>BULK (10&micro;F electrolytic, at the 3V3/GND rail entry, polarized)</span>
 </fieldset>
 
@@ -136,27 +150,30 @@
 
   <div class="pin-cell side-left">
     <span class="squares"><span class="square sig-pwm">1PWM</span></span>
-    <span class="pin-name wired">GP0</span>
+    <span class="pin-name wired">GP0</span><span class="coord">C1</span>
   </div>
   <div class="spine-cell">USB-C</div>
   <div class="pin-cell side-right">
+    <span class="coord">C8</span>
     <span class="pin-name">VBUS</span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares"><span class="square sig-pwm">2PWM</span></span>
-    <span class="pin-name wired">GP1</span>
+    <span class="pin-name wired">GP1</span><span class="coord">D1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">D8</span>
     <span class="pin-name">VSYS</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="pin-name">GND</span>
+    <span class="pin-name">GND</span><span class="coord">E1</span>
   </div>
   <div class="spine-cell gnd">GND</div>
   <div class="pin-cell side-right">
+    <span class="coord">E8</span>
     <span class="pin-name wired">GND</span>
     <span class="squares">
       <span class="square sig-gnd">1GND</span>
@@ -177,19 +194,21 @@
       <span class="square sig-clk">5CLK</span>
       <span class="square sig-clk">6CLK</span>
     </span>
-    <span class="pin-name wired">GP2</span>
+    <span class="pin-name wired">GP2</span><span class="coord">F1</span>
   </div>
   <div class="spine-cell">RESET</div>
   <div class="pin-cell side-right">
+    <span class="coord">F8</span>
     <span class="pin-name">3V3 EN</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">4CSX</span></span>
-    <span class="pin-name wired">GP3</span>
+    <span class="squares"><span class="square sig-cs">4CS</span></span>
+    <span class="pin-name wired">GP3</span><span class="coord">G1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">G8</span>
     <span class="pin-name wired">3V3</span>
     <span class="squares">
       <span class="square sig-bulk">BULK</span>
@@ -203,38 +222,42 @@
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">1CSX</span></span>
-    <span class="pin-name wired">GP4</span>
+    <span class="squares"><span class="square sig-cs">1CS</span></span>
+    <span class="pin-name wired">GP4</span><span class="coord">H1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">H8</span>
     <span class="pin-name">ADC VREF</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">2CSX</span></span>
-    <span class="pin-name wired">GP5</span>
+    <span class="squares"><span class="square sig-cs">2CS</span></span>
+    <span class="pin-name wired">GP5</span><span class="coord">I1</span>
   </div>
   <div class="spine-cell">RP2350B</div>
   <div class="pin-cell side-right">
+    <span class="coord">I8</span>
     <span class="pin-name wired">GP28</span>
     <span class="squares"><span class="square sig-pwm">6PWM</span></span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="pin-name">GND</span>
+    <span class="pin-name">GND</span><span class="coord">J1</span>
   </div>
   <div class="spine-cell gnd">GND</div>
   <div class="pin-cell side-right">
+    <span class="coord">J8</span>
     <span class="pin-name">GND</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">3CSX</span></span>
-    <span class="pin-name wired">GP6</span>
+    <span class="squares"><span class="square sig-cs">3CS</span></span>
+    <span class="pin-name wired">GP6</span><span class="coord">K1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">K8</span>
     <span class="pin-name wired">GP27</span>
     <span class="squares"><span class="square sig-pwm">5PWM</span></span>
   </div>
@@ -248,54 +271,59 @@
       <span class="square sig-din">5DIN</span>
       <span class="square sig-din">6DIN</span>
     </span>
-    <span class="pin-name wired">GP7</span>
+    <span class="pin-name wired">GP7</span><span class="coord">L1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">L8</span>
     <span class="pin-name wired">GP26</span>
     <span class="squares"><span class="square sig-pwm">4PWM</span></span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">5CSX</span></span>
-    <span class="pin-name wired">GP8</span>
+    <span class="squares"><span class="square sig-cs">5CS</span></span>
+    <span class="pin-name wired">GP8</span><span class="coord">M1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">M8</span>
     <span class="pin-name">RUN</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-cs">6CSX</span></span>
-    <span class="pin-name wired">GP9</span>
+    <span class="squares"><span class="square sig-cs">6CS</span></span>
+    <span class="pin-name wired">GP9</span><span class="coord">N1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">N8</span>
     <span class="pin-name wired">GP22</span>
     <span class="squares"><span class="square sig-pwm">3PWM</span></span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="pin-name">GND</span>
+    <span class="pin-name">GND</span><span class="coord">O1</span>
   </div>
   <div class="spine-cell gnd">GND</div>
   <div class="pin-cell side-right">
+    <span class="coord">O8</span>
     <span class="pin-name">GND</span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares">
-      <span class="square sig-dc">1DCX</span>
-      <span class="square sig-dc">2DCX</span>
-      <span class="square sig-dc">3DCX</span>
-      <span class="square sig-dc">4DCX</span>
-      <span class="square sig-dc">5DCX</span>
-      <span class="square sig-dc">6DCX</span>
+      <span class="square sig-dc">1DC</span>
+      <span class="square sig-dc">2DC</span>
+      <span class="square sig-dc">3DC</span>
+      <span class="square sig-dc">4DC</span>
+      <span class="square sig-dc">5DC</span>
+      <span class="square sig-dc">6DC</span>
     </span>
-    <span class="pin-name wired">GP10</span>
+    <span class="pin-name wired">GP10</span><span class="coord">P1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">P8</span>
     <span class="pin-name">GP21</span>
   </div>
 
@@ -308,55 +336,61 @@
       <span class="square sig-rst">5RST</span>
       <span class="square sig-rst">6RST</span>
     </span>
-    <span class="pin-name wired">GP11</span>
+    <span class="pin-name wired">GP11</span><span class="coord">Q1</span>
   </div>
   <div class="spine-cell">pico plus 2</div>
   <div class="pin-cell side-right">
+    <span class="coord">Q8</span>
     <span class="pin-name">GP20</span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="pin-name">GP12</span>
+    <span class="pin-name">GP12</span><span class="coord">R1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">R8</span>
     <span class="pin-name">GP19</span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares"><span class="square sig-key">1KEY</span></span>
-    <span class="pin-name wired">GP13</span>
+    <span class="pin-name wired">GP13</span><span class="coord">S1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">S8</span>
     <span class="pin-name wired">GP18</span>
     <span class="squares"><span class="square sig-key">6KEY</span></span>
   </div>
 
   <div class="pin-cell side-left">
-    <span class="pin-name">GND</span>
+    <span class="pin-name">GND</span><span class="coord">T1</span>
   </div>
   <div class="spine-cell gnd">GND</div>
   <div class="pin-cell side-right">
+    <span class="coord">T8</span>
     <span class="pin-name">GND</span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares"><span class="square sig-key">2KEY</span></span>
-    <span class="pin-name wired">GP14</span>
+    <span class="pin-name wired">GP14</span><span class="coord">U1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">U8</span>
     <span class="pin-name wired">GP17</span>
     <span class="squares"><span class="square sig-key">5KEY</span></span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares"><span class="square sig-key">3KEY</span></span>
-    <span class="pin-name wired">GP15</span>
+    <span class="pin-name wired">GP15</span><span class="coord">V1</span>
   </div>
   <div class="spine-cell"></div>
   <div class="pin-cell side-right">
+    <span class="coord">V8</span>
     <span class="pin-name wired">GP16</span>
     <span class="squares"><span class="square sig-key">4KEY</span></span>
   </div>

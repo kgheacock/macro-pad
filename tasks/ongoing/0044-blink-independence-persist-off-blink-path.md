@@ -116,14 +116,14 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — Any number of pending keys cost one `nvm` write in one `step`.
+- [x] **DoD-1** — Any number of pending keys cost one `nvm` write in one `step`.
   **Proof:** `python3 -m pytest test/test_app.py -k persist_batches_one_nvm_write`
-- [ ] **DoD-2** — A new `MacroPad` on the same `nvm` restores color, Emoji ID, and blink of every key.
+- [x] **DoD-2** — A new `MacroPad` on the same `nvm` restores color, Emoji ID, and blink of every key.
   A bad magic byte gives the power-on default.
   **Proof:** `python3 -m pytest test/test_glyph_state.py -k nvm`
-- [ ] **DoD-3** — With a blink due in 50 ms, `step` does not write. When the change is 2 s old, it writes.
+- [x] **DoD-3** — With a blink due in 50 ms, `step` does not write. When the change is 2 s old, it writes.
   **Proof:** `python3 -m pytest test/test_app.py -k persist_waits_for_idle_gap`
-- [ ] **DoD-4** — An update to a blinking key draws the frame that the key showed, with the new color,
+- [x] **DoD-4** — An update to a blinking key draws the frame that the key showed, with the new color,
   and the next toggle stays on the old schedule.
   **Proof:** `python3 -m pytest test/test_app.py -k update_keeps_blink_phase`
 - [ ] **DoD-5** — At 16 MHz, with keys 0 to 2 blinking, 10 updates to key 4, 2 s apart, leave every gap
@@ -131,15 +131,20 @@ ticked.
   `PERSIST_DONE` at 100 ms or less. Before the change, at 4 MHz, the largest gap was 950 ms.
   **Proof:** `make blink-trace SCENARIO=single` prints `max gap` and `max persist` within these limits
   (board, `CIRCUITPY` unmounted)
+  Not run: it needs the board. `tools/blink_trace.py`'s analysis passes its tests on synthetic traces only.
 - [ ] **DoD-6** — A burst of 6 updates, sent 50 ms apart through the driver, gives 6 `HOST_MESSAGE_DECODED` records.
   **Proof:** `make blink-trace SCENARIO=burst` prints `decoded 6/6`
-- [ ] **DoD-7** — `SendKeyState` called twice at once waits `minReportGap` before the second write.
+  Not run: it needs the board. `minReportGap` is 50 ms, a starting value and not a measured one.
+- [x] **DoD-7** — `SendKeyState` called twice at once waits `minReportGap` before the second write.
   **Proof:** `cd driver && go test ./transport -run TestSendKeyStateSpacesReports`
-- [ ] **DoD-8** — `firmware/README.md` records the `nvm` layout, the gap rule, and the measured times.
+- [x] **DoD-8** — `firmware/README.md` records the `nvm` layout, the gap rule, and the measured times.
   Task 0030 states that `make flash` no longer resets key state.
   **Proof:** `firmware/README.md`, section "Latency"; `tasks/ongoing/0030-custom-glyph-upload-and-persistence.md`
+  The times recorded are the spike's `nvm` and file write times. The figures of DoD-5 and DoD-6 are not there yet.
 - [ ] **DoD-9** — The temporary tracer edit is gone from `firmware/code.py`.
   **Proof:** `git grep "TEMPORARY (blink spike)"` returns nothing
+  The edit is gone: `git grep "TEMPORARY (blink spike)" -- firmware tools Makefile driver` finds nothing. The
+  proof as written still finds this line of the spec, so it cannot return nothing.
 - [ ] **DoD-10** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
 

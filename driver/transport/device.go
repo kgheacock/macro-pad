@@ -158,6 +158,11 @@ type Device struct {
 	reportMu   sync.Mutex
 	lastReport time.Time
 
+	// closeOnce makes Close safe to call more than once: a second hid_close
+	// on the same handle crashes the process.
+	closeOnce sync.Once
+	closeErr  error
+
 	msgQueue chan Message
 }
 
@@ -326,12 +331,17 @@ func (d *Device) ReadMessage() (Message, error) {
 }
 
 // Close implements Transport. It releases both the HID and CDC handles.
-// A ReadMessage call blocked on the CDC stream returns io.EOF.
+// A ReadMessage call blocked on the CDC stream returns io.EOF. It is safe
+// to call more than once: later calls return the first call's result.
 func (d *Device) Close() error {
-	herr := d.hid.Close()
-	serr := d.serial.Close()
-	if herr != nil {
-		return herr
-	}
-	return serr
+	d.closeOnce.Do(func() {
+		herr := d.hid.Close()
+		serr := d.serial.Close()
+		if herr != nil {
+			d.closeErr = herr
+		} else {
+			d.closeErr = serr
+		}
+	})
+	return d.closeErr
 }

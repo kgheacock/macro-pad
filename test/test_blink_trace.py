@@ -54,7 +54,7 @@ def test_gaps_before_the_first_update_do_not_count():
 
 
 @pytest.mark.parametrize("decoded,passes", [(6, True), (2, False)])
-def test_burst_counts_decoded_messages(decoded, passes):
+def test_burst_counts_the_keys_whose_report_was_decoded(decoded, passes):
     lines = [
         _trace_line(blink_trace.HOST_MESSAGE_DECODED, key, 50_000 * key) for key in range(decoded)
     ]
@@ -62,6 +62,16 @@ def test_burst_counts_decoded_messages(decoded, passes):
 
     assert blink_trace.report(blink_trace.load_trace(lines), "burst", out) is passes
     assert "decoded {}/6".format(decoded) in out.getvalue()
+
+
+def test_burst_with_a_repeated_decode_still_passes():
+    lines = [_trace_line(blink_trace.HOST_MESSAGE_DECODED, key, 50_000 * key) for key in range(6)]
+    lines.append(_trace_line(blink_trace.HOST_MESSAGE_DECODED, 5, 350_000))
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(lines), "burst", out) is True
+    assert "decoded 6/6" in out.getvalue()
+    assert "7 records" in out.getvalue()
 
 
 def test_traced_code_adds_a_tracer_to_the_real_code_py():

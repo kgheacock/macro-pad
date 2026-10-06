@@ -10,7 +10,9 @@ persist inside the gap between two blinks without freezing a blinking key
 4,096-byte `nvm`, so they stay one file per key under `glyph_state_files/`.
 
 `nvm` survives a firmware reflash, unlike a file the reflash deletes. So
-`make flash` no longer resets the state of a key. A magic byte at the start
+`make flash` no longer resets the color, Emoji ID, and blink of a key. It
+still deletes a custom glyph's pixels, and that key shows its color alone
+until the driver resends the glyph. A magic byte at the start
 of `nvm` rejects bytes that another layout left there. See
 tasks/ongoing/0044-blink-independence-persist-off-blink-path.md for the
 design decision, and tasks/ongoing/0030-custom-glyph-upload-and-persistence.md
@@ -240,9 +242,10 @@ class NvmStorage:
         no state was saved for it.
 
         A custom glyph's record is its header followed by its pixels. When
-        the pixel file is missing or has the wrong length, the record is
-        the header alone, which `decode` rejects as a custom record with no
-        pixels.
+        the pixel file is missing or has the wrong length — `make flash`
+        deletes `glyph_state_files/` and leaves `nvm` alone — the key keeps
+        its color and blink and drops to the power-on Emoji ID, as a legacy
+        record does. The driver resends the glyph.
         """
         start, end = self._slot(key_index)
         header = bytes(self._image[start:end])
@@ -252,7 +255,7 @@ class NvmStorage:
             return header
         pixels = self._pixel_files.read(key_index)
         if pixels is None or len(pixels) != wire.CUSTOM_GLYPH_PIXELS_SIZE:
-            return header
+            return header[:3] + bytes((0,)) + header[4:]
         return header + pixels
 
     def write_many(self, headers, pixels):

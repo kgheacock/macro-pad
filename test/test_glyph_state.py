@@ -249,14 +249,14 @@ def test_nvm_storage_keeps_a_custom_glyph_in_files():
     )
 
 
-def test_nvm_storage_with_a_missing_pixel_file_is_a_corrupt_record():
+def test_nvm_storage_with_a_missing_pixel_file_keeps_the_color_and_blink():
+    """`make flash` deletes the pixel files and leaves `nvm` alone."""
     nvm = FakeNvm()
     storage = glyph_state.NvmStorage(nvm=nvm, pixel_files=FakePixelFiles())
-    header = glyph_state.encode_header(0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, False)
+    header = glyph_state.encode_header(0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, True)
     storage.write_many({1: header}, {})
 
-    with pytest.raises(ValueError):
-        glyph_state.decode(storage.read(1))
+    assert glyph_state.decode(storage.read(1)) == (0x001F, 0, True, None)
 
 
 def test_nvm_storage_skips_the_header_of_a_key_whose_pixels_failed_to_write():

@@ -13,7 +13,7 @@ python3 -m venv .venv
 ## CircuitPython hardware mocks
 
 Firmware imports CircuitPython-only modules (`board`, `digitalio`,
-`usb_hid`, `usb_cdc`, `audiobusio`, `displayio`, `bitmaptools`) that do not exist on a dev
+`usb_hid`, `usb_cdc`, `audiobusio`, `displayio`, `bitmaptools`, `microcontroller`) that do not exist on a dev
 machine. Hand-written fakes for these live in [`stubs/`](stubs/), one file
 per module. `conftest.py` puts `stubs/` on `sys.path` before any test
 collects, so firmware code can `import board` (etc.) unmodified in a test.

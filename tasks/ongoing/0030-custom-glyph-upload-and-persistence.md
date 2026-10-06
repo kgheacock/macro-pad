@@ -44,6 +44,10 @@ state across a power cycle.
   already covers the one motion effect this pad supports.
 - Persisted state surviving a firmware reflash. `make flash` resets every
   key to the built-in table by design; see Design and Decision.
+  **Superseded by task 0044:** `make flash` no longer resets key state.
+  Each key's header (color, Emoji ID, blink) now lives in
+  `microcontroller.nvm`, which a reflash leaves alone. The reflash still
+  deletes a custom glyph's pixels in `glyph_state_files/`.
 
 ## Approaches considered
 
@@ -192,6 +196,9 @@ Files to change:
   so no firmware version reads a file an earlier version wrote. **Proof:**
   run `make flash`, then check that `CIRCUITPY/glyph_state_files/` holds
   no files from before the run.
+  **Superseded by task 0044:** `make flash` no longer resets key state, so
+  this proof no longer holds for the headers in `nvm`. It holds for the
+  pixel files, which the reflash still deletes.
 - [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 

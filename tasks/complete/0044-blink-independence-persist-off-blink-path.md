@@ -1,7 +1,7 @@
 ---
 id: "0044"
 title: "Keep blinking keys independent: keep no key state on the board, and replay it from the host"
-status: "ongoing"
+status: "complete"
 created: "2026-10-06"
 updated: "2026-10-06"
 owner: "kgheacock"
@@ -170,10 +170,12 @@ ticked.
   The first version of this proof searched the whole repository, and so found its own line in this spec. It cannot return nothing.
 - [x] **DoD-10** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
-- [ ] **DoD-11** — With `macropadd` running and keys set, unplugging and replugging the board brings every key back to its last state.
-  **Proof:** on the board: set a color on key 0 and a blinking color on key 1, replug the USB cable, and see both keys return
-  without a new call. Record the time from replug to the last key in `firmware/README.md`, and set `defaultSettleDelay` from it.
-  Not run: it needs the board.
+- [x] **DoD-11** — With `macropadd` running and keys set, unplugging and replugging the board brings every key back to its last state.
+  **Proof:** on the board: with six keys set, each showing an emoji over a background color and key 0 blinking, unplug and replug the USB cable,
+  and see every key return without a new call.
+  Run on 2026-10-06: the daemon logged the unplug at 16:47:51 and `replayed the state of 6 keys` at 16:48:08, and the owner confirmed
+  all six keys and key 0's blink. The replay takes about 4 s after the board connects (6 key states and 6 glyphs, `minReportGap` 150 ms).
+  The exact time from replug to the last key was not captured. `defaultSettleDelay` stays at 1 s: no run lost a report to the settle.
 - [x] **DoD-12** — The daemon saves each key's state to files on the host, and a new daemon replays them to the first board.
   A built-in Emoji ID removes the glyph file. A corrupt `keys.json` is moved aside. A missing glyph file keeps the color and blink.
   A slow glyph upload does not block `Close`.

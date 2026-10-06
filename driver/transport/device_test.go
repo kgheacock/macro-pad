@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -240,6 +241,47 @@ func TestDevice_SendKeyState(t *testing.T) {
 	want := []byte{keyStateReportID, 2, ProtocolVersion, 0x00, 0xF8, 7, 1}
 	if !bytes.Equal(written, want) {
 		t.Fatalf("HID write = % x, want % x", written, want)
+	}
+}
+
+// timedWriteCloser records when each write reached it.
+type timedWriteCloser struct {
+	mu     sync.Mutex
+	writes []time.Time
+}
+
+func (w *timedWriteCloser) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes = append(w.writes, time.Now())
+	return len(p), nil
+}
+
+func (w *timedWriteCloser) Close() error { return nil }
+
+func TestSendKeyStateSpacesReports(t *testing.T) {
+	hid := &timedWriteCloser{}
+	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+	defer d.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(key byte) {
+			defer wg.Done()
+			ks := KeyState{KeyIndex: key, Version: ProtocolVersion, Color: 0xF800}
+			if err := d.SendKeyState(ks); err != nil {
+				t.Errorf("SendKeyState: %v", err)
+			}
+		}(byte(i))
+	}
+	wg.Wait()
+
+	if len(hid.writes) != 2 {
+		t.Fatalf("HID writes = %d, want 2", len(hid.writes))
+	}
+	if gap := hid.writes[1].Sub(hid.writes[0]); gap < minReportGap {
+		t.Fatalf("gap between two simultaneous reports = %v, want at least %v", gap, minReportGap)
 	}
 }
 

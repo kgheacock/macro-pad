@@ -210,9 +210,12 @@ shows the power-on default: no glyph, color `0x0000`, no blink. The host
 driver restores them. `macropadd`'s `transport.Reconnecting` remembers each
 key's last key state and custom glyph, and sends them again each time the
 board connects, so a replug or a power cut on a running host brings the keys
-back within a second or so of the board's boot. With no driver running, the
-keys stay at the default. A one-shot `macrodriver` call therefore lasts until
-the next power cycle.
+back within a second or so of the board's boot. The daemon also keeps its
+memory in files on the host (`keys.json` and `glyph-N.bin`, see
+[`driver/README.md`](../driver/README.md)), so a daemon restart or a host
+reboot restores the keys too. With no driver running, the keys stay at the
+default. A one-shot `macrodriver` call therefore lasts until the next power
+cycle.
 
 Task 0030 persisted this state in files, and task 0044 first moved the
 headers to `nvm` and then removed board-side persistence altogether: a flash

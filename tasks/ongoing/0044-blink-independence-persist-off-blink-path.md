@@ -87,7 +87,7 @@ When the board connects, it sends them again.
 - Bad, because with no driver running, a power cycle leaves every key at the power-on default.
   A one-shot `macrodriver` call lasts only until the next power cycle.
 - Bad, because the keys show the default for a few seconds after a replug, until the board has booted and the driver has replayed.
-- Bad, because a daemon restart or a host reboot loses the memory, unless the daemon saves it to disk. This task does not.
+- Bad, because a daemon restart or a host reboot loses the memory, unless the daemon saves it to disk. It does: see Design.
 
 ## Decision
 
@@ -96,7 +96,8 @@ Chosen: **Approach D — Keep no state on the board, and replay it from the host
 The owner chose it after Approach C, on 2026-10-06, because of flash wear. An `nvm` write is one sector erase with no wear leveling.
 At an assumed 100,000 erase cycles, a plugin that changes a key every few seconds would use them in days.
 Approach C also needed a gap rule and still forced a 50 ms freeze when blinkers were out of phase.
-The decision accepts that the board shows the default until a driver connects.
+The decision accepts that the board shows the default until a driver connects. The owner added, on 2026-10-06, that a host always exists,
+so the daemon saves its memory to disk.
 Approach C was built first, reviewed, and removed.
 
 ## Design
@@ -110,6 +111,12 @@ messages for as long as the board stays connected, and opens it again when it go
 a custom glyph sets the key to the sentinel Emoji ID, and a built-in Emoji ID ends the key's glyph. A send while no board is connected is
 remembered, reports success, and is replayed. `macropadd` uses it in place of `transport.Open`.
 
+The daemon saves the memory on every change to a state directory (`--state-dir`, default `macro-pad` under the user's config directory):
+`keys.json` holds each key's key state, and `glyph-N.bin` holds key N's glyph as raw pixels. It loads them at start and replays them to the
+first board it connects to. Files are written by rename, a `keys.json` that does not parse is moved to `keys.json.bad`, and a missing or
+wrong-size glyph file leaves the key with its color and blink and no glyph. A send's bookkeeping and `Close` never wait behind a glyph
+upload, which takes seconds: only the writes to the board take turns.
+
 Two smaller fixes ride along:
 
 - `render_key` takes a `toggle` flag. A redraw caused by a state change does not toggle `_blink_visible`.
@@ -121,7 +128,7 @@ Files to change:
 
 - `firmware/app.py`, `firmware/boot.py`, `firmware/glyph_state.py` (deleted) — no persistence, no remount
 - `firmware/display_render.py` — `render_key(..., toggle=True)`
-- `driver/transport/reconnect.go`, `driver/cmd/macropadd/main.go` — `Reconnecting`
+- `driver/transport/reconnect.go`, `driver/transport/statestore.go`, `driver/cmd/macropadd/main.go` — `Reconnecting`, state files
 - `driver/transport/device.go` — `minReportGap`
 - `tools/blink_trace.py`, `driver/cmd/blinksend/main.go`, `Makefile` — `make blink-trace`
 - `test/test_app.py`, `test/test_display_render.py`, `driver/transport/reconnect_test.go`, `driver/transport/device_test.go` — tests
@@ -166,20 +173,26 @@ ticked.
   **Proof:** on the board: set a color on key 0 and a blinking color on key 1, replug the USB cable, and see both keys return
   without a new call. Record the time from replug to the last key in `firmware/README.md`, and set `defaultSettleDelay` from it.
   Not run: it needs the board.
+- [x] **DoD-12** — The daemon saves each key's state to files on the host, and a new daemon replays them to the first board.
+  A built-in Emoji ID removes the glyph file. A corrupt `keys.json` is moved aside. A missing glyph file keeps the color and blink.
+  A slow glyph upload does not block `Close`.
+  **Proof:** `cd driver && go test ./transport -run TestReconnecting`
+  Checked on the real board on 2026-10-06: `macropadd --state-dir` loaded 4 keys, including a custom glyph, and replayed them 3 s after start.
+  The files were `keys.json` and a 32,768-byte `glyph-2.bin` with the expected RGB565 pixels. Whether the panels showed the state was not seen.
 
 ## Risks
 
 - Replay races the board's boot: a report that arrives while `code.py` restarts is dropped → `defaultSettleDelay` waits 1 s. DoD-11 measures it.
 - Replaying six keys costs 6 reports at `minReportGap`, and a glyph costs about 32 KB over CDC → DoD-11 records the time to the last key.
-- A daemon restart or a host reboot loses the memory → keys show the default until plugins send again. Saving the memory to disk is an open question.
+- A glyph upload to the board takes seconds, and the first version of `Reconnecting` held its lock throughout, so every other send and `Close` hung → the lock is split, and a test covers it.
 - A one-shot `macrodriver` call does not survive a power cycle → documented in `firmware/README.md`.
 - A 50 ms burst needs the firmware to read each report in time → DoD-6 measures it. Raise `minReportGap` if it fails.
 - A mounted `CIRCUITPY` on macOS reloads the board and breaks CDC and HID → unmount it before `make blink-trace`.
 
 ## Open questions
 
-- [ ] Should `macropadd` save its memory to disk, so a host reboot also restores the keys? — owner
-- [ ] Is a default-color power-on acceptable with no driver running, for example on a wall charger? — owner
+- [x] Should `macropadd` save its memory to disk, so a host reboot also restores the keys? Yes, and it does.
+- [x] Is a default-color power-on acceptable with no driver running? Yes: the owner says a host always exists.
 - [x] Is a 2 s limit right? Moot: the board no longer writes.
 - [x] Should `make flash` still reset key state? Moot: it behaves like a power cycle.
 

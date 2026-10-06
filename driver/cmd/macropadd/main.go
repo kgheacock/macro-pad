@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 
 	"github.com/kgheacock/macro-pad/driver/plugin"
 	"github.com/kgheacock/macro-pad/driver/recorder"
@@ -20,6 +21,18 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// defaultStateDir is where macropadd keeps its state files unless told
+// otherwise: macro-pad under the user's config directory, which is
+// ~/Library/Application Support on macOS. It is empty, so state stays in
+// memory, when the config directory is unknown.
+func defaultStateDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "macro-pad")
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("macropadd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -28,6 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly (e.g. /dev/cu.usbmodem2103), bypassing discovery; needed when the board exposes more than one CDC port, such as a debug console alongside the data channel")
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
+	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key is saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
 	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
 	if err := fs.Parse(args); err != nil {
@@ -52,7 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			ProductID:    uint16(*productID),
 			SerialNumber: *serialNumber,
 			CDCPort:      *cdcPort,
-		}, func(format string, args ...any) {
+		}, *stateDir, func(format string, args ...any) {
 			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
 		})
 	}

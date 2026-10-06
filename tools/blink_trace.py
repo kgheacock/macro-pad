@@ -22,16 +22,13 @@ from pathlib import Path
 
 # Trace codes, as in firmware/tracer.py.
 HOST_MESSAGE_DECODED = 1
-PERSIST_DONE = 6
 REFRESH_DONE = 8
 
-# DoD-5: the largest allowed gap between two REFRESH_DONE records of one
-# blinking key, and the largest allowed write between REFRESH_DONE and
-# PERSIST_DONE, both in milliseconds.
+# DoD-5: the largest allowed gap, in milliseconds, between two REFRESH_DONE
+# records of one blinking key.
 BLINKING_KEYS = (0, 1, 2)
 UPDATED_KEY = 4
 MAX_GAP_LIMIT_MS = 650
-MAX_PERSIST_LIMIT_MS = 100
 
 # DoD-6: how many updates the burst sends.
 BURST_UPDATES = 6
@@ -100,24 +97,6 @@ def blink_gaps_ms(records):
     return gaps
 
 
-def persist_times_ms(records):
-    """Return, for each PERSIST_DONE record, the time in ms since the most
-    recent REFRESH_DONE record before it.
-
-    A write follows the redraw in the same `step`, so this is the write's
-    duration. A write in a `step` that drew nothing reads long, so this
-    can only overstate the write.
-    """
-    times = []
-    last_refresh = None
-    for code, _, _, t in records:
-        if code == REFRESH_DONE:
-            last_refresh = t
-        elif code == PERSIST_DONE and last_refresh is not None:
-            times.append((t - last_refresh) / 1000)
-    return times
-
-
 def decoded_count(records):
     """Return how many HOST_MESSAGE_DECODED records the trace holds."""
     return sum(1 for code, _, _, _ in records if code == HOST_MESSAGE_DECODED)
@@ -131,15 +110,12 @@ def report(records, scenario, out):
         return decoded == BURST_UPDATES
 
     gaps = blink_gaps_ms(records)
-    persists = persist_times_ms(records)
-    if not gaps or not persists:
-        print("no blink gaps or persist records in the trace", file=out)
+    if not gaps:
+        print("no blink gaps in the trace", file=out)
         return False
     max_gap = max(gaps)
-    max_persist = max(persists)
     print("max gap {:.1f} ms (limit {})".format(max_gap, MAX_GAP_LIMIT_MS), file=out)
-    print("max persist {:.1f} ms (limit {})".format(max_persist, MAX_PERSIST_LIMIT_MS), file=out)
-    return max_gap <= MAX_GAP_LIMIT_MS and max_persist <= MAX_PERSIST_LIMIT_MS
+    return max_gap <= MAX_GAP_LIMIT_MS
 
 
 def main(argv, out=sys.stdout):

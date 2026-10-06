@@ -75,7 +75,7 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
 1. Decode one HID key state message and update that key's render state.
 2. Decode one Set custom glyph message from the CDC data channel, if a
    full one has arrived, and update that key's render state — see
-   "Custom glyphs and persisted state," below.
+   "Custom glyphs and key state," below.
 3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
 4. Redraw the keys that changed, plus every key that blinks — see
@@ -166,49 +166,20 @@ The 46 ms is a 23 ms compose (`GLYPH_BUILT`) and a 23 ms push. A push of a
 cached frame alone takes 23 ms. At 4 MHz a push takes 81 ms, so a color
 change takes about 105 ms and a blink push 81 ms. `code.py` now sets 16 MHz,
 so the figures above apply.
-Persisting runs after the redraw, in the same `step`, so it delays the next
-`step` and not the new image.
+**The board keeps no key state, and why.** A write of a 5-byte state file
+to flash took 320 ms to 590 ms on the board. While `step` waits for it, no
+blinking key toggles, so one update froze every blinker for 0.4 s to 0.7 s
+and moved their phases. A write to `microcontroller.nvm` took 48 ms to 53 ms
+(spike, 2026-10-06, 20 samples), which fits an idle gap between blinks but
+not every case, and it wears the flash: `nvm` is one sector with no wear
+leveling, and a status plugin that changes a key every few seconds can use
+the flash's erase cycles in days. So the board writes nothing (task 0044).
+After a power cycle every key shows the power-on default until the host
+driver replays each key's last state; see "Custom glyphs and key state."
 
-**Persist, and why it must not freeze a blink.** A write of a 5-byte state
-file took 320 ms to 590 ms on the board. While `step` waits for it, no blinking
-key toggles, so one update froze every blinker for 0.4 s to 0.7 s and moved
-their phases. Task 0044 replaced the file with `microcontroller.nvm`:
-
-| Write on the RP2350 (spike, 2026-10-06, 20 samples) | Time       |
-|-----------------------------------------------------|------------|
-| 5-byte file, as before                              | 320–590 ms |
-| 5-byte file, in place                               | 190–270 ms |
-| `nvm`, 5 bytes or all 30 header bytes               | 48–53 ms   |
-| `nvm`, the first writes to erased bytes             | 1 ms       |
-
-An `nvm` write takes the same time whatever its length, so `step` writes the
-headers of every pending key in one write.
-
-`nvm` layout: one magic byte, `0xA5`, then one 5-byte header for each key, key
-0 first, so key `k` starts at offset `1 + 5 * k`. A header is a format byte
-(`1`), the color (2 bytes, little-endian), the Emoji ID, and the blink flag.
-A format byte of `0` is a key with no saved state. A first byte other than the
-magic means `nvm` holds another layout, and every key reads as the power-on
-default. A custom glyph's 32,768 bytes of pixels do not fit in the 4,096-byte
-`nvm`: they stay in `glyph_state_files/<key>.bin`, written only when the glyph
-changes. A glyph upload still stalls the loop.
-
-**The gap rule.** `step` writes the pending headers when no blinking key is
-due within `PERSIST_BUDGET_US` (100 ms), so the write fits in the idle gap
-between two rounds of blink pushes. It writes anyway once the oldest pending
-change has waited `PERSIST_MAX_WAIT_US` (2 s). At 16 MHz six in-phase
-blinkers push for 126 ms of each 500 ms, which leaves a gap of about 370 ms.
-Blinkers that were updated at different times are out of phase, and one of
-them can be due every 83 ms. Then no gap exists, and the 2 s limit forces a
-50 ms freeze. One shared blink phase for every key removes that case; it is a
-separate task.
-
-**Flash wear.** A header write happens only when a header changed, and at most
-once per 2 s, which is at most 43,200 writes a day. Assume 100,000 erase cycles
-for the flash behind `nvm` (an assumption, not read from the chip's data
-sheet). A plugin that changed a key every 2 s without pause would use them in
-2.3 days, and one that changes a key 1,000 times a day would use them in about
-100 days. The 2 s limit bounds the write rate, not the lifetime.
+A blinking key keeps its phase when an update arrives: the redraw shows the
+frame the key showed, in the new color, and the next toggle stays on its old
+500 ms schedule. Only a due blink toggles the frame.
 
 **Not yet measured with `make blink-trace`:** the largest gap between blink
 pushes while key 4 updates (`SCENARIO=single`, DoD-5 of task 0044), and how
@@ -218,11 +189,9 @@ Record the two lines it prints here.
 `make blink-trace SCENARIO=single` or `SCENARIO=burst`, run from the repo root,
 puts a tracing `code.py` on the board, unmounts `CIRCUITPY`, sends the
 scripted run with `driver/cmd/blinksend`, and prints `tools/blink_trace.py`'s
-figures. Run `make flash` afterward to restore the real `code.py`. The
-persist time it prints is `PERSIST_DONE` minus the `REFRESH_DONE` before it,
-so a write in a `step` that drew nothing can only read long.
+figures. Run `make flash` afterward to restore the real `code.py`.
 
-## Custom glyphs and persisted state
+## Custom glyphs and key state
 
 A driver call can send an arbitrary 128×128 image for one key over CDC —
 "Set custom glyph" in [`docs/wire-protocol.md`](../docs/wire-protocol.md)
@@ -236,26 +205,20 @@ black; see "Set custom glyph" in the wire protocol. Every Emoji ID draws
 no glyph: the board has no built-in glyph table (task 0039), so a key
 shows its color until a custom glyph arrives.
 
-`glyph_state.py` persists each key's last state — built-in or custom,
-color, and blink — so a key redraws its own last state after a power
-cycle with no driver connected. The headers live in `microcontroller.nvm`
-and a custom glyph's pixels in files under `glyph_state_files/`; see
-"Latency" for the layout and for when `step` writes.
+The board holds every key's state in RAM only. After a power cycle each key
+shows the power-on default: no glyph, color `0x0000`, no blink. The host
+driver restores them. `macropadd`'s `transport.Reconnecting` remembers each
+key's last key state and custom glyph, and sends them again each time the
+board connects, so a replug or a power cut on a running host brings the keys
+back within a second or so of the board's boot. With no driver running, the
+keys stay at the default. A one-shot `macrodriver` call therefore lasts until
+the next power cycle.
 
-A firmware reflash (`make flash`) no longer resets a key (task 0044). `nvm`
-survives it. The reflash still deletes `glyph_state_files/`, because its
-`rsync --delete` removes what the source tree lacks, so a custom-glyph key
-keeps its color and blink and shows no glyph until the driver resends it.
-`MacroPad`'s `storage` constructor argument injects a fake for this in
-tests, the same way `panels` and the other hardware arguments do; `code.py`
-relies on the real `glyph_state.NvmStorage` default.
-
-A header starts with a format byte (task 0043). A record from before
-that task has none and holds RGBA4444 pixels, which the board cannot
-show: it loads as its color and blink alone, and the driver resends the
-glyph. `NvmStorage` never reads such a record, because `nvm` starts empty.
-State that a build before task 0044 saved in `glyph_state_files/` is not
-read either: each key starts from the power-on default once.
+Task 0030 persisted this state in files, and task 0044 first moved the
+headers to `nvm` and then removed board-side persistence altogether: a flash
+write froze the blinking keys and wore the flash. `make flash` and a power
+cycle now behave alike, and `boot.py` no longer remounts the filesystem for
+writing.
 
 ## Connectivity check
 

@@ -69,6 +69,19 @@ its class drivers to the composite device task 0008 describes; the other
 platforms hidapi and go.bug.st/serial support are untested here and out of
 scope for this project.
 
+### Surviving a power cut: `transport.Reconnecting`
+
+The board keeps no key state across a power cycle (task 0044). `macropadd`
+therefore opens the board through `transport.Reconnecting`, which wraps
+`Open`. It remembers each key's last key state and custom glyph, waits for
+the board if it is not attached, and sends that state again every time the
+board connects, including after a replug. A send while the board is absent
+is remembered and replayed. A key keeps showing the default between a power
+cut and the replay, which takes the board's boot time plus about 1 s of
+settling and one report per key. The memory lives in the daemon, so a
+daemon restart loses it until the plugins send again. Code that holds a
+`Device` directly, such as `macrodriver`, gets no replay.
+
 ## Connectivity check
 
 `driver/cmd/pingpong` sends a ping — a Key state message with the

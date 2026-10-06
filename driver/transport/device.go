@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	hid "github.com/sstallion/go-hid"
@@ -24,6 +25,15 @@ const deviceQueueSize = 32
 // defaultPollInterval paces Open's retries when Options does not set a
 // faster one.
 const defaultPollInterval = 250 * time.Millisecond
+
+// minReportGap is the least time between two HID output reports. The board
+// holds one report: a second one that arrives before the firmware's loop
+// reads the first overwrites it, and a burst of 6 reports in 250 ms decoded
+// only 2 (task 0044). 50 ms is a starting value, not a measured one: the
+// board's loop reads a report once per `step`, and a round of blink pushes
+// can hold a `step` for 126 ms. Raise it if `make blink-trace
+// SCENARIO=burst` prints fewer than 6 decoded.
+const minReportGap = 50 * time.Millisecond
 
 // ErrAmbiguousDevice is returned by Open when more than one attached
 // device matches Options.VendorID and Options.ProductID, and
@@ -142,6 +152,11 @@ func (serialPortBackend) open(portName string) (io.ReadWriteCloser, error) {
 type Device struct {
 	hid    io.WriteCloser
 	serial io.ReadWriteCloser
+
+	// reportMu serialises SendKeyState and guards lastReport, the time the
+	// previous report was written. It is the zero time before the first.
+	reportMu   sync.Mutex
+	lastReport time.Time
 
 	msgQueue chan Message
 }
@@ -265,13 +280,24 @@ func (d *Device) receiveMessages() {
 // SendKeyState implements Transport. It writes one HID output report
 // carrying ks, encoded per docs/wire-protocol.md and prefixed by
 // firmware/boot.py's KEY_STATE_REPORT_ID.
+//
+// SendKeyState waits until minReportGap has passed since the previous
+// report, because the board holds one report and a faster burst overwrites
+// itself. Concurrent callers take turns.
 func (d *Device) SendKeyState(ks KeyState) error {
 	var buf bytes.Buffer
 	buf.WriteByte(keyStateReportID)
 	if err := encodeKeyState(&buf, ks); err != nil {
 		return err
 	}
+
+	d.reportMu.Lock()
+	defer d.reportMu.Unlock()
+	if wait := minReportGap - time.Since(d.lastReport); wait > 0 {
+		time.Sleep(wait)
+	}
 	_, err := d.hid.Write(buf.Bytes())
+	d.lastReport = time.Now()
 	return err
 }
 

@@ -22,7 +22,6 @@ import time
 import digitalio
 
 import display_render
-import glyph_state
 import tracer as tracer_module
 import wire
 from debounce import Debouncer
@@ -100,7 +99,6 @@ class MacroPad:
         debounce_window_ms=7.5,
         idle_timer=None,
         tracer=None,
-        storage=None,
     ):
         self._switches = switches
         self._panels = panels
@@ -108,7 +106,6 @@ class MacroPad:
         self._hid_device = hid_device
         self._serial = serial
         self._tracer = tracer
-        self._storage = storage if storage is not None else glyph_state.FilesystemStorage()
         self._custom_glyph_reader = wire.CustomGlyphReader()
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
@@ -118,82 +115,21 @@ class MacroPad:
         self._last_raw = [not switch.value for switch in switches]
         self._idle_timer = idle_timer if idle_timer is not None else IdleTimer()
 
-        # `_persisted` mirrors the bytes last written for each key, so a
-        # later state that encodes identically is not written again — see
-        # tasks/ongoing/0030-custom-glyph-upload-and-persistence.md's
-        # Risks, "Flash wear."
-        self._persisted = [None] * len(switches)
-        # Keys whose state changed since the last `step` persisted them.
-        # A flash write took 260 ms to 450 ms on the board, longer than
-        # composing and pushing the frame, so `step` persists these after
-        # `_render_dirty_keys`, not before it (task 0043's DoD-6).
-        self._persist_pending = set()
+        # Every key starts at the power-on default. The board keeps no state
+        # across a power cycle: the host driver replays each key's last state
+        # when it reconnects (task 0044).
         self.key_states = [
-            self._restore_key_state(key_index) for key_index in range(len(switches))
+            display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
+            for _ in switches
         ]
         # Next `now_us` at which a blinking key is allowed to toggle
-        # visibility again; see BLINK_INTERVAL_US.
-        self._next_blink_us = [0] * len(switches)
+        # visibility again; see BLINK_INTERVAL_US. `None` while the key does
+        # not blink, so a key that starts blinking gets a fresh schedule.
+        self._next_blink_us = [None] * len(switches)
         # Every key is dirty at power-on so the first step paints all six
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
         self._dirty = set(range(len(self.key_states)))
-
-    def _restore_key_state(self, key_index):
-        """Build one key's starting `KeyState`: its last persisted state,
-        or the power-on default when none was saved, or the saved record
-        is corrupt.
-        """
-        saved = self._storage.read(key_index)
-        if saved is None:
-            return display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
-
-        try:
-            color, emoji_id, blink, pixels = glyph_state.decode(saved)
-        except ValueError:
-            return display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
-
-        self._persisted[key_index] = saved
-        return display_render.KeyState(
-            emoji_id=emoji_id, color=color, blink=blink, pixels=pixels
-        )
-
-    def _persist_key_state(self, key_index):
-        """Write `key_index`'s current state to storage, unless it
-        already matches what was last written there.
-
-        A write failure (for example the filesystem going read-only, or a
-        `make flash` sync landing on the same file at the same instant —
-        see `boot.py`'s `storage.remount` comment) is dropped rather than
-        raised: the key still keeps its new state in RAM and on its
-        display, it just won't survive the next power cycle.
-        """
-        key_state = self.key_states[key_index]
-        data = glyph_state.encode(
-            key_state.color, key_state.emoji_id, key_state.blink, key_state.pixels
-        )
-        if data != self._persisted[key_index]:
-            try:
-                self._storage.write(key_index, data)
-                self._persisted[key_index] = data
-            except OSError:
-                pass
-
-        if self._tracer is not None:
-            self._tracer.record(
-                tracer_module.PERSIST_DONE,
-                key_index,
-                0,
-                time.monotonic_ns() // 1000,
-            )
-
-    def _persist_pending_keys(self):
-        """Write every key whose state changed this step. Runs after the
-        redraw, so a flash write never delays a key's new image.
-        """
-        for key_index in sorted(self._persist_pending):
-            self._persist_key_state(key_index)
-        self._persist_pending.clear()
 
     def step(self, now_us):
         """Run one iteration of the loop."""
@@ -202,7 +138,6 @@ class MacroPad:
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys(now_us)
-        self._persist_pending_keys()
 
         if host_message or custom_glyph_message or key_event:
             self._idle_timer.touch(now_us)
@@ -258,7 +193,6 @@ class MacroPad:
         if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
             key_state.pixels = None
         self._dirty.add(message.key_index)
-        self._persist_pending.add(message.key_index)
         return True
 
     def _apply_custom_glyph(self):
@@ -293,7 +227,6 @@ class MacroPad:
         key_state.emoji_id = wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
         key_state.pixels = glyph.pixels
         self._dirty.add(glyph.key_index)
-        self._persist_pending.add(glyph.key_index)
         return True
 
     @staticmethod
@@ -357,20 +290,28 @@ class MacroPad:
         """Redraw the keys that changed, plus every blinking key whose
         BLINK_INTERVAL_US has elapsed since it last toggled.
 
-        `render_key` toggles a blinking key's frame once per call (see
-        display_render.py), so gating that call on elapsed wall-clock
-        time, not on `step`'s own iteration rate, is what makes the
-        toggle a human-visible blink instead of a flicker.
+        `render_key` toggles a blinking key's frame only when asked, so
+        gating that toggle on elapsed wall-clock time, not on `step`'s own
+        iteration rate, is what makes it a human-visible blink instead of
+        a flicker. A redraw caused by a state change does not toggle and
+        does not move the key's schedule, so an update to a blinking key
+        keeps its phase (task 0044). A key that has just started to blink
+        gets its first schedule here.
         """
         for index, key_state in enumerate(self.key_states):
-            due_to_blink = key_state.blink and now_us >= self._next_blink_us[index]
+            next_blink_us = self._next_blink_us[index]
+            due_to_blink = (
+                key_state.blink and next_blink_us is not None and now_us >= next_blink_us
+            )
             if index not in self._dirty and not due_to_blink:
                 continue
 
             display_render.render_key(
-                self._panels[index], key_state, self._tracer, index
+                self._panels[index], key_state, self._tracer, index, toggle=due_to_blink
             )
-            if key_state.blink:
+            if not key_state.blink:
+                self._next_blink_us[index] = None
+            elif due_to_blink or next_blink_us is None:
                 self._next_blink_us[index] = now_us + BLINK_INTERVAL_US
 
         self._dirty.clear()

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	hid "github.com/sstallion/go-hid"
@@ -24,6 +25,20 @@ const deviceQueueSize = 32
 // defaultPollInterval paces Open's retries when Options does not set a
 // faster one.
 const defaultPollInterval = 250 * time.Millisecond
+
+// minReportGap is the least time between two HID output reports. The board
+// holds one report: a second one that arrives before the firmware's loop
+// reads the first overwrites it, and a burst of 6 reports in 250 ms decoded
+// only 2 (task 0044).
+//
+// The firmware reads one report per loop pass, and a pass that redraws a key
+// takes about 46 ms, plus about 21 ms for each blinking key that is due. On
+// an idle board, 6 reports 50 ms apart all arrived. With keys 0 to 2
+// blinking, the same burst lost key 2's report (2026-10-06, `make blink-trace
+// SCENARIO=busyburst`). 150 ms is above the longest pass with three blinkers
+// due. Six blinkers due at once could take longer; raise it if
+// `SCENARIO=busyburst` prints fewer than 6 decoded.
+const minReportGap = 150 * time.Millisecond
 
 // ErrAmbiguousDevice is returned by Open when more than one attached
 // device matches Options.VendorID and Options.ProductID, and
@@ -142,6 +157,16 @@ func (serialPortBackend) open(portName string) (io.ReadWriteCloser, error) {
 type Device struct {
 	hid    io.WriteCloser
 	serial io.ReadWriteCloser
+
+	// reportMu serialises SendKeyState and guards lastReport, the time the
+	// previous report was written. It is the zero time before the first.
+	reportMu   sync.Mutex
+	lastReport time.Time
+
+	// closeOnce makes Close safe to call more than once: a second hid_close
+	// on the same handle crashes the process.
+	closeOnce sync.Once
+	closeErr  error
 
 	msgQueue chan Message
 }
@@ -265,13 +290,24 @@ func (d *Device) receiveMessages() {
 // SendKeyState implements Transport. It writes one HID output report
 // carrying ks, encoded per docs/wire-protocol.md and prefixed by
 // firmware/boot.py's KEY_STATE_REPORT_ID.
+//
+// SendKeyState waits until minReportGap has passed since the previous
+// report, because the board holds one report and a faster burst overwrites
+// itself. Concurrent callers take turns.
 func (d *Device) SendKeyState(ks KeyState) error {
 	var buf bytes.Buffer
 	buf.WriteByte(keyStateReportID)
 	if err := encodeKeyState(&buf, ks); err != nil {
 		return err
 	}
+
+	d.reportMu.Lock()
+	defer d.reportMu.Unlock()
+	if wait := minReportGap - time.Since(d.lastReport); wait > 0 {
+		time.Sleep(wait)
+	}
 	_, err := d.hid.Write(buf.Bytes())
+	d.lastReport = time.Now()
 	return err
 }
 
@@ -300,12 +336,17 @@ func (d *Device) ReadMessage() (Message, error) {
 }
 
 // Close implements Transport. It releases both the HID and CDC handles.
-// A ReadMessage call blocked on the CDC stream returns io.EOF.
+// A ReadMessage call blocked on the CDC stream returns io.EOF. It is safe
+// to call more than once: later calls return the first call's result.
 func (d *Device) Close() error {
-	herr := d.hid.Close()
-	serr := d.serial.Close()
-	if herr != nil {
-		return herr
-	}
-	return serr
+	d.closeOnce.Do(func() {
+		herr := d.hid.Close()
+		serr := d.serial.Close()
+		if herr != nil {
+			d.closeErr = herr
+		} else {
+			d.closeErr = serr
+		}
+	})
+	return d.closeErr
 }

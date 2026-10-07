@@ -19,8 +19,8 @@ RECORD_SIZE = 12  # code (1) + key (1) + payload (2) + timestamp (8)
 # four mark the points `firmware/app.py`'s `MacroPad.step` records at. The
 # last four mark the custom-glyph paint pipeline's stages — task 0042 —
 # recorded from `firmware/app.py` and `firmware/display_render.py`. Task
-# 0043 moved `PERSIST_DONE` after `REFRESH_DONE`: persisting follows the
-# redraw.
+# 0044 removed the board's persistence, so nothing emits `PERSIST_DONE` now;
+# the code stays in the registry so the wire protocol's numbers do not move.
 TRACE_DROPPED = 0
 HOST_MESSAGE_DECODED = 1
 SWITCH_READ = 2

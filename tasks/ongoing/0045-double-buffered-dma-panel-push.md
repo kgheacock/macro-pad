@@ -1,14 +1,14 @@
 ---
 id: "0045"
 title: "Double-buffered panel push: send frames by DMA so blinking does not use the CPU"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-06"
 updated: "2026-10-06"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0045-double-buffered-dma-panel-push"
 related: ["0043", "0044"]
 tags: ["firmware", "blink", "spi", "dma", "pio"]
 ---

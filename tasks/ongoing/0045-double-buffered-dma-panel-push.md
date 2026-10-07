@@ -109,24 +109,27 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — On the board, the CPU runs a loop for 15 ms or more while a cached-frame push is on the wire.
+- [x] **DoD-1** — On the board, the CPU runs a loop for 15 ms or more while a cached-frame push is on the wire.
   **Proof:** the spike output `cpu_free_ms` is 15 or more (the push takes 21 ms)
-- [ ] **DoD-2** — A frame sent with `start_push` arrives byte-identical on the SPI stub, with the same window
+  Result: `make dma-spike` printed `cpu_free_ms 17` for 5 pushes. The push takes 18 ms at 15 MHz.
+- [x] **DoD-2** — A frame sent with `start_push` arrives byte-identical on the SPI stub, with the same window
   commands as `Panel.push` today. CS stays low until `poll()` sees the state machine done.
   **Proof:** `python3 -m pytest test/test_st7735.py -k start_push`
-- [ ] **DoD-3** — A color change on a key, while a push of another frame runs, never changes the frame that
+- [x] **DoD-3** — A color change on a key, while a push of another frame runs, never changes the frame that
   is on the wire.
   **Proof:** `python3 -m pytest test/test_app.py -k back_frame_not_sent`
-- [ ] **DoD-4** — With six keys blinking and an update to key 4 every 2 s, every gap between `PUSH_STARTED`
+- [x] **DoD-4** — With six keys blinking and an update to key 4 every 2 s, every gap between `PUSH_STARTED`
   records of one blinking key is 600 ms or less. Today, at 16 MHz, the expected figure is about 650 ms.
   **Proof:** `make blink-trace SCENARIO=single` prints `max gap` of 600 ms or less. Task 0044 adds this command.
-- [ ] **DoD-5** — Two pushes queued for different panels never overlap, and run in queue order.
+  Result: `max gap 506.6 ms` and `max gap 507.5 ms` (two runs). The command keeps keys 0 to 2 blinking, not six.
+- [x] **DoD-5** — Two pushes queued for different panels never overlap, and run in queue order.
   **Proof:** `python3 -m pytest test/test_app.py -k pushes_do_not_overlap`
-- [ ] **DoD-6** — At the rate in `code.py`, all six panels show the 8-bar and column test pattern with no noise,
+- [x] **DoD-6** — At the rate in `code.py`, all six panels show the 8-bar and column test pattern with no noise,
   and a person records the rate. **Proof:** the Notes of this spec
-- [ ] **DoD-7** — The trace registry lists `PUSH_STARTED`.
+  Result: see "DoD-6 check" in the Notes.
+- [x] **DoD-7** — The trace registry lists `PUSH_STARTED`.
   **Proof:** `docs/wire-protocol.md`, section "Trace code registry"
-- [ ] **DoD-8** — `firmware/README.md` records the push design and the measured CPU time per push.
+- [x] **DoD-8** — `firmware/README.md` records the push design and the measured CPU time per push.
   **Proof:** `firmware/README.md`, section "Latency"
 - [ ] **DoD-9** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
@@ -154,3 +157,27 @@ ticked.
 - The ST7735R frame store holds about 132×162 pixels, from the chip datasheet. This was not checked against
   `docs/0.85inch_ScreenKey_Module.pdf`. Two 128×128 frames would not fit, so the panel could not flip between
   two frames in hardware.
+
+- DoD-6 check, 2026-10-06, RP2350, 15 MHz. A person looked at all six panels. The pattern had 8 color bars, a
+  band of 1 px black and white columns, and a mark for each key (one to six white squares). They saw correct
+  colors, sharp columns, and no noise or shifted rows on all six. The image went through `Panel.push` on the PIO bus.
+  25 MHz was not tried, so the first open question stays open.
+- What differs from the Design section:
+  - The rate is 15 MHz, not 16 MHz. The PIO runs at twice the baud rate, and 150 MHz / 30 MHz is a whole divider (5),
+    so the SCK edges are even. `busio.SPI` already ran at 15 MHz when `code.py` asked for 16 MHz.
+  - There are no separate front and back frames for each key. `_compose` already allocates a new `Bitmap` for each
+    rebuild, so a rebuild never writes into a frame that is on the wire, and the `Panel` holds the frame it is
+    sending. The cached frames are byte views, `memoryview(bitmap).cast("B")`. `background_write` accepted the view
+    on the board with no copy.
+  - The queue lives in `MacroPad`, not in `render_key`. `render_key` hands a frame to a per-key port, and `step`
+    starts the pushes. A key has one waiting frame at most, and a newer frame replaces an older one that has not
+    started.
+  - `PioBus.done` clears `txstall` after the DMA ends, and reads it. `StateMachine.tx_fifo` does not exist on
+    this CircuitPython, and `txstall` is set whenever the state machine is idle, so it cannot start the wait.
+    `writing` goes false when the DMA has put the last byte in the FIFO, up to 5 bytes (2.7 us) before the wire is clear.
+  - `blink_trace.py` now counts `PUSH_STARTED` records, and its limit is 600 ms.
+- Measured on the board, 2026-10-06: `background_write` of the byte view takes 150 us to 250 us to start, the DMA of
+  32,768 bytes ends 17.6 ms to 17.7 ms later, and `start_push` holds the CPU 1.2 ms to 1.3 ms for the window commands.
+  The CPU does not copy a frame.
+- The bytes on the wire were not captured with a logic analyzer. A capture state machine hung the board, and a
+  person checked the image on the panels instead (DoD-6).

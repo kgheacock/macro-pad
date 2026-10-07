@@ -70,11 +70,22 @@ class PioBus:
     def done(self):
         """True when no transfer is on the wire.
 
-        The DMA is finished and the FIFO is empty. The last byte can still be
-        in the shift register for 8 bit times, 0.5 us at 15 MHz, which is
-        shorter than the CPU takes to change CS or DC after it reads this.
+        The DMA is finished and the state machine has used every byte. The DMA
+        ends when it has put the last byte in the FIFO, so up to five bytes
+        (2.7 us at 15 MHz) are still to shift out. The state machine stalls
+        when it has nothing left to shift, so this clears the stall flag once
+        the DMA is done, and reads it. The flag is set at once when the state
+        machine is already idle, because an idle state machine is stalled. A
+        `False` here means the last bytes are on their way; read it again.
+
+        The flag cannot start the wait: it is set while the state machine is
+        idle, before the DMA delivers the first byte. It only means "drained"
+        after the DMA ends.
         """
-        return not self._sm.writing and self._sm.tx_fifo == 0
+        if self._sm.writing:
+            return False
+        self._sm.clear_txstall()
+        return self._sm.txstall
 
     def write(self, data):
         """Send `data` and wait until it is on the wire. For short writes."""

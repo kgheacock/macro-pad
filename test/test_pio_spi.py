@@ -55,17 +55,30 @@ def test_done_is_false_until_the_background_write_ends():
     assert bus.done is True
 
 
-def test_done_waits_for_the_fifo_to_empty():
+def test_done_waits_for_the_last_bytes_to_shift_out():
     bus = _bus()
+    bus._sm.stall_polls = 3
     bus.start(b"\x00" * 8)
     bus._sm.finish()
-    bus._sm.tx_fifo = 3
 
+    assert bus.done is False  # the DMA is done, the last bytes are not
+    assert bus.done is False
+    assert bus.done is True
+
+
+def test_done_ignores_a_stall_flag_set_before_the_dma_ends():
+    bus = _bus()
+    bus._sm.polls_to_finish = 5
+    bus._sm._stalled = True  # the state machine idled before the first byte
+
+    bus.start(b"\x00" * 8)
+
+    assert bus._sm.txstall is True
     assert bus.done is False
 
-    bus._sm.tx_fifo = 0
 
-    assert bus.done is True
+def test_done_is_true_at_once_for_an_idle_state_machine():
+    assert _bus().done is True
 
 
 def test_write_returns_when_the_bytes_are_on_the_wire():

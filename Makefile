@@ -87,6 +87,25 @@ blink-trace: check-circuitpy
 	echo "Run 'make flash' to restore the real code.py."; \
 	exit $$status
 
+# `make dma-spike` measures how long the CPU is free while a cached-frame
+# push is on the wire (task 0045's DoD-1). Run `make flash` first, so the board
+# has the current firmware modules. It puts a measuring code.py on the board,
+# so run `make flash` afterward to restore the real one. Like `blink-trace`, it
+# unmounts CIRCUITPY for the run and mounts it again at the end.
+.PHONY: dma-spike
+dma-spike: check-circuitpy
+	python3 tools/dma_spike.py install $(CIRCUITPY_VOLUME)
+	sync
+	@dev=$$(diskutil info $(CIRCUITPY_VOLUME) | awk '/Device Identifier:/ {print $$3}'); \
+	diskutil unmount $(CIRCUITPY_VOLUME) || exit 1; \
+	echo "Waiting for the board to reload code.py and measure."; \
+	sleep 10; \
+	python3 tools/dma_spike.py read; \
+	status=$$?; \
+	diskutil mount /dev/$$dev >/dev/null; \
+	echo "Run 'make flash' to restore the real code.py."; \
+	exit $$status
+
 .PHONY: e2e
 e2e: flash
 	cd driver && MACROPAD_VENDOR_ID=$(PINGPONG_VENDOR_ID) MACROPAD_PRODUCT_ID=$(PINGPONG_PRODUCT_ID) \

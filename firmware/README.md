@@ -75,7 +75,7 @@ fakes in [`../test/stubs/`](../test/stubs/) with no board attached. One
 1. Decode one HID key state message and update that key's render state.
 2. Decode one Set custom glyph message from the CDC data channel, if a
    full one has arrived, and update that key's render state — see
-   "Custom glyphs and persisted state," below.
+   "Custom glyphs and key state," below.
 3. Read every switch, debounce it, and write a 10-byte event per accepted
    transition to the CDC data channel.
 4. Redraw the keys that changed, plus every key that blinks — see
@@ -149,7 +149,13 @@ pixel and swaps no byte.
 Two frames for each of six keys use 384 KB of the board's heap, which has
 about 8 MB free.
 
-**Latency, measured on the board** from the trace of `macropadd
+A blinking key keeps its phase when an update arrives: the redraw shows the
+frame the key showed, in the new color, and the next toggle stays on its old
+500 ms schedule (task 0044). Only a due blink toggles the frame.
+
+## Latency
+
+**Display latency, measured on the board** from the trace of `macropadd
 --trace-file`, with `HOST_MESSAGE_DECODED` as the start:
 
 ```
@@ -160,10 +166,61 @@ The 46 ms is a 23 ms compose (`GLYPH_BUILT`) and a 23 ms push. A push of a
 cached frame alone takes 23 ms. At 4 MHz a push takes 81 ms, so a color
 change takes about 105 ms and a blink push 81 ms. `code.py` now sets 16 MHz,
 so the figures above apply.
-Persisting to flash takes 240 ms to 360 ms and runs after the redraw, in
-the same `step`, so it delays the next `step` and not the new image.
+**The board keeps no key state, and why.** A write of a 5-byte state file
+to flash took 320 ms to 590 ms on the board. While `step` waits for it, no
+blinking key toggles, so one update froze every blinker for 0.4 s to 0.7 s
+and moved their phases. A write to `microcontroller.nvm` took 48 ms to 53 ms
+(spike, 2026-10-06, 20 samples), which fits an idle gap between blinks but
+not every case, and it wears the flash: `nvm` is one sector with no wear
+leveling, and a status plugin that changes a key every few seconds can use
+the flash's erase cycles in days. So the board writes nothing (task 0044).
+After a power cycle every key shows the power-on default until the host
+driver replays each key's last state; see "Custom glyphs and key state."
 
-## Custom glyphs and persisted state
+A blinking key keeps its phase when an update arrives: the redraw shows the
+frame the key showed, in the new color, and the next toggle stays on its old
+500 ms schedule. Only a due blink toggles the frame.
+
+**Reports in a burst** (task 0044's DoD-6, RP2350, 2026-10-06). The board holds
+one HID report, and its loop reads one per pass, so a report that arrives
+before the pass that follows the last one overwrites it. A pass that redraws a
+key takes about 46 ms, plus about 21 ms for each blinking key that is due.
+
+| Run                                               | Gap    | Result                          |
+|---------------------------------------------------|--------|---------------------------------|
+| `SCENARIO=burst`, idle board                      | 50 ms  | `decoded 6/6` (7 records, one repeat) |
+| `SCENARIO=busyburst`, keys 0 to 2 blinking        | 50 ms  | `decoded 5/6`, key 2 lost       |
+| `SCENARIO=busyburst`, keys 0 to 2 blinking        | 150 ms | `decoded 6/6`, in 3 runs of 3   |
+| `SCENARIO=burst`, idle board                      | 150 ms | `decoded 6/6`                   |
+
+The lost report was a key's background color, seen on the board as a missing
+background. `transport.minReportGap` is 150 ms because of it. Six blinkers
+due in one pass could take longer than 150 ms; that case was not run. The
+first `make blink-trace` runs printed `decoded 0/6`, or an unreadable
+first trace record, when the board had just reloaded `code.py`. The target
+now waits 10 s and then opens the board once, with no traffic, before it
+measures; every run after that worked.
+
+**Blink gap while key 4 updates** (task 0044's DoD-5, `SCENARIO=single`, keys 0
+to 2 blinking, 10 updates 2 s apart, 16 MHz):
+
+```
+max gap 532.8 ms (limit 650)
+```
+
+At 4 MHz with a flash write the largest gap was 950 ms.
+
+A blinking glyph with a transparent background flips the background between
+the key's color and black. With a black key color both frames look the same, so
+the key does not appear to blink.
+
+`make blink-trace SCENARIO=single`, `burst`, or `busyburst`, run from the repo
+root, puts a tracing `code.py` on the board, unmounts `CIRCUITPY` for the run,
+sends the scripted run with `driver/cmd/blinksend`, prints
+`tools/blink_trace.py`'s figures, and mounts the volume again. Run `make
+flash` afterward to restore the real `code.py`.
+
+## Custom glyphs and key state
 
 A driver call can send an arbitrary 128×128 image for one key over CDC —
 "Set custom glyph" in [`docs/wire-protocol.md`](../docs/wire-protocol.md)
@@ -177,20 +234,23 @@ black; see "Set custom glyph" in the wire protocol. Every Emoji ID draws
 no glyph: the board has no built-in glyph table (task 0039), so a key
 shows its color until a custom glyph arrives.
 
-`glyph_state.py` persists each key's last state — built-in or custom,
-color, and blink — to one file per key under `glyph_state_files/`, so a key
-redraws its own last state after a power cycle with no driver connected.
-A firmware reflash (`make flash`) resets this: `glyph_state/` is not part
-of the source tree that command syncs from (see its `.gitignore` entry),
-so its `rsync --delete` removes the directory from the board on every
-run. `MacroPad`'s `storage` constructor argument injects a fake for this
-in tests, the same way `panels` and the other hardware arguments do;
-`code.py` relies on the real `glyph_state.FilesystemStorage` default.
+The board holds every key's state in RAM only. After a power cycle each key
+shows the power-on default: no glyph, color `0x0000`, no blink. The host
+driver restores them. `macropadd`'s `transport.Reconnecting` remembers each
+key's last key state and custom glyph, and sends them again each time the
+board connects, so a replug or a power cut on a running host brings the keys
+back within a second or so of the board's boot. The daemon also keeps its
+memory in files on the host (`keys.json` and `glyph-N.bin`, see
+[`driver/README.md`](../driver/README.md)), so a daemon restart or a host
+reboot restores the keys too. With no driver running, the keys stay at the
+default. A one-shot `macrodriver` call therefore lasts until the next power
+cycle.
 
-A record starts with a format byte (task 0043). A record from before
-that task has none and holds RGBA4444 pixels, which the board cannot
-show: it loads as its color and blink alone, and the driver resends the
-glyph.
+Task 0030 persisted this state in files, and task 0044 first moved the
+headers to `nvm` and then removed board-side persistence altogether: a flash
+write froze the blinking keys and wore the flash. `make flash` and a power
+cycle now behave alike, and `boot.py` no longer remounts the filesystem for
+writing.
 
 ## Connectivity check
 

@@ -31,6 +31,9 @@ state across a power cycle.
   glyph or custom image, color, and blink — with no driver connected. A
   firmware reflash (`make flash`) is a different event, and may reset this
   state; see Non-goals.
+  **Superseded by task 0044:** the host driver restores this state, not the
+  board. With no driver running, a power cycle leaves every key at the
+  power-on default.
 - Only the most recent state per key persists. An older state leaves no
   trace once a newer one replaces it.
 
@@ -44,6 +47,9 @@ state across a power cycle.
   already covers the one motion effect this pad supports.
 - Persisted state surviving a firmware reflash. `make flash` resets every
   key to the built-in table by design; see Design and Decision.
+  **Superseded by task 0044:** the board no longer persists key state at
+  all. A power cycle and `make flash` both leave every key at the power-on
+  default until the host driver replays its last state.
 
 ## Approaches considered
 
@@ -192,6 +198,8 @@ Files to change:
   so no firmware version reads a file an earlier version wrote. **Proof:**
   run `make flash`, then check that `CIRCUITPY/glyph_state_files/` holds
   no files from before the run.
+  **Superseded by task 0044:** the board keeps no state files, so there
+  is nothing for `make flash` to remove and this proof no longer applies.
 - [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:**
   PR body
 

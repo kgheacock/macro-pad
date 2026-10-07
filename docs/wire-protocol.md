@@ -86,7 +86,7 @@ one frame, under the frame header's `uint16` `Length` field's limit, so
 this message needs no multi-frame reassembly on either side. The driver
 decodes the source PNG and converts its colors to RGB565 itself;
 firmware never parses an image format or converts a pixel, it only
-copies the bytes into a bitmap and a file. See
+copies the bytes into a bitmap. See
 [task 0030](../tasks/ongoing/0030-custom-glyph-upload-and-persistence.md)
 for the design decision, including why this task keeps the source PNG's
 fidelity a driver-side concern instead of an on-device one.
@@ -236,7 +236,7 @@ for the design decision.
 | 3 | `DEBOUNCE_VERDICT` | `0` = accepted press, `1` = accepted release, `0xFF` = rejected as a bounce |
 | 4 | `EVENT_WRITTEN` | The Press/release event's Event type byte: `0` = press, `1` = release |
 | 5 | `CUSTOM_GLYPH_DECODED` | `0`, unused — the Key field already names the target key |
-| 6 | `PERSIST_DONE` | `0`, unused |
+| 6 | `PERSIST_DONE` | `0`, unused. No longer emitted since task 0044: the board keeps no state. |
 | 7 | `GLYPH_BUILT` | `0`, unused |
 | 8 | `REFRESH_DONE` | `0`, unused |
 
@@ -249,15 +249,15 @@ reading changes from the previous `step` — not on every `step` for every
 switch — so a rejected bounce leaves the same pair of records a press
 does, distinguished by `DEBOUNCE_VERDICT`'s payload.
 
-`CUSTOM_GLYPH_DECODED`, `PERSIST_DONE`, `GLYPH_BUILT`, and `REFRESH_DONE`
-mark the custom-glyph paint pipeline's stages for one Set custom glyph
-message: CDC transfer and decode end at `CUSTOM_GLYPH_DECODED`; composing
-the key's cached frames from the raw pixel buffer ends at `GLYPH_BUILT`;
-the SPI push to the panel ends at `REFRESH_DONE`; and persisting the new
-state to flash ends at `PERSIST_DONE`. Persisting comes last, since task
-0043: a flash write took 260 ms to 450 ms, more than the rest of the
-paint. A Key state message records `HOST_MESSAGE_DECODED`, then the same
-last three codes. Each Timestamp is its own point-in-time reading, not the
+`CUSTOM_GLYPH_DECODED`, `GLYPH_BUILT`, and `REFRESH_DONE` mark the
+custom-glyph paint pipeline's stages for one Set custom glyph message: CDC
+transfer and decode end at `CUSTOM_GLYPH_DECODED`; composing the key's
+cached frames from the raw pixel buffer ends at `GLYPH_BUILT`; and the SPI
+push to the panel ends at `REFRESH_DONE`. Until task 0044, persisting the
+new state to flash ended at `PERSIST_DONE`, after the paint.
+
+A Key state message records `HOST_MESSAGE_DECODED`, then the last
+two of those codes. Each Timestamp is its own point-in-time reading, not the
 `step` iteration's shared `now_us`, so the gap between two consecutive
 records is that stage's duration — see [task
 0042](../tasks/ongoing/0042-instrument-custom-glyph-paint-latency.md) for

@@ -59,6 +59,34 @@ ping-pong: check-circuitpy
 	cd driver && go run ./cmd/pingpong --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID)
 	@echo "Run 'make flash' to restore the real code.py and wire.py."
 
+# `make blink-trace` runs a scripted run of key-state updates against the
+# board and prints its figures. SCENARIO is `single` (task 0044's DoD-5:
+# 10 updates to key 4 while keys 0 to 2 blink) or `burst` (DoD-6: 6 updates
+# back to back). It puts a tracing code.py on the board, so run `make flash`
+# afterward to restore the real one. It unmounts CIRCUITPY for the run,
+# because a mounted CIRCUITPY on macOS reloads the board and breaks CDC and
+# HID, and it mounts the volume again when the run ends, even if it failed.
+SCENARIO              ?= single
+BLINK_TRACE_FILE      ?= /tmp/macropad-blink-trace-$(SCENARIO).jsonl
+
+.PHONY: blink-trace
+blink-trace: check-circuitpy
+	python3 tools/blink_trace.py install $(CIRCUITPY_VOLUME)
+	sync
+	@dev=$$(diskutil info $(CIRCUITPY_VOLUME) | awk '/Device Identifier:/ {print $$3}'); \
+	diskutil unmount $(CIRCUITPY_VOLUME) || exit 1; \
+	echo "Waiting for the board to reload code.py: a report sent during the reload is dropped."; \
+	sleep 10; \
+	( cd driver && go run ./cmd/blinksend --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID) \
+		--scenario=warmup --trace-file=/dev/null ) && \
+	( cd driver && go run ./cmd/blinksend --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID) \
+		--scenario=$(SCENARIO) --trace-file=$(BLINK_TRACE_FILE) ) \
+	&& python3 tools/blink_trace.py report --scenario=$(SCENARIO) $(BLINK_TRACE_FILE); \
+	status=$$?; \
+	diskutil mount /dev/$$dev >/dev/null; \
+	echo "Run 'make flash' to restore the real code.py."; \
+	exit $$status
+
 .PHONY: e2e
 e2e: flash
 	cd driver && MACROPAD_VENDOR_ID=$(PINGPONG_VENDOR_ID) MACROPAD_PRODUCT_ID=$(PINGPONG_PRODUCT_ID) \

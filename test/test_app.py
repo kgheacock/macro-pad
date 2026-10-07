@@ -4,7 +4,6 @@ import pytest
 
 # Imported flat, under the names the board uses. See conftest.py.
 import display_render
-import glyph_state
 import pins
 import st7735
 import tracer as tracer_module
@@ -103,29 +102,12 @@ class FakeHID:
         return self.queued.pop(0)
 
 
-class FakeGlyphStorage:
-    """In-memory stand-in for `glyph_state.FilesystemStorage`. Passing the
-    same instance to two `_build_pad` calls simulates a reboot: the
-    second `MacroPad` reads whatever the first one wrote.
-    """
-
-    def __init__(self):
-        self._files = {}
-
-    def read(self, key_index):
-        return self._files.get(key_index)
-
-    def write(self, key_index, data):
-        self._files[key_index] = data
-
-
-def _build_pad(idle_timer=None, tracer=None, storage=None, panels=None):
+def _build_pad(idle_timer=None, tracer=None, panels=None):
     switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
     panels = panels if panels is not None else FakePanels(len(pins.KEYS))
     backlights = [FakeBacklight() for _ in pins.KEYS]
     hid_device = FakeHID()
     serial = FakeSerial()
-    storage = storage if storage is not None else FakeGlyphStorage()
 
     pad = MacroPad(
         switches=switches,
@@ -135,9 +117,8 @@ def _build_pad(idle_timer=None, tracer=None, storage=None, panels=None):
         serial=serial,
         idle_timer=idle_timer,
         tracer=tracer,
-        storage=storage,
     )
-    return pad, switches, panels, backlights, hid_device, serial, storage
+    return pad, switches, panels, backlights, hid_device, serial
 
 
 def _key_state_report(
@@ -229,7 +210,7 @@ def _rgb565_pixels_with_transparent_corner(color):
 
 
 def test_key_state_applies_to_one_key():
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
 
@@ -248,7 +229,7 @@ def test_key_state_applies_to_one_key():
 
 
 def test_key_state_rejects_version_and_keeps_state():
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)
     hid_device.feed(
@@ -264,7 +245,7 @@ def test_key_state_rejects_version_and_keeps_state():
 
 
 def test_key_state_ignores_unknown_key_index():
-    pad, _, _, _, hid_device, _, _ = _build_pad()
+    pad, _, _, _, hid_device, _ = _build_pad()
 
     pad.step(0)
     hid_device.feed(_key_state_report(key_index=99, color=0xF81F, emoji_id=0xA2))
@@ -274,7 +255,7 @@ def test_key_state_ignores_unknown_key_index():
 
 
 def test_color_only_change_rebuilds_the_frame():
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
     hid_device.feed(_key_state_report(key_index=2, color=0x0000, emoji_id=7))
@@ -291,7 +272,7 @@ def test_emoji_id_only_change_pushes_the_same_picture_without_composing():
     """A built-in Emoji ID draws no glyph, so a change of Emoji ID alone
     leaves the frame as it was: the board composes nothing.
     """
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
     hid_device.feed(_key_state_report(key_index=4, color=0x001F, emoji_id=7))
@@ -314,7 +295,7 @@ def test_key_switch_sends_no_init_or_reset():
     bus = FakeBus(key_count=len(pins.KEYS))
     panels = [bus.panel(i, colstart=2, rowstart=3) for i in range(len(pins.KEYS))]
     st7735.init_panels(bus.rst, panels, sleep=lambda seconds: None)
-    pad, _, _, _, hid_device, _, _ = _build_pad(panels=panels)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
     pad.step(0)  # power-on paint of all six keys
     commands_before = len(bus.records)
     rst_log_before = list(bus.rst.log)
@@ -335,7 +316,7 @@ def test_update_to_one_key_writes_nothing_to_the_other_panels():
     bus = FakeBus(key_count=len(pins.KEYS))
     panels = [bus.panel(i) for i in range(len(pins.KEYS))]
     st7735.init_panels(bus.rst, panels, sleep=lambda seconds: None)
-    pad, _, _, _, hid_device, _, _ = _build_pad(panels=panels)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
     pad.step(0)
     frame_counts = [bus.frame_count(i) for i in range(len(pins.KEYS))]
     other_commands = {i: len(bus.commands(i)) for i in range(len(pins.KEYS)) if i != 2}
@@ -353,7 +334,7 @@ def test_blink_redraw_composes_nothing():
     """A blink-only redraw pushes the other cached frame. It must not
     fill or blit, since neither the color nor the glyph changed.
     """
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
     hid_device.feed(
@@ -370,7 +351,7 @@ def test_blink_redraw_composes_nothing():
 
 
 def test_key_state_accepts_report_with_report_id_prefix():
-    pad, _, _, _, hid_device, _, _ = _build_pad()
+    pad, _, _, _, hid_device, _ = _build_pad()
 
     pad.step(0)
     # boot.py declares report ID 1. Whether the core prefixes it is this
@@ -385,7 +366,7 @@ def test_key_state_accepts_report_with_report_id_prefix():
 
 
 def test_press_writes_event():
-    pad, switches, _, _, _, serial, _ = _build_pad()
+    pad, switches, _, _, _, serial = _build_pad()
 
     pad.step(0)  # every switch open
     assert serial.written == b""
@@ -401,7 +382,7 @@ def test_press_writes_event():
 
 def test_press_trace_order():
     tr = tracer_module.Tracer(capacity=32, enabled=True)
-    pad, switches, _, _, _, serial, _ = _build_pad(tracer=tr)
+    pad, switches, _, _, _, serial = _build_pad(tracer=tr)
 
     pad.step(0)  # power-on: every switch's initial reading, not an edge
     # Power-on also paints all six keys, tracing GLYPH_BUILT/REFRESH_DONE
@@ -428,7 +409,7 @@ def test_press_trace_order():
 
 
 def test_release_writes_event():
-    pad, switches, _, _, _, serial, _ = _build_pad()
+    pad, switches, _, _, _, serial = _build_pad()
 
     pad.step(0)
     switches[2].value = False
@@ -444,7 +425,7 @@ def test_release_writes_event():
 
 
 def test_bounce_writes_one_event():
-    pad, switches, _, _, _, serial, _ = _build_pad()
+    pad, switches, _, _, _, serial = _build_pad()
 
     pad.step(0)
 
@@ -459,7 +440,7 @@ def test_bounce_writes_one_event():
 
 def test_idle_dims_backlight():
     idle_timer = IdleTimer(idle_window_us=5000)
-    pad, _, _, backlights, _, _, _ = _build_pad(idle_timer=idle_timer)
+    pad, _, _, backlights, _, _ = _build_pad(idle_timer=idle_timer)
 
     pad.step(0)
     assert all(backlight.duty_cycle == 1.0 for backlight in backlights)
@@ -473,7 +454,7 @@ def test_idle_dims_backlight():
 
 def test_key_event_wakes_backlight():
     idle_timer = IdleTimer(idle_window_us=5000)
-    pad, switches, _, backlights, _, _, _ = _build_pad(idle_timer=idle_timer)
+    pad, switches, _, backlights, _, _ = _build_pad(idle_timer=idle_timer)
 
     pad.step(5000)
     assert all(backlight.duty_cycle == 0.1 for backlight in backlights)
@@ -485,7 +466,7 @@ def test_key_event_wakes_backlight():
 
 def test_host_message_wakes_backlight():
     idle_timer = IdleTimer(idle_window_us=5000)
-    pad, _, _, backlights, hid_device, _, _ = _build_pad(idle_timer=idle_timer)
+    pad, _, _, backlights, hid_device, _ = _build_pad(idle_timer=idle_timer)
 
     pad.step(5000)
     assert all(backlight.duty_cycle == 0.1 for backlight in backlights)
@@ -503,7 +484,7 @@ def test_blink_key_redraws_only_after_blink_interval_elapses():
     bring-up). It should redraw once immediately (the state change
     itself), then again only once BLINK_INTERVAL_US has elapsed.
     """
-    pad, _, panels, _, hid_device, _, _ = _build_pad()
+    pad, _, panels, _, hid_device, _ = _build_pad()
 
     pad.step(0)  # power-on: every key, including 5, renders once
     assert len(panels.per_key[5].frames) == 1
@@ -537,7 +518,7 @@ def test_backlight_scales_fraction_to_pwm_duty_cycle():
 
 
 def test_custom_glyph_applies_to_one_key():
-    pad, _, panels, _, _, serial, _ = _build_pad()
+    pad, _, panels, _, _, serial = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
     serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0xAB))
@@ -553,11 +534,12 @@ def test_custom_glyph_applies_to_one_key():
 
 
 def test_custom_glyph_paint_trace_order():
-    """DoD-1: one custom-glyph paint fires the four task-0042 trace codes,
-    in stage order, for the key the Set custom glyph message named.
+    """DoD-1: one custom-glyph paint fires three of the task-0042 trace
+    codes, in stage order, for the key the Set custom glyph message named.
+    The board no longer persists (task 0044), so `PERSIST_DONE` is not one.
     """
     tr = tracer_module.Tracer(capacity=32, enabled=True)
-    pad, _, _, _, _, serial, _ = _build_pad(tracer=tr)
+    pad, _, _, _, _, serial = _build_pad(tracer=tr)
 
     pad.step(0)  # power-on paint of all six keys
     serial.written = bytearray()
@@ -573,37 +555,17 @@ def test_custom_glyph_paint_trace_order():
     ]
     key3_codes = [code for code, key, _, _ in trace_records if key == 3]
 
-    # Persisting comes last: a flash write took 260 ms to 450 ms on the
-    # board, so it must not sit between the message and the new image.
     assert key3_codes == [
         tracer_module.CUSTOM_GLYPH_DECODED,
         tracer_module.GLYPH_BUILT,
         tracer_module.REFRESH_DONE,
-        tracer_module.PERSIST_DONE,
     ]
 
 
-def test_state_is_persisted_after_the_redraw_in_the_same_step():
-    storage = FakeGlyphStorage()
-    events = []
-    panels = FakePanels(len(pins.KEYS))
-    original_push = panels.per_key[2].push
-    panels.per_key[2].push = lambda frame: (events.append("push"), original_push(frame))
-    original_write = storage.write
-    storage.write = lambda key, data: (events.append("write"), original_write(key, data))
-    pad, _, _, _, hid_device, _, _ = _build_pad(storage=storage, panels=panels)
-    pad.step(0)
-    events.clear()
-
-    hid_device.feed(_key_state_report(key_index=2, color=0xF81F, emoji_id=0))
-    pad.step(1000)
-
-    assert events == ["push", "write"]
-    assert storage._files[2] == glyph_state.encode(0xF81F, 0, False)
 
 
 def test_custom_glyph_ignores_unknown_key_index():
-    pad, _, _, _, _, serial, _ = _build_pad()
+    pad, _, _, _, _, serial = _build_pad()
 
     pad.step(0)
     serial.feed(_custom_glyph_frame(key_index=99, fill_byte=0xAB))
@@ -613,7 +575,7 @@ def test_custom_glyph_ignores_unknown_key_index():
 
 
 def test_custom_glyph_arrives_across_multiple_steps():
-    pad, _, panels, _, _, serial, _ = _build_pad()
+    pad, _, panels, _, _, serial = _build_pad()
 
     pad.step(0)
     frame = _custom_glyph_frame(key_index=2, fill_byte=0xCD)
@@ -634,7 +596,7 @@ def test_custom_glyph_arrives_across_multiple_steps():
 
 
 def test_built_in_glyph_replaces_custom_image():
-    pad, _, _, _, hid_device, serial, _ = _build_pad()
+    pad, _, _, _, hid_device, serial = _build_pad()
 
     pad.step(0)
     serial.feed(_custom_glyph_frame(key_index=1, fill_byte=0xAB))
@@ -649,7 +611,7 @@ def test_built_in_glyph_replaces_custom_image():
 
 
 def test_key_state_naming_custom_glyph_sentinel_keeps_image_and_blinks():
-    pad, _, _, _, hid_device, serial, _ = _build_pad()
+    pad, _, _, _, hid_device, serial = _build_pad()
 
     pad.step(0)
     serial.feed(_custom_glyph_frame(key_index=1, fill_byte=0xAB))
@@ -674,7 +636,7 @@ def test_custom_glyph_draws_over_the_key_color():
     """Task 0041 DoD-1, as task 0043 draws it: a transparent pixel shows
     the key's own color, and an opaque pixel shows the glyph.
     """
-    pad, _, panels, _, hid_device, serial, _ = _build_pad()
+    pad, _, panels, _, hid_device, serial = _build_pad()
 
     pad.step(0)  # power-on paint of all six keys
     hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0x00))
@@ -696,7 +658,7 @@ def test_custom_glyph_blink_toggles_background_when_transparent():
     only the color behind its transparent pixels alternates between the
     key's color and black.
     """
-    pad, _, panels, _, hid_device, serial, _ = _build_pad()
+    pad, _, panels, _, hid_device, serial = _build_pad()
 
     pad.step(0)
     hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0x00))
@@ -730,7 +692,7 @@ def test_custom_glyph_opaque_keeps_whole_image_blink_toggle():
     """Task 0041 DoD-3: a custom glyph with no transparent pixel blinks by
     showing and hiding the whole image, over the key's color.
     """
-    pad, _, panels, _, hid_device, serial, _ = _build_pad()
+    pad, _, panels, _, hid_device, serial = _build_pad()
 
     pad.step(0)
     pixels = _rgb565_solid_pixels(0xF800)  # fully opaque, no transparency
@@ -759,7 +721,7 @@ def test_custom_glyph_opaque_keeps_whole_image_blink_toggle():
 
 
 def test_custom_glyph_of_the_wrong_length_is_dropped():
-    pad, _, panels, _, _, serial, _ = _build_pad()
+    pad, _, panels, _, _, serial = _build_pad()
     pad.step(0)
     writer = FakeSerial()
     wire.write_frame(
@@ -782,7 +744,7 @@ def test_custom_glyph_of_the_wrong_length_is_dropped():
 
 def test_custom_glyph_wakes_backlight():
     idle_timer = IdleTimer(idle_window_us=5000)
-    pad, _, _, backlights, _, serial, _ = _build_pad(idle_timer=idle_timer)
+    pad, _, _, backlights, _, serial = _build_pad(idle_timer=idle_timer)
 
     pad.step(5000)
     assert all(backlight.duty_cycle == 0.1 for backlight in backlights)
@@ -792,72 +754,45 @@ def test_custom_glyph_wakes_backlight():
     assert all(backlight.duty_cycle == 1.0 for backlight in backlights)
 
 
-def test_reboot_restores_persisted_state():
-    storage = FakeGlyphStorage()
-    pad, _, _, _, hid_device, serial, _ = _build_pad(storage=storage)
-
-    pad.step(0)
-    hid_device.feed(_key_state_report(key_index=4, color=0xF800, emoji_id=0xF2, blink=True))
-    pad.step(1000)
-    serial.feed(_custom_glyph_frame(key_index=1, fill_byte=0x42))
-    pad.step(2000)
-
-    # A fresh MacroPad, same storage: the reboot.
-    rebooted, _, panels, _, _, _, _ = _build_pad(storage=storage)
-
-    assert rebooted.key_states[4].color == 0xF800
-    assert rebooted.key_states[4].emoji_id == 0xF2
-    assert rebooted.key_states[4].blink is True
-    assert rebooted.key_states[1].pixels == _custom_glyph_pixels(0x42)
-    assert rebooted.key_states[1].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
-
-    for index in (0, 2, 3, 5):
-        assert rebooted.key_states[index].color == DEFAULT_COLOR
-        assert rebooted.key_states[index].emoji_id == DEFAULT_EMOJI_ID
-        assert rebooted.key_states[index].pixels is None
-
-    rebooted.step(0)  # power-on paint reflects the restored state with no driver connected
-    assert len(panels.per_key[1].frames) == 1
-    assert _last_frame(panels.per_key[1]) == _solid_frame(0x4242)
-    assert _last_frame(panels.per_key[4]) == _solid_frame(0xF800)
 
 
-def test_reboot_with_a_legacy_record_shows_its_color_only():
-    """A record from before task 0043 holds RGBA4444 pixels the board
-    cannot show. The key keeps its color and blink and shows no glyph.
+
+
+
+
+
+
+
+
+def test_update_keeps_blink_phase():
+    """An update to a blinking key draws the frame the key showed, with the
+    new color. The next toggle stays on the old schedule.
     """
-    storage = FakeGlyphStorage()
-    legacy = bytes((0x1F, 0xF8, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, 0)) + bytes(
-        wire.CUSTOM_GLYPH_PIXELS_SIZE
-    )
-    storage.write(2, legacy)
-
-    pad, _, panels, _, _, _, _ = _build_pad(storage=storage)
+    pad, _, panels, _, hid_device, _ = _build_pad()
     pad.step(0)
-
-    assert pad.key_states[2].color == 0xF81F
-    assert pad.key_states[2].pixels is None
-    assert _last_frame(panels.per_key[2]) == _solid_frame(0xF81F)
-
-
-def test_second_state_leaves_no_trace_of_first():
-    storage = FakeGlyphStorage()
-    pad, _, _, _, _, serial, _ = _build_pad(storage=storage)
-
-    pad.step(0)
-    serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0x11))
+    hid_device.feed(_key_state_report(key_index=5, color=0x001F, emoji_id=0, blink=True))
     pad.step(1000)
-    serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0x22))
-    pad.step(2000)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x001F)  # "on"
+    pad.step(1000 + BLINK_INTERVAL_US)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)  # "off"
+    shown = len(panels.per_key[5].frames)
 
-    rebooted, _, _, _, _, _, _ = _build_pad(storage=storage)
+    # An update while "off": the key stays "off", in the new color.
+    hid_device.feed(_key_state_report(key_index=5, color=0xF800, emoji_id=0, blink=True))
+    pad.step(1000 + BLINK_INTERVAL_US + 200_000)
+    assert len(panels.per_key[5].frames) == shown + 1
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)
 
-    assert rebooted.key_states[3].pixels == _custom_glyph_pixels(0x22)
-    # Exactly one stored record for the key — no trace of the first state.
-    assert len(storage._files) == 1
-    assert storage._files[3] == glyph_state.encode(
-        rebooted.key_states[3].color,
-        wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID,
-        False,
-        _custom_glyph_pixels(0x22),
-    )
+    # No toggle until the old schedule, then "on" in the new color.
+    pad.step(1000 + 2 * BLINK_INTERVAL_US - 1)
+    assert len(panels.per_key[5].frames) == shown + 1
+    pad.step(1000 + 2 * BLINK_INTERVAL_US)
+    assert len(panels.per_key[5].frames) == shown + 2
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0xF800)
+
+    # An update while "on": the key stays "on".
+    hid_device.feed(_key_state_report(key_index=5, color=0x07E0, emoji_id=0, blink=True))
+    pad.step(1000 + 2 * BLINK_INTERVAL_US + 100_000)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x07E0)
+    pad.step(1000 + 3 * BLINK_INTERVAL_US)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)

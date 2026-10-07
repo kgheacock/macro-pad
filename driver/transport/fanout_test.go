@@ -42,38 +42,26 @@ func TestFanout_SlowSubscriberDoesNotBlockAnother(t *testing.T) {
 	slow := f.Subscribe() // never read from
 	healthy := f.Subscribe()
 
+	// Inject one event at a time and read it from healthy before the next.
+	// Fanout drops a message when a subscriber's queue is full, by design,
+	// so a loop that injects faster than healthy is read would drop from
+	// healthy too, and the test would fail on scheduling. In lockstep
+	// healthy's queue never holds more than one message, and slow's fills
+	// after fanoutQueueSize of them: the test is whether slow's full queue
+	// stalls delivery to healthy.
 	const n = fanoutQueueSize + 5
-
-	// Drain healthy concurrently with injection, so its own bounded queue
-	// never fills — the point of the test is whether slow's full queue
-	// stalls delivery to healthy, not whether healthy can out-buffer a
-	// burst on its own. Errors travel back over a channel instead of
-	// calling t.Fatal directly: this goroutine is not the test goroutine.
-	got := make(chan error, 1)
-	go func() {
-		for i := 0; i < n; i++ {
-			if _, err := healthy.ReadMessage(); err != nil {
-				got <- err
-				return
-			}
-		}
-		got <- nil
-	}()
-
 	for i := 0; i < n; i++ {
 		ev := Event{KeyIndex: byte(i % 6), Type: EventPress, Timestamp: uint64(i)}
 		if err := emu.InjectEvent(ev); err != nil {
 			t.Fatalf("InjectEvent %d: %v", i, err)
 		}
-	}
-
-	select {
-	case err := <-got:
+		msg, err := readWithTimeout(t, healthy)
 		if err != nil {
-			t.Fatalf("healthy subscriber: %v", err)
+			t.Fatalf("healthy subscriber, message %d: %v", i, err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for healthy subscriber to receive all messages")
+		if msg.Event != ev {
+			t.Fatalf("healthy subscriber, message %d = %+v, want %+v", i, msg.Event, ev)
+		}
 	}
 
 	_ = slow // deliberately undrained, proving it did not stall healthy

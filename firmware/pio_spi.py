@@ -11,7 +11,7 @@ The PIO owns SCK and MOSI. DC and every CS line stay with the CPU, as in
 ends before the next one starts. `app.MacroPad` does that, because all six
 panels share these two lines.
 
-See tasks/ongoing/0045-double-buffered-dma-panel-push.md for the design
+See tasks/complete/0045-double-buffered-dma-panel-push.md for the design
 decision.
 """
 

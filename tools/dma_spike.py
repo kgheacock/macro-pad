@@ -2,7 +2,7 @@
 """Measure how much CPU time a cached-frame push leaves free, on the board.
 
 `make dma-spike` runs `install`, then `read`. See
-tasks/ongoing/0045-double-buffered-dma-panel-push.md, DoD-1.
+tasks/complete/0045-double-buffered-dma-panel-push.md, DoD-1.
 
     dma_spike.py install CIRCUITPY_VOLUME
     dma_spike.py read

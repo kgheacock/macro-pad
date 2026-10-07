@@ -19,7 +19,7 @@ use the bus: all six share SCK and MOSI, and `app.MacroPad` sends one push at
 a time (task 0045).
 
 See tasks/ongoing/0043-raw-spi-panels-init-once.md and
-tasks/ongoing/0045-double-buffered-dma-panel-push.md for the design decisions.
+tasks/complete/0045-double-buffered-dma-panel-push.md for the design decisions.
 """
 
 import time

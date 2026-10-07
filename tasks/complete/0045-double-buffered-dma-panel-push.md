@@ -1,13 +1,13 @@
 ---
 id: "0045"
 title: "Double-buffered panel push: send frames by DMA so blinking does not use the CPU"
-status: "ongoing"
+status: "complete"
 created: "2026-10-06"
 updated: "2026-10-06"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/46"
 branch: "0045-double-buffered-dma-panel-push"
 related: ["0043", "0044"]
 tags: ["firmware", "blink", "spi", "dma", "pio"]
@@ -131,7 +131,7 @@ ticked.
   **Proof:** `docs/wire-protocol.md`, section "Trace code registry"
 - [x] **DoD-8** — `firmware/README.md` records the push design and the measured CPU time per push.
   **Proof:** `firmware/README.md`, section "Latency"
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec.
+- [x] **DoD-9** — The PR in the `pr` field links to this spec.
   **Proof:** the PR body
 
 ## Risks

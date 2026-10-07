@@ -21,6 +21,8 @@ RECORD_SIZE = 12  # code (1) + key (1) + payload (2) + timestamp (8)
 # recorded from `firmware/app.py` and `firmware/display_render.py`. Task
 # 0044 removed the board's persistence, so nothing emits `PERSIST_DONE` now;
 # the code stays in the registry so the wire protocol's numbers do not move.
+# Task 0045 adds `PUSH_STARTED`: a push goes out by DMA, so `REFRESH_DONE`
+# now marks the end of the push and `PUSH_STARTED` its start.
 TRACE_DROPPED = 0
 HOST_MESSAGE_DECODED = 1
 SWITCH_READ = 2
@@ -30,6 +32,7 @@ CUSTOM_GLYPH_DECODED = 5
 PERSIST_DONE = 6
 GLYPH_BUILT = 7
 REFRESH_DONE = 8
+PUSH_STARTED = 9
 
 
 class Tracer:

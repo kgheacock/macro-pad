@@ -1,4 +1,4 @@
-"""Computes what to draw for a key and pushes it to the key's panel.
+"""Computes what to draw for a key and hands it to the key's panel queue.
 
 Each key keeps cached 128x128 RGB565 frames: an "on" frame, and an "off"
 frame while the key blinks. The board rebuilds them only when the key's
@@ -7,11 +7,17 @@ composes nothing.
 
 A frame is a `displayio.Bitmap` used as a plain 16-bit pixel buffer. It is
 never shown through `displayio`. `bitmaptools` fills and blits it, and
-`st7735.Panel.push` writes its bytes to the panel. The host driver already
-converted the glyph to the panel's big-endian RGB565, so the board converts
-no pixels; see "Set custom glyph" in docs/wire-protocol.md.
+`st7735.Panel.start_push` sends its bytes to the panel by DMA. The host driver
+already converted the glyph to the panel's big-endian RGB565, so the board
+converts no pixels; see "Set custom glyph" in docs/wire-protocol.md.
 
-See tasks/ongoing/0043-raw-spi-panels-init-once.md for the design decision.
+A frame is never changed after it is built. A new color or glyph composes a
+new `Bitmap` in place of the cached one, the "back" frame, and the old one
+stays whole until the panel has sent it, so a rebuild cannot change a frame
+that is on the wire (task 0045).
+
+See tasks/ongoing/0043-raw-spi-panels-init-once.md and
+tasks/ongoing/0045-double-buffered-dma-panel-push.md for the design decisions.
 """
 
 import array
@@ -101,9 +107,14 @@ def _has_transparent_pixel(pixels: bytes) -> bool:
         start = found + 1
 
 
-def _compose(color: int, pixels: bytes) -> displayio.Bitmap:
+def _compose(color: int, pixels: bytes) -> memoryview:
     """Build one frame: fill it with `color`, then blit `pixels` over it,
     skipping the transparent value. `pixels` may be `None`.
+
+    Returns a view of the new `Bitmap` with one item per byte, which is what
+    the DMA sends. A `Bitmap` of 16-bit pixels has 16-bit items, and the DMA
+    would send a pixel as one item in the wrong size and order. The view keeps
+    the `Bitmap` alive.
     """
     frame = displayio.Bitmap(FRAME_WIDTH, FRAME_HEIGHT, _FRAME_COLORS)
     bitmaptools.fill_region(frame, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, _swap16(color))
@@ -113,7 +124,7 @@ def _compose(color: int, pixels: bytes) -> displayio.Bitmap:
         bitmaptools.blit(
             frame, glyph, 0, 0, skip_source_index=TRANSPARENT_PIXEL
         )
-    return frame
+    return memoryview(frame).cast("B")
 
 
 def _build_frames(key_state: KeyState, tracer=None, key_index=None) -> None:
@@ -160,11 +171,12 @@ def _build_frames(key_state: KeyState, tracer=None, key_index=None) -> None:
 def render_key(
     panel, key_state: KeyState, tracer=None, key_index=None, toggle=True
 ) -> None:
-    """Push one frame for a key to its panel.
+    """Hand one frame for a key to its panel queue.
 
     Rebuilds the key's cached frames first when its color, glyph, or blink
-    flag changed since they were built. Then pushes the "on" frame, or for
-    a blinking key, the frame it should show now.
+    flag changed since they were built. Then submits the "on" frame, or for
+    a blinking key, the frame it should show now. `panel.submit(frame)` only
+    queues the frame; `app.MacroPad` sends it when the bus is free.
 
     `toggle` says why the key is drawn. A due blink passes `True` and the
     key flips to the frame it did not push last. A redraw caused by a state
@@ -173,8 +185,8 @@ def render_key(
     first paint of a blinking key shows "on" either way.
 
     `tracer`/`key_index`, when `tracer` is set, record a `GLYPH_BUILT`
-    record when the frames are rebuilt, and a `REFRESH_DONE` record right
-    after the push returns — see task 0042.
+    record when the frames are rebuilt. `app.MacroPad` records `PUSH_STARTED`
+    and `REFRESH_DONE` when the push starts and ends — see tasks 0042 and 0045.
     """
     first_paint = key_state._on_frame is None
     _build_frames(key_state, tracer, key_index)
@@ -187,9 +199,4 @@ def render_key(
         key_state._blink_visible = not key_state._blink_visible
 
     frame = key_state._on_frame if key_state._blink_visible else key_state._off_frame
-    panel.push(frame)
-
-    if tracer is not None:
-        tracer.record(
-            tracer_module.REFRESH_DONE, key_index, 0, time.monotonic_ns() // 1000
-        )
+    panel.submit(frame)

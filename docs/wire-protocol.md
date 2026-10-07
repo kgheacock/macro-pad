@@ -238,7 +238,8 @@ for the design decision.
 | 5 | `CUSTOM_GLYPH_DECODED` | `0`, unused — the Key field already names the target key |
 | 6 | `PERSIST_DONE` | `0`, unused. No longer emitted since task 0044: the board keeps no state. |
 | 7 | `GLYPH_BUILT` | `0`, unused |
-| 8 | `REFRESH_DONE` | `0`, unused |
+| 8 | `REFRESH_DONE` | `0`, unused. Since task 0045, the end of a push to the panel |
+| 9 | `PUSH_STARTED` | `0`, unused. The start of a push to the panel, task 0045 |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last
@@ -252,9 +253,13 @@ does, distinguished by `DEBOUNCE_VERDICT`'s payload.
 `CUSTOM_GLYPH_DECODED`, `GLYPH_BUILT`, and `REFRESH_DONE` mark the
 custom-glyph paint pipeline's stages for one Set custom glyph message: CDC
 transfer and decode end at `CUSTOM_GLYPH_DECODED`; composing the key's
-cached frames from the raw pixel buffer ends at `GLYPH_BUILT`; and the SPI
-push to the panel ends at `REFRESH_DONE`. Until task 0044, persisting the
-new state to flash ended at `PERSIST_DONE`, after the paint.
+cached frames from the raw pixel buffer ends at `GLYPH_BUILT`; the SPI
+push to the panel starts at `PUSH_STARTED` (task 0045); and it ends at
+`REFRESH_DONE`. A push goes out by DMA, so the two records are one DMA transfer
+apart, about 22 ms at 15 MHz, and the board does other work between them. Only
+one push is on the wire at a time, so a key's record can come after the
+records of other keys' pushes that were queued before it. Until task 0044,
+persisting the new state to flash ended at `PERSIST_DONE`, after the paint.
 
 A Key state message records `HOST_MESSAGE_DECODED`, then the last
 two of those codes. Each Timestamp is its own point-in-time reading, not the

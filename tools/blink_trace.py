@@ -22,13 +22,14 @@ from pathlib import Path
 
 # Trace codes, as in firmware/tracer.py.
 HOST_MESSAGE_DECODED = 1
-REFRESH_DONE = 8
+PUSH_STARTED = 9
 
-# DoD-5: the largest allowed gap, in milliseconds, between two REFRESH_DONE
-# records of one blinking key.
+# The largest allowed gap, in milliseconds, between two PUSH_STARTED records
+# of one blinking key. Task 0044's DoD-5 allowed 650. Task 0045's DoD-4 allows
+# 600: a blink toggles every 500 ms, within 100 ms.
 BLINKING_KEYS = (0, 1, 2)
 UPDATED_KEY = 4
-MAX_GAP_LIMIT_MS = 650
+MAX_GAP_LIMIT_MS = 600
 
 # DoD-6: how many updates the burst sends, one to each key from 0.
 BURST_UPDATES = 6
@@ -80,7 +81,7 @@ def load_trace(lines):
 
 
 def blink_gaps_ms(records):
-    """Return every gap, in ms, between two REFRESH_DONE records of one
+    """Return every gap, in ms, between two PUSH_STARTED records of one
     blinking key, for the gaps that end after the first update to the
     updated key — the run's window starts there.
     """
@@ -94,7 +95,7 @@ def blink_gaps_ms(records):
     gaps = []
     last = {}
     for code, key, _, t in records:
-        if code != REFRESH_DONE or key not in BLINKING_KEYS:
+        if code != PUSH_STARTED or key not in BLINKING_KEYS:
             continue
         if key in last and t >= window_start:
             gaps.append((t - last[key]) / 1000)

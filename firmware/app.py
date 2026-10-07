@@ -77,9 +77,22 @@ def make_switch(pin):
     return switch
 
 
+class _KeyPort:
+    """What `display_render.render_key` hands a frame to: it queues the frame
+    for one key's panel in the `MacroPad` that built it.
+    """
+
+    def __init__(self, pad, key_index):
+        self._pad = pad
+        self._key_index = key_index
+
+    def submit(self, frame):
+        self._pad._submit_push(self._key_index, frame)
+
+
 class MacroPad:
-    """The whole device: six switches, six panels on one shared SPI bus, six
-    backlights.
+    """The whole device: six switches, six panels on one shared PIO SPI bus,
+    six backlights.
 
     Every argument is injected rather than built here, which is what lets
     a test drive `step` one iteration at a time with fakes. `panels` holds
@@ -87,6 +100,12 @@ class MacroPad:
     (task 0043). A redraw of one key pushes a frame to that key's panel
     alone — it releases no bus, pulses no reset line, and sends no init
     command, so the other five panels keep their image.
+
+    A push goes out by DMA and does not hold the loop (task 0045). All six
+    panels share SCK and MOSI, so one push is on the wire at a time. `step`
+    queues a frame for a key, starts the next queued push when the bus is
+    free, and polls the push on the wire. A key has at most one frame in the
+    queue: a newer frame replaces an older one that has not started.
     """
 
     def __init__(
@@ -131,13 +150,22 @@ class MacroPad:
         # up showing.
         self._dirty = set(range(len(self.key_states)))
 
+        self._ports = [_KeyPort(self, index) for index in range(len(switches))]
+        # The key indexes waiting to push, oldest first, and the frame each
+        # waits with. `_active_push` is the key whose push is on the wire.
+        self._push_queue = []
+        self._queued_frame = [None] * len(switches)
+        self._active_push = None
+
     def step(self, now_us):
         """Run one iteration of the loop."""
+        self._service_pushes()
         host_message = self._apply_host_report(now_us)
         custom_glyph_message = self._apply_custom_glyph()
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys(now_us)
+        self._service_pushes()
 
         if host_message or custom_glyph_message or key_event:
             self._idle_timer.touch(now_us)
@@ -145,6 +173,41 @@ class MacroPad:
 
         if self._tracer is not None:
             self._tracer.drain(self._write_trace_record)
+
+    def _submit_push(self, key_index, frame):
+        """Queue `frame` for a key. It replaces a frame of the same key that
+        has not started, and keeps that frame's place in the queue.
+        """
+        if self._queued_frame[key_index] is None:
+            self._push_queue.append(key_index)
+        self._queued_frame[key_index] = frame
+
+    def _service_pushes(self):
+        """End the push on the wire when it is done, then start the next.
+
+        Returns at once when a push is still on the wire. Each push is on
+        the wire for about 20 ms, so this runs many times for one push.
+        """
+        while True:
+            if self._active_push is not None:
+                if not self._panels[self._active_push].poll():
+                    return
+                self._record_trace(tracer_module.REFRESH_DONE, self._active_push)
+                self._active_push = None
+
+            if not self._push_queue:
+                return
+
+            key_index = self._push_queue.pop(0)
+            frame = self._queued_frame[key_index]
+            self._queued_frame[key_index] = None
+            self._panels[key_index].start_push(frame)
+            self._active_push = key_index
+            self._record_trace(tracer_module.PUSH_STARTED, key_index)
+
+    def _record_trace(self, code, key_index):
+        if self._tracer is not None:
+            self._tracer.record(code, key_index, 0, time.monotonic_ns() // 1000)
 
     def _write_trace_record(self, record_bytes):
         wire.write_frame(self._serial, wire.MESSAGE_TYPE_TRACE, record_bytes)
@@ -307,7 +370,7 @@ class MacroPad:
                 continue
 
             display_render.render_key(
-                self._panels[index], key_state, self._tracer, index, toggle=due_to_blink
+                self._ports[index], key_state, self._tracer, index, toggle=due_to_blink
             )
             if not key_state.blink:
                 self._next_blink_us[index] = None

@@ -18,7 +18,7 @@ class FakePanel:
         self.frames = []
         self.frame_objects = []
 
-    def push(self, frame):
+    def submit(self, frame):
         self.frame_objects.append(frame)
         self.frames.append(bytes(memoryview(frame)))
 
@@ -329,7 +329,7 @@ def test_swap16():
     assert display_render._swap16(0xF800) == 0x00F8
 
 
-def test_render_key_records_glyph_built_then_refresh_done():
+def test_render_key_records_glyph_built():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x0000)
     tracer = FakeTracer()
@@ -337,7 +337,7 @@ def test_render_key_records_glyph_built_then_refresh_done():
     render_key(panel, key, tracer, key_index=3)
 
     codes = [code for code, _, _, _ in tracer.records]
-    assert codes == [tracer_module.GLYPH_BUILT, tracer_module.REFRESH_DONE]
+    assert codes == [tracer_module.GLYPH_BUILT]
     assert all(key_index == 3 for _, key_index, _, _ in tracer.records)
 
 
@@ -354,7 +354,7 @@ def test_render_key_blink_only_redraw_skips_glyph_built():
     tracer.records.clear()
     render_key(panel, key, tracer, key_index=1)
 
-    assert [code for code, _, _, _ in tracer.records] == [tracer_module.REFRESH_DONE]
+    assert tracer.records == []
 
 
 def test_render_key_records_nothing_without_a_tracer():

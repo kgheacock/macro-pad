@@ -1,11 +1,19 @@
-"""A fake shared SPI bus with one DC line, one RST line, and one CS line
+"""A fake shared PIO SPI bus with one DC line, one RST line, and one CS line
 per panel, for tests of `firmware/st7735.py`.
 
-`FakeSPI.write` checks what real hardware needs: the bus must be locked,
-and exactly one CS line must be low. It then files each write under the
-panel that CS line selects, as a command (DC low) or as data for the last
-command (DC high). `FakeBus.commands(key)` and `FakeBus.image(key)` read
-back what each panel was sent.
+`FakePioBus` has the shape of `pio_spi.PioBus`: `write` waits for a short
+transfer, `start` begins a transfer by DMA, and `done` says it is on the
+wire. It checks what real hardware needs: exactly one CS line must be low
+for a transfer, and a new transfer must not start while one is on the wire.
+It files each transfer under the panel that CS line selects, as a command
+(DC low) or as data for the last command (DC high). `FakeBus.commands(key)`
+and `FakeBus.image(key)` read back what each panel was sent.
+
+A frame started with `start` is read when the transfer ends, as the DMA reads
+it while it runs. A write to the frame in between shows in `image`. CS must
+still be low when the transfer ends. With `auto_finish=True`, the default, a
+transfer ends the first time `done` is read. With `auto_finish=False` it ends
+when a test calls `FakeBus.finish`.
 """
 
 import st7735
@@ -29,31 +37,23 @@ class FakePin:
         self.log.append(self._value)
 
 
-class FakeSPI:
-    def __init__(self, bus):
+class FakePioBus:
+    def __init__(self, bus, auto_finish=True):
         self._bus = bus
-        self._locked = False
-        self.configures = []
+        self.auto_finish = auto_finish
+        self._in_flight = None  # (key, data) of the transfer on the wire
+        self.starts = 0
 
-    def try_lock(self):
-        assert not self._locked, "the bus is already locked"
-        self._locked = True
-        return True
-
-    def unlock(self):
-        assert self._locked, "unlock without a lock"
-        self._locked = False
-
-    def configure(self, *, baudrate, polarity, phase):
-        assert self._locked, "configure needs the lock"
-        self.configures.append((baudrate, polarity, phase))
-
-    def write(self, data):
-        assert self._locked, "write needs the lock"
+    def _selected(self):
         selected = [i for i, cs in enumerate(self._bus.cs) if cs.value is False]
         assert len(selected) == 1, "exactly one CS line must be low, got {}".format(selected)
-        key = selected[0]
+        return selected[0]
+
+    def write(self, data):
+        assert self._in_flight is None, "the bus is still sending a transfer"
+        key = self._selected()
         data = bytes(memoryview(data))
+        assert self._bus.dc.value is not None
         if self._bus.dc.value is False:
             assert len(data) == 1, "a command is one byte"
             self._bus.records.append([key, data[0], b""])
@@ -62,20 +62,47 @@ class FakeSPI:
             assert record[0] == key, "data written to another panel than its command"
             record[2] += data
 
+    def start(self, data):
+        assert self._in_flight is None, "the bus is still sending a transfer"
+        key = self._selected()
+        assert self._bus.dc.value is True, "a frame goes out as data"
+        self._in_flight = (key, data)
+        self.starts += 1
+
+    def finish(self):
+        """End the transfer on the wire, reading its buffer now."""
+        if self._in_flight is None:
+            return
+        key, data = self._in_flight
+        assert self._bus.cs[key].value is False, "CS went high before the transfer ended"
+        record = self._bus.records[-1]
+        assert record[0] == key, "data written to another panel than its command"
+        record[2] += bytes(memoryview(data))
+        self._in_flight = None
+
+    @property
+    def done(self):
+        if self.auto_finish:
+            self.finish()
+        return self._in_flight is None
+
 
 class FakeBus:
-    def __init__(self, key_count):
+    def __init__(self, key_count, auto_finish=True):
         self.dc = FakePin("dc", value=False)
         self.rst = FakePin("rst", value=True)
         self.cs = [FakePin("cs{}".format(i), value=True) for i in range(key_count)]
-        self.spi = FakeSPI(self)
+        self.pio = FakePioBus(self, auto_finish=auto_finish)
         # One [key, command, data] entry per command written.
         self.records = []
 
+    def finish(self):
+        """End the transfer on the wire."""
+        self.pio.finish()
+
     def panel(self, key, **kwargs):
-        kwargs.setdefault("baudrate", 4_000_000)
         kwargs.setdefault("sleep", lambda seconds: None)
-        return st7735.Panel(self.spi, self.dc, self.cs[key], **kwargs)
+        return st7735.Panel(self.pio, self.dc, self.cs[key], **kwargs)
 
     def commands(self, key=None):
         """The command bytes written, in order, to one panel or to all."""

@@ -9,7 +9,6 @@ See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 """
 
 import board
-import busio
 import digitalio
 import displayio
 import pwmio
@@ -17,6 +16,7 @@ import usb_cdc
 import usb_hid
 
 import pins
+import pio_spi
 import st7735
 from app import Backlight, MacroPad, make_switch
 
@@ -38,18 +38,23 @@ DISPLAY_ROWSTART = 3
 # runs at 16MHz: a frame push takes 21ms, against 79ms at 4MHz. Confirmed
 # live on all six wired panels (2026-10-06): a labeled test pattern of
 # color bars and 1px columns rendered cleanly at 4, 8, 12, 16, and 20MHz.
-# The RP2350 steps its SPI clock down from 150MHz, so 16MHz runs at an
-# actual 15MHz. Above about 19MHz a push stays near 17ms, because the CPU
-# feeding the FIFO is the limit, not the wire, so a higher rate buys little.
-DISPLAY_BAUDRATE = 16_000_000
+# The RP2350 steps its SPI clock down from 150MHz, so 16MHz ran at an
+# actual 15MHz. Above about 19MHz a push stayed near 17ms, because the CPU
+# feeding the FIFO was the limit, not the wire.
+# Task 0045 sends frames by DMA from a PIO state machine, whose clock is the
+# 150MHz system clock over a divider. 15MHz is a whole divider (5), so the
+# SCK edges are evenly spaced, and it is the rate the panels already ran at.
+# A frame push takes 22ms and holds the CPU for under 3ms of it.
+DISPLAY_BAUDRATE = 15_000_000
 
 # `displayio` claims the display pins at boot. Release them so the raw SPI
 # driver can use them.
 displayio.release_displays()
 
-spi = busio.SPI(
-    clock=getattr(board, pins.SPI_SCK),
-    MOSI=getattr(board, pins.SPI_MOSI),
+bus = pio_spi.PioBus(
+    sck=getattr(board, pins.SPI_SCK),
+    mosi=getattr(board, pins.SPI_MOSI),
+    baudrate=DISPLAY_BAUDRATE,
 )
 
 
@@ -65,10 +70,9 @@ rst = _output(pins.DISPLAY_RST, True)
 
 panels = [
     st7735.Panel(
-        spi,
+        bus,
         dc,
         _output(key.display_cs_pin, True),
-        DISPLAY_BAUDRATE,
         width=DISPLAY_WIDTH,
         height=DISPLAY_HEIGHT,
         colstart=DISPLAY_COLSTART,

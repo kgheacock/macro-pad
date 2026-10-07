@@ -1,17 +1,25 @@
-"""Drives the six ST7735R panels over one raw SPI bus, each initialised once.
+"""Drives the six ST7735R panels over one PIO SPI bus, each initialised once.
 
 This board allows one `displayio` bus at a time, so a key switch used to
 release the bus and build a new one. That pulsed the shared RST line and
 reran a 763 ms panel init, and the other five panels lost their image. A
-`Panel` here owns no bus. It borrows the one SPI bus under its own CS line
-for each transaction, so one key's update never reaches another panel.
+`Panel` here owns no bus. It borrows the one `pio_spi.PioBus` under its own
+CS line for each transaction, so one key's update never reaches another
+panel.
 
 `code.py` calls `init_panels` once at boot: one RST pulse, then one init per
-panel. After that, `Panel.push` is the only thing that talks to a panel. It
-sets the draw window and writes a frame. It sends no init command and
-touches no RST.
+panel. After that, a push is the only thing that talks to a panel. It sets
+the draw window and sends a frame. It sends no init command and touches no
+RST.
 
-See tasks/ongoing/0043-raw-spi-panels-init-once.md for the design decision.
+A push does not wait for the frame. `Panel.start_push` sets the window, hands
+the frame to the bus's DMA, and returns. `Panel.poll` releases CS when the
+frame is on the wire. Until then the panel is `busy`, and no other panel may
+use the bus: all six share SCK and MOSI, and `app.MacroPad` sends one push at
+a time (task 0045).
+
+See tasks/ongoing/0043-raw-spi-panels-init-once.md and
+tasks/ongoing/0045-double-buffered-dma-panel-push.md for the design decisions.
 """
 
 import time
@@ -88,50 +96,50 @@ class Panel:
     """One ST7735R panel, reached through the shared SPI bus and its own
     chip-select line.
 
-    `spi` is a `busio.SPI`, shared by every panel. `dc` is the shared
+    `bus` is a `pio_spi.PioBus`, shared by every panel. `dc` is the shared
     data/command line, and `cs` is this panel's own chip-select line. Both
     are `digitalio.DigitalInOut` outputs. `cs` idles high.
+
+    `busy` is true from `start_push` until `poll` sees the frame on the wire.
     """
 
     def __init__(
         self,
-        spi,
+        bus,
         dc,
         cs,
-        baudrate,
         width=128,
         height=128,
         colstart=0,
         rowstart=0,
         sleep=time.sleep,
     ):
-        self._spi = spi
+        self._bus = bus
         self._dc = dc
         self._cs = cs
-        self._baudrate = baudrate
         self._width = width
         self._height = height
         self._colstart = colstart
         self._rowstart = rowstart
         self._sleep = sleep
+        self.busy = False
+        # The frame on the wire. The panel holds it so that it stays alive and
+        # unchanged until `poll` sees it sent.
+        self._frame = None
         cs.value = True
 
     def _begin(self):
-        while not self._spi.try_lock():
-            pass
-        self._spi.configure(baudrate=self._baudrate, polarity=0, phase=0)
         self._cs.value = False
 
     def _end(self):
         self._cs.value = True
-        self._spi.unlock()
 
     def _command(self, command, data=None):
         self._dc.value = False
-        self._spi.write(bytes((command,)))
+        self._bus.write(bytes((command,)))
         if data:
             self._dc.value = True
-            self._spi.write(data)
+            self._bus.write(data)
 
     def init(self):
         """Run the init sequence on this panel. Boot only."""
@@ -155,14 +163,20 @@ class Panel:
                 i += 1
                 self._sleep((500 if delay_ms == 0xFF else delay_ms) / 1000)
 
-    def push(self, frame):
-        """Write one full frame to the panel.
+    def start_push(self, frame):
+        """Start sending one full frame to the panel, and return.
 
-        `frame` is `width * height` big-endian RGB565 pixels in any object
-        `spi.write` accepts. This sets the draw window, with the panel's
-        column and row offsets, then writes the frame, all under this
-        panel's CS line. It sends no init command.
+        `frame` is `width * height` big-endian RGB565 pixels as a buffer of
+        bytes. This sets the draw window, with the panel's column and row
+        offsets, with short writes that finish before it returns. It then
+        starts the frame on the bus's DMA, with this panel's CS line low. It
+        sends no init command. The caller must not change `frame` before
+        `poll` returns true, and must not start another panel's push until
+        then.
         """
+        if self.busy:
+            raise RuntimeError("a push is already on the wire")
+
         x_end = self._colstart + self._width - 1
         y_end = self._rowstart + self._height - 1
 
@@ -178,6 +192,26 @@ class Panel:
             )
             self._command(RAMWR)
             self._dc.value = True
-            self._spi.write(frame)
-        finally:
+            self._frame = frame
+            self._bus.start(frame)
+        except BaseException:
+            self._frame = None
             self._end()
+            raise
+        self.busy = True
+
+    def poll(self):
+        """Release CS once the frame is on the wire. Return True when the
+        panel is idle.
+        """
+        if self.busy and self._bus.done:
+            self._end()
+            self._frame = None
+            self.busy = False
+        return not self.busy
+
+    def push(self, frame):
+        """Send one full frame and wait until it is on the wire."""
+        self.start_push(frame)
+        while not self.poll():
+            pass

@@ -21,10 +21,10 @@ def _single_run(blink_period_us):
     t = 0
     while t <= 3_000_000:
         for key in (0, 1, 2):
-            lines.append(_trace_line(blink_trace.REFRESH_DONE, key, t + key * 25_000))
+            lines.append(_trace_line(blink_trace.PUSH_STARTED, key, t + key * 25_000))
         t += blink_period_us
     lines.append(_trace_line(blink_trace.HOST_MESSAGE_DECODED, 4, 1_000_000))
-    lines.append(_trace_line(blink_trace.REFRESH_DONE, 4, 1_060_000))
+    lines.append(_trace_line(blink_trace.PUSH_STARTED, 4, 1_060_000))
     return lines
 
 
@@ -44,10 +44,10 @@ def test_single_run_with_a_frozen_blink_fails():
 
 def test_gaps_before_the_first_update_do_not_count():
     lines = [
-        _trace_line(blink_trace.REFRESH_DONE, 0, 0),
-        _trace_line(blink_trace.REFRESH_DONE, 0, 900_000),
+        _trace_line(blink_trace.PUSH_STARTED, 0, 0),
+        _trace_line(blink_trace.PUSH_STARTED, 0, 900_000),
         _trace_line(blink_trace.HOST_MESSAGE_DECODED, 4, 1_000_000),
-        _trace_line(blink_trace.REFRESH_DONE, 0, 1_500_000),
+        _trace_line(blink_trace.PUSH_STARTED, 0, 1_500_000),
     ]
 
     assert blink_trace.blink_gaps_ms(blink_trace.load_trace(lines)) == [600.0]

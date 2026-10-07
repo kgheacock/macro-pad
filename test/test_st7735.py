@@ -99,36 +99,28 @@ def test_push_takes_a_memoryview():
     assert bus.image(0) == bytes(frame)
 
 
-def test_transaction_releases_cs_and_bus_after_push():
+def test_transaction_releases_cs_after_push():
     bus = FakeBus(key_count=2)
 
     bus.panel(0).push(bytes(FRAME_BYTES))
 
     assert bus.cs[0].value is True
-    assert bus.spi._locked is False
 
 
-def test_transaction_releases_cs_and_bus_when_a_write_fails():
+def test_transaction_releases_cs_when_a_write_fails():
     bus = FakeBus(key_count=1)
     panel = bus.panel(0)
 
-    class Broken:
-        def __len__(self):
-            raise RuntimeError("write failed")
+    def broken(data):
+        raise RuntimeError("write failed")
 
-    with pytest.raises(Exception):
-        panel.push(Broken())
+    bus.pio.start = broken
+
+    with pytest.raises(RuntimeError):
+        panel.start_push(bytes(FRAME_BYTES))
 
     assert bus.cs[0].value is True
-    assert bus.spi._locked is False
-
-
-def test_panel_uses_its_baudrate():
-    bus = FakeBus(key_count=1)
-
-    bus.panel(0, baudrate=16_000_000).push(bytes(FRAME_BYTES))
-
-    assert bus.spi.configures == [(16_000_000, 0, 0)]
+    assert panel.busy is False
 
 
 def test_cs_idles_high():
@@ -138,3 +130,109 @@ def test_cs_idles_high():
     bus.panel(0)
 
     assert bus.cs[0].value is True
+
+
+def test_start_push_sends_the_window_and_the_frame_byte_identical():
+    bus = FakeBus(key_count=2)
+    panel = bus.panel(1, colstart=2, rowstart=3)
+    frame = bytes(range(256)) * (FRAME_BYTES // 256)
+
+    panel.start_push(frame)
+    assert panel.poll() is True
+
+    assert bus.commands(1) == [st7735.CASET, st7735.RASET, st7735.RAMWR]
+    assert bus.window(1) == ((2, 129), (3, 130))
+    assert bus.image(1) == frame
+    assert bus.commands(0) == []
+
+
+def test_start_push_returns_with_cs_low_and_the_panel_busy():
+    bus = FakeBus(key_count=2, auto_finish=False)
+    panel = bus.panel(0)
+
+    panel.start_push(bytes(FRAME_BYTES))
+
+    assert panel.busy is True
+    assert bus.cs[0].value is False
+    assert bus.cs[1].value is True
+    assert bus.pio.starts == 1
+
+
+def test_start_push_poll_keeps_cs_low_until_the_state_machine_is_done():
+    bus = FakeBus(key_count=1, auto_finish=False)
+    panel = bus.panel(0)
+    panel.start_push(bytes(FRAME_BYTES))
+
+    assert panel.poll() is False
+    assert panel.poll() is False
+    assert bus.cs[0].value is False
+    assert panel.busy is True
+
+    bus.finish()
+
+    assert panel.poll() is True
+    assert bus.cs[0].value is True
+    assert panel.busy is False
+    assert bus.image(0) == bytes(FRAME_BYTES)
+
+
+def test_start_push_takes_a_memoryview():
+    bus = FakeBus(key_count=1)
+    frame = bytearray(b"\xf8\x00") * (FRAME_BYTES // 2)
+
+    panel = bus.panel(0)
+    panel.start_push(memoryview(frame))
+    panel.poll()
+
+    assert bus.image(0) == bytes(frame)
+
+
+def test_start_push_refuses_a_second_push_while_busy():
+    bus = FakeBus(key_count=1, auto_finish=False)
+    panel = bus.panel(0)
+    panel.start_push(bytes(FRAME_BYTES))
+
+    with pytest.raises(RuntimeError):
+        panel.start_push(bytes(FRAME_BYTES))
+
+    assert bus.frame_count(0) == 1  # one RAMWR, not two
+    assert bus.image(0) == b""  # its frame is not on the wire yet
+    bus.finish()
+    panel.poll()
+    assert bus.image(0) == bytes(FRAME_BYTES)
+
+
+def test_start_push_holds_the_frame_until_poll_sees_it_sent():
+    bus = FakeBus(key_count=1, auto_finish=False)
+    panel = bus.panel(0)
+    frame = bytearray(FRAME_BYTES)
+
+    panel.start_push(frame)
+
+    assert panel._frame is frame
+    bus.finish()
+    panel.poll()
+    assert panel._frame is None
+
+
+def test_poll_on_an_idle_panel_is_true_and_leaves_cs_alone():
+    bus = FakeBus(key_count=1)
+    panel = bus.panel(0)
+
+    assert panel.poll() is True
+    assert bus.cs[0].log == [True]  # only the constructor's write
+
+
+def test_panel_can_push_again_after_poll_sees_the_last_push_sent():
+    bus = FakeBus(key_count=1, auto_finish=False)
+    panel = bus.panel(0)
+    panel.start_push(bytes(FRAME_BYTES))
+    bus.finish()
+    panel.poll()
+
+    panel.start_push(b"\x01\x02" * (FRAME_BYTES // 2))
+    bus.finish()
+    panel.poll()
+
+    assert bus.frame_count(0) == 2
+    assert bus.image(0) == b"\x01\x02" * (FRAME_BYTES // 2)

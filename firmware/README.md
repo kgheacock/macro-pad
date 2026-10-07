@@ -193,6 +193,34 @@ next toggle. Task 0045 shortens each delay, but does not remove it.
 
 ## Latency
 
+**CPU time per push, by DMA** (task 0045's DoD-1, `make dma-spike`, RP2350,
+15 MHz, 2026-10-06, 5 pushes of a cached frame):
+
+```
+start_push 1190 us to 1251 us, total 18 ms, cpu_free_ms 17
+```
+
+A push is on the wire for 18 ms, and the CPU is free for 17 ms of it. The 1.2
+ms that `start_push` holds the CPU is the draw window: five short blocking
+writes of 200 us each, before the frame starts. Before task 0045 the CPU
+held the whole 21 ms. A color change still costs a 23 ms compose, but the
+compose now overlaps the previous push.
+
+**Blink gap with the DMA push** (task 0045's DoD-4, `SCENARIO=single`, keys 0
+to 2 blinking, 10 updates 2 s apart, measured between `PUSH_STARTED` records):
+
+```
+max gap 506.6 ms (limit 600)
+max gap 507.5 ms (limit 600)
+```
+
+Task 0044 measured 532.8 ms with the `spi.write` push, between `REFRESH_DONE`
+records. `SCENARIO=burst` and `SCENARIO=busyburst` both gave `decoded 6/6`.
+
+**Rate.** `DISPLAY_BAUDRATE` is 15 MHz, a whole PIO divider (5). On 2026-10-06 a
+person saw a test pattern of 8 color bars, 1 px columns, and a mark for each
+key on all six panels with no noise at 15 MHz. 25 MHz was not tried.
+
 **Display latency, measured on the board** from the trace of `macropadd
 --trace-file`, with `HOST_MESSAGE_DECODED` as the start:
 

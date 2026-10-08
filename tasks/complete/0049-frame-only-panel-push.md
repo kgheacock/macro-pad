@@ -1,7 +1,7 @@
 ---
 id: "0049"
 title: "Send the window commands once at boot, and push only the frame after that"
-status: "ongoing"
+status: "complete"
 created: "2026-10-06"
 updated: "2026-10-08"
 owner: "kgheacock"
@@ -109,9 +109,9 @@ ticked.
   **Proof:** `python3 -m pytest test/test_st7735.py -k window_after_failed_push`
 - [x] **DoD-4** — On the board, `start_push` holds the CPU 500 us or less.
   **Proof:** `make dma-spike` prints `start_push` of 500 us or less for every trial
-- [ ] **DoD-5** — After `make blink-trace SCENARIO=single`, the six panels show no shifted or wrapped image, and
+- [x] **DoD-5** — After `make blink-trace SCENARIO=single`, the six panels show no shifted or wrapped image, and
   `max gap` is 600 ms or less. **Proof:** the `max gap` line, and the Notes of this spec
-  - Half confirmed: `max gap 504.6 ms` (limit 600). Nobody has yet looked at the six panels for a shifted or wrapped image.
+  - `max gap 504.6 ms` (limit 600). A person looked at the panels after the `single` scenario (see Notes).
 - [x] **DoD-6** — `firmware/README.md` records the frame-only push and the measured `start_push` time.
   **Proof:** `firmware/README.md`, section "Latency"
 - [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** the PR body
@@ -135,3 +135,7 @@ ticked.
   (task 0045, `make dma-spike`).
 - Board run, 2026-10-08, RP2350: `make dma-spike` gave `start_push 305 us` in all 5 trials (was 1190 us to 1251 us),
   `cpu_free_ms 17`. `make blink-trace SCENARIO=single` gave `max gap 504.6 ms (limit 600)`.
+- Visual check, 2026-10-08: a person ran `blinksend --scenario=single` on this branch's firmware and on main's. Both showed the same
+  images (one key green, three keys blinking blue), with no shifted or wrapped image. Before the scenario, the panels were blank on
+  both firmwares after every reboot: the power-on state draws nothing until the host sends a key state. The check covered the
+  scenario run only, not a long run, and it did not look at all six panels one by one.

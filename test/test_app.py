@@ -330,15 +330,15 @@ def test_key_switch_sends_no_init_or_reset():
     pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
     pad.step(0)  # power-on paint of all six keys
     commands_before = len(bus.records)
+    frames_before = len(bus.frames)
     rst_log_before = list(bus.rst.log)
 
     for key_index, color in ((0, 0xF800), (1, 0x07E0), (0, 0x001F)):
         hid_device.feed(_key_state_report(key_index, color, emoji_id=0))
         pad.step(1000)
 
-    new_commands = [command for _, command, _ in bus.records[commands_before:]]
-    assert new_commands, "the redraws wrote nothing"
-    assert set(new_commands) == {st7735.CASET, st7735.RASET, st7735.RAMWR}
+    assert len(bus.frames) > frames_before, "the redraws wrote nothing"
+    assert bus.records[commands_before:] == []  # frame-only pushes (task 0049)
     assert bus.rst.log == rst_log_before
     assert bus.image(0) == _solid_frame(0x001F)
     assert bus.image(1) == _solid_frame(0x07E0)

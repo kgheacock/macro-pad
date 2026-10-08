@@ -215,9 +215,16 @@ writes of 200 us each, before the frame starts. Before task 0045 the CPU
 held the whole 21 ms. A color change still costs a 23 ms compose, but the
 compose now overlaps the previous push.
 
-Task 0049 removes those five writes from every push after boot. Its limit is
-a `start_push` of 500 us or less in every trial of `make dma-spike`. That
-figure has not been measured on the board yet.
+Task 0049 removes those five writes from every push after boot. On
+2026-10-08 (RP2350, 15 MHz, 5 pushes of a cached frame) `make dma-spike` gave:
+
+```
+start_push 305 us, total 17 ms, cpu_free_ms 17
+```
+
+`start_push` held the CPU 305 us in every trial, down from 1190 us to 1251 us.
+The limit is 500 us. What is left is the DC and CS writes and the DMA start.
+`make blink-trace SCENARIO=single` gave `max gap 504.6 ms (limit 600)`.
 
 **Blink gap with the DMA push** (task 0045's DoD-4, `SCENARIO=single`, keys 0
 to 2 blinking, 10 updates 2 s apart, measured between `PUSH_STARTED` records):

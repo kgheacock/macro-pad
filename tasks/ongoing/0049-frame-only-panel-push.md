@@ -107,15 +107,13 @@ ticked.
   **Proof:** `python3 -m pytest test/test_st7735.py -k frame_only_push`
 - [x] **DoD-3** — After a push that raised, the next push sends the window and `RAMWR` first.
   **Proof:** `python3 -m pytest test/test_st7735.py -k window_after_failed_push`
-- [ ] **DoD-4** — On the board, `start_push` holds the CPU 500 us or less.
+- [x] **DoD-4** — On the board, `start_push` holds the CPU 500 us or less.
   **Proof:** `make dma-spike` prints `start_push` of 500 us or less for every trial
-  - Not confirmed: no board was attached. `tools/dma_spike.py` now fails a trial over 500 us (tested), but nobody has run it on the board.
 - [ ] **DoD-5** — After `make blink-trace SCENARIO=single`, the six panels show no shifted or wrapped image, and
   `max gap` is 600 ms or less. **Proof:** the `max gap` line, and the Notes of this spec
-  - Not confirmed: no board was attached, so `make blink-trace SCENARIO=single` did not run and no one looked at the panels.
-- [ ] **DoD-6** — `firmware/README.md` records the frame-only push and the measured `start_push` time.
+  - Half confirmed: `max gap 504.6 ms` (limit 600). Nobody has yet looked at the six panels for a shifted or wrapped image.
+- [x] **DoD-6** — `firmware/README.md` records the frame-only push and the measured `start_push` time.
   **Proof:** `firmware/README.md`, section "Latency"
-  - Partly done: the README describes the frame-only push, but the measured `start_push` time is missing until DoD-4 runs on the board.
 - [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 
 ## Risks
@@ -135,3 +133,5 @@ ticked.
   low and high around each one, gave a correct box frame on all six panels.
 - Today's push time: the five command writes take about 200 us each, and `start_push` holds the CPU 1.2 ms to 1.3 ms
   (task 0045, `make dma-spike`).
+- Board run, 2026-10-08, RP2350: `make dma-spike` gave `start_push 305 us` in all 5 trials (was 1190 us to 1251 us),
+  `cpu_free_ms 17`. `make blink-trace SCENARIO=single` gave `max gap 504.6 ms (limit 600)`.

@@ -66,6 +66,87 @@ def test_init_panels_pulses_rst_once_and_inits_every_panel():
         assert bus.commands(key).count(SWRESET) == 1
 
 
+def _booted_bus(key_count, **panel_kwargs):
+    bus = FakeBus(key_count=key_count)
+    panels = [bus.panel(i, **panel_kwargs) for i in range(key_count)]
+    st7735.init_panels(bus.rst, panels, sleep=lambda seconds: None)
+    return bus, panels
+
+
+def test_window_once_per_panel_after_init_panels():
+    bus, panels = _booted_bus(3, colstart=2, rowstart=3)
+
+    for key in range(3):
+        commands = bus.commands(key)
+        assert commands.count(st7735.CASET) == 1
+        assert commands.count(st7735.RASET) == 1
+        assert commands.count(st7735.RAMWR) == 1
+        assert commands[-3:] == [st7735.CASET, st7735.RASET, st7735.RAMWR]
+        assert bus.window(key) == ((2, 129), (3, 130))
+        assert bus.cs[key].value is True
+    assert bus.frames == []
+
+
+def test_frame_only_push_sends_the_frame_and_no_command():
+    bus, panels = _booted_bus(2)
+    commands_before = list(bus.records)
+    frame = bytes(range(256)) * (FRAME_BYTES // 256)
+
+    panels[1].push(frame)
+    panels[1].push(frame)
+
+    assert bus.records == commands_before
+    assert bus.frame_count(1) == 2
+    assert bus.image(1) == frame
+    assert bus.frame_count(0) == 0
+    assert bus.dc.value is True
+
+
+def test_window_after_failed_push():
+    bus, panels = _booted_bus(1, colstart=2, rowstart=3)
+    panel = panels[0]
+    real_start = bus.pio.start
+
+    def broken(data):
+        raise RuntimeError("write failed")
+
+    bus.pio.start = broken
+    with pytest.raises(RuntimeError):
+        panel.start_push(bytes(FRAME_BYTES))
+    bus.pio.start = real_start
+    commands_before = len(bus.records)
+
+    panel.push(bytes(FRAME_BYTES))
+    panel.push(bytes(FRAME_BYTES))
+
+    # The window and RAMWR go out once, before the first good frame only.
+    assert [c for _, c, _ in bus.records[commands_before:]] == [
+        st7735.CASET,
+        st7735.RASET,
+        st7735.RAMWR,
+    ]
+    assert bus.window(0) == ((2, 129), (3, 130))
+    assert bus.frame_count(0) == 2
+
+
+def test_first_push_without_init_panels_sends_the_window():
+    bus = FakeBus(key_count=1)
+
+    bus.panel(0).push(bytes(FRAME_BYTES))
+
+    assert bus.commands(0) == [st7735.CASET, st7735.RASET, st7735.RAMWR]
+
+
+def test_a_command_takes_the_fake_panel_out_of_write_mode():
+    bus, panels = _booted_bus(1)
+    panels[0]._begin()
+    panels[0]._command(0x13)  # NORON, no arguments
+    bus.dc.value = True
+
+    with pytest.raises(AssertionError, match="RAMWR"):
+        bus.pio.start(bytes(FRAME_BYTES))
+
+
 def test_push_sets_window_with_offsets_then_writes_frame():
     bus = FakeBus(key_count=2)
     panel = bus.panel(1, colstart=2, rowstart=3)

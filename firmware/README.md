@@ -104,12 +104,12 @@ limit, and 0040 only fixed repeat redraws of the same key.
 
 Task 0043 drops `displayio` for the panels. `st7735.py` has one `Panel`
 for each key. `code.py` pulses RST once at boot, holds it high, and runs
-each panel's init once (`st7735.init_panels`). After that the only thing
-the firmware sends a panel is a push of a frame: it sets the draw window
-with the panel's column and row offsets, and sends the frame, under that
-panel's CS line. It sends no init command and touches no RST, so a key's
-update never reaches another panel. Task 0045 changed how the frame goes out;
-see "Pushes by DMA."
+each panel's init and draw window once (`st7735.init_panels`). After that the
+only thing the firmware sends a panel is a push of a frame, under that
+panel's CS line. It sends no init command, no window command, and touches no
+RST, so a key's update never reaches another panel. Task 0045 changed how the
+frame goes out; see "Pushes by DMA." Task 0049 moved the window to boot; see
+"Frame-only pushes."
 
 `DISPLAY_BAUDRATE` in `code.py` was 16 MHz for the `busio.SPI` driver of
 task 0043. A frame push took 21 ms at 16 MHz and 79 ms at 4 MHz. On 2026-10-06 a test pattern of color bars and
@@ -171,10 +171,19 @@ edges are evenly spaced. `PioBus.start(data)` calls `background_write` and
 returns; `PioBus.done` is true when the DMA has ended and the FIFO is empty.
 DC and every CS line stay with the CPU.
 
-`Panel.start_push(frame)` sets the draw window with three short blocking
-writes, then starts the frame and returns with CS low and `busy` set.
-`Panel.poll()` sets CS high once the bus is `done`. Until then the panel holds
-its frame, so the frame stays alive.
+`Panel.start_push(frame)` starts the frame and returns with DC high, CS low
+and `busy` set. `Panel.poll()` sets CS high once the bus is `done`. Until
+then the panel holds its frame, so the frame stays alive.
+
+**Frame-only pushes** (task 0049). `init_panels` calls `Panel.setup_window()`
+for each panel after its init. That sends `CASET`, `RASET` (with the panel's
+offsets) and `RAMWR` once. The window is always the full 128 x 128 frame, and
+a panel stays in write mode after `RAMWR`, so its address pointer wraps at
+the end of each frame. A push after boot sends the frame and no command.
+`Panel._needs_window` is set while a push starts and cleared once the frame
+has started. A push that raises leaves it set, so the next `start_push`
+calls `setup_window()` first. A panel that leaves write mode some other way,
+for example by a brownout, stays wrong until a push fails.
 
 All six panels share SCK and MOSI, so one push is on the wire at a time.
 `MacroPad.step` keeps a queue of keys. `_service_pushes` ends the push on the
@@ -205,6 +214,17 @@ ms that `start_push` holds the CPU is the draw window: five short blocking
 writes of 200 us each, before the frame starts. Before task 0045 the CPU
 held the whole 21 ms. A color change still costs a 23 ms compose, but the
 compose now overlaps the previous push.
+
+Task 0049 removes those five writes from every push after boot. On
+2026-10-08 (RP2350, 15 MHz, 5 pushes of a cached frame) `make dma-spike` gave:
+
+```
+start_push 305 us, total 17 ms, cpu_free_ms 17
+```
+
+`start_push` held the CPU 305 us in every trial, down from 1190 us to 1251 us.
+The limit is 500 us. What is left is the DC and CS writes and the DMA start.
+`make blink-trace SCENARIO=single` gave `max gap 504.6 ms (limit 600)`.
 
 **Blink gap with the DMA push** (task 0045's DoD-4, `SCENARIO=single`, keys 0
 to 2 blinking, 10 updates 2 s apart, measured between `PUSH_STARTED` records):

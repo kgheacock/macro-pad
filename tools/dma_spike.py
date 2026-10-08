@@ -2,7 +2,8 @@
 """Measure how much CPU time a cached-frame push leaves free, on the board.
 
 `make dma-spike` runs `install`, then `read`. See
-tasks/complete/0045-double-buffered-dma-panel-push.md, DoD-1.
+tasks/complete/0045-double-buffered-dma-panel-push.md, DoD-1, and
+tasks/ongoing/0049-frame-only-panel-push.md, DoD-4.
 
     dma_spike.py install CIRCUITPY_VOLUME
     dma_spike.py read
@@ -15,7 +16,8 @@ puts the real one back.
 The board times `Panel.start_push` and a loop that counts while the DMA runs,
 five times. It sends the lines over the CDC data port and repeats them every 2 s,
 because a line sent before the host opens the port is lost. `read` prints the
-lines and exits 0 when `cpu_free_ms` is at least 15, the limit of DoD-1.
+lines and exits 0 when `cpu_free_ms` is at least 15, the limit of DoD-1, and
+`start_push_us` is at most 500 in every trial, the limit of task 0049's DoD-4.
 """
 
 import glob
@@ -29,6 +31,10 @@ from pathlib import Path
 # DoD-1: the CPU must run a loop for at least this long while a cached-frame
 # push is on the wire. The push takes 17.5 ms at 15 MHz.
 MIN_CPU_FREE_MS = 15
+
+# Task 0049's DoD-4: `Panel.start_push` sends the frame and no command, so it
+# must hold the CPU no longer than this in any trial.
+MAX_START_PUSH_US = 500
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -98,7 +104,7 @@ def parse_figures(text):
 
 
 def report(text, out=sys.stdout):
-    """Print the figures. Return True when every trial meets DoD-1."""
+    """Print the figures. Return True when every trial meets both limits."""
     figures = parse_figures(text)
     if not figures:
         print("no push figures from the board", file=out)
@@ -112,7 +118,9 @@ def report(text, out=sys.stdout):
         )
     worst = min(trial["cpu_free_ms"] for trial in figures)
     print("cpu_free_ms {} (limit {})".format(worst, MIN_CPU_FREE_MS), file=out)
-    return worst >= MIN_CPU_FREE_MS
+    slowest = max(trial["start_push_us"] for trial in figures)
+    print("start_push_us {} (limit {})".format(slowest, MAX_START_PUSH_US), file=out)
+    return worst >= MIN_CPU_FREE_MS and slowest <= MAX_START_PUSH_US
 
 
 def read_board(timeout_s=60):

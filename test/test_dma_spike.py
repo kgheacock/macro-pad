@@ -26,9 +26,9 @@ def test_spike_code_refuses_a_code_py_with_no_run_call():
     raise AssertionError("expected ValueError")
 
 
-def _lines(*cpu_free):
+def _lines(*cpu_free, start_push_us=300):
     return "\n".join(
-        "push start_push_us=1200 total_ms=18 cpu_free_ms={} loops=440".format(ms)
+        "push start_push_us={} total_ms=18 cpu_free_ms={} loops=440".format(start_push_us, ms)
         for ms in cpu_free
     )
 
@@ -49,3 +49,17 @@ def test_report_fails_with_no_figures():
 
     assert dma_spike.report("garbage", out) is False
     assert "no push figures" in out.getvalue()
+
+
+def test_report_passes_when_every_start_push_is_500_us_or_less():
+    out = io.StringIO()
+
+    assert dma_spike.report(_lines(17, 17, start_push_us=500), out) is True
+    assert "start_push_us 500 (limit 500)" in out.getvalue()
+
+
+def test_report_fails_when_start_push_holds_the_cpu_over_500_us():
+    out = io.StringIO()
+
+    assert dma_spike.report(_lines(17, 17, start_push_us=1200), out) is False
+    assert "start_push_us 1200 (limit 500)" in out.getvalue()

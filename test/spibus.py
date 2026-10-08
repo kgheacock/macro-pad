@@ -5,9 +5,12 @@ per panel, for tests of `firmware/st7735.py`.
 transfer, `start` begins a transfer by DMA, and `done` says it is on the
 wire. It checks what real hardware needs: exactly one CS line must be low
 for a transfer, and a new transfer must not start while one is on the wire.
-It files each transfer under the panel that CS line selects, as a command
-(DC low) or as data for the last command (DC high). `FakeBus.commands(key)`
-and `FakeBus.image(key)` read back what each panel was sent.
+It files each short write under the panel that CS line selects, as a command
+(DC low) or as data for the last command (DC high). A frame started with
+`start` is filed as a frame of that panel. Like the real panel, a fake panel
+takes a frame only after `RAMWR`, and stays in write mode until it is sent
+another command (task 0049). `FakeBus.commands(key)`, `FakeBus.image(key)`
+and `FakeBus.frame_count(key)` read back what each panel was sent.
 
 A frame started with `start` is read when the transfer ends, as the DMA reads
 it while it runs. A write to the frame in between shows in `image`. CS must
@@ -41,7 +44,7 @@ class FakePioBus:
     def __init__(self, bus, auto_finish=True):
         self._bus = bus
         self.auto_finish = auto_finish
-        self._in_flight = None  # (key, data) of the transfer on the wire
+        self._in_flight = None  # (key, data, frame) of the transfer on the wire
         self.starts = 0
 
     def _selected(self):
@@ -57,6 +60,10 @@ class FakePioBus:
         if self._bus.dc.value is False:
             assert len(data) == 1, "a command is one byte"
             self._bus.records.append([key, data[0], b""])
+            if data[0] == st7735.RAMWR:
+                self._bus.write_mode.add(key)
+            else:
+                self._bus.write_mode.discard(key)
         else:
             record = self._bus.records[-1]
             assert record[0] == key, "data written to another panel than its command"
@@ -66,18 +73,19 @@ class FakePioBus:
         assert self._in_flight is None, "the bus is still sending a transfer"
         key = self._selected()
         assert self._bus.dc.value is True, "a frame goes out as data"
-        self._in_flight = (key, data)
+        assert key in self._bus.write_mode, "a frame needs a RAMWR before it"
+        frame = [key, b""]
+        self._bus.frames.append(frame)
+        self._in_flight = (key, data, frame)
         self.starts += 1
 
     def finish(self):
         """End the transfer on the wire, reading its buffer now."""
         if self._in_flight is None:
             return
-        key, data = self._in_flight
+        key, data, frame = self._in_flight
         assert self._bus.cs[key].value is False, "CS went high before the transfer ended"
-        record = self._bus.records[-1]
-        assert record[0] == key, "data written to another panel than its command"
-        record[2] += bytes(memoryview(data))
+        frame[1] = bytes(memoryview(data))
         self._in_flight = None
 
     @property
@@ -95,6 +103,10 @@ class FakeBus:
         self.pio = FakePioBus(self, auto_finish=auto_finish)
         # One [key, command, data] entry per command written.
         self.records = []
+        # One [key, bytes] entry per frame started, in order.
+        self.frames = []
+        # The panels that took a RAMWR and no other command since.
+        self.write_mode = set()
 
     def finish(self):
         """End the transfer on the wire."""
@@ -118,9 +130,11 @@ class FakeBus:
         )
 
     def image(self, key):
-        """The bytes of the last frame written to a panel, or `None`."""
-        frames = [d for k, c, d in self.records if k == key and c == st7735.RAMWR]
+        """The bytes of the last frame started to a panel, or `None`. It is
+        empty until the frame is on the wire.
+        """
+        frames = [d for k, d in self.frames if k == key]
         return frames[-1] if frames else None
 
     def frame_count(self, key):
-        return len([1 for k, c, _ in self.records if k == key and c == st7735.RAMWR])
+        return len([1 for k, _ in self.frames if k == key])

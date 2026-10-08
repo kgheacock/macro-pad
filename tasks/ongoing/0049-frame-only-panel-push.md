@@ -7,7 +7,7 @@ updated: "2026-10-08"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/47"
 branch: "0049-frame-only-panel-push"
 related: ["0043", "0045", "0048"]
 tags: ["firmware", "spi", "pio"]
@@ -116,7 +116,7 @@ ticked.
 - [ ] **DoD-6** — `firmware/README.md` records the frame-only push and the measured `start_push` time.
   **Proof:** `firmware/README.md`, section "Latency"
   - Partly done: the README describes the frame-only push, but the measured `start_push` time is missing until DoD-4 runs on the board.
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** the PR body
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 
 ## Risks
 

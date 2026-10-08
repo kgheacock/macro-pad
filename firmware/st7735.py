@@ -7,19 +7,20 @@ reran a 763 ms panel init, and the other five panels lost their image. A
 CS line for each transaction, so one key's update never reaches another
 panel.
 
-`code.py` calls `init_panels` once at boot: one RST pulse, then one init per
-panel. After that, a push is the only thing that talks to a panel. It sets
-the draw window and sends a frame. It sends no init command and touches no
-RST.
+`code.py` calls `init_panels` once at boot: one RST pulse, then one init and one
+draw window per panel. The window never changes, and the panel stays in write
+mode after it, so its address pointer wraps at the end of each frame. After
+boot, a push is the frame alone. It sends no command, no init, and touches no
+RST (task 0049).
 
-A push does not wait for the frame. `Panel.start_push` sets the window, hands
-the frame to the bus's DMA, and returns. `Panel.poll` releases CS when the
-frame is on the wire. Until then the panel is `busy`, and no other panel may
+A push does not wait for the frame. `Panel.start_push` hands the frame to the
+bus's DMA and returns. `Panel.poll` releases CS when the frame is on the wire. Until then the panel is `busy`, and no other panel may
 use the bus: all six share SCK and MOSI, and `app.MacroPad` sends one push at
 a time (task 0045).
 
-See tasks/ongoing/0043-raw-spi-panels-init-once.md and
-tasks/complete/0045-double-buffered-dma-panel-push.md for the design decisions.
+See tasks/ongoing/0043-raw-spi-panels-init-once.md,
+tasks/complete/0045-double-buffered-dma-panel-push.md and
+tasks/ongoing/0049-frame-only-panel-push.md for the design decisions.
 """
 
 import time
@@ -82,14 +83,16 @@ def pulse_reset(rst, sleep=time.sleep):
 
 
 def init_panels(rst, panels, sleep=time.sleep):
-    """Boot sequence: one RST pulse, then one init for each panel.
+    """Boot sequence: one RST pulse, then one init and one draw window for
+    each panel.
 
     After this returns, nothing in the firmware pulses RST or sends an
-    init command again.
+    init command again, and a push sends the frame alone.
     """
     pulse_reset(rst, sleep)
     for panel in panels:
         panel.init()
+        panel.setup_window()
 
 
 class Panel:
@@ -101,6 +104,10 @@ class Panel:
     are `digitalio.DigitalInOut` outputs. `cs` idles high.
 
     `busy` is true from `start_push` until `poll` sees the frame on the wire.
+
+    `_needs_window` is true when the panel may not be in write mode with its
+    window set: before the first `setup_window`, and after a push that
+    raised. The next `start_push` then sends the window first.
     """
 
     def __init__(
@@ -123,6 +130,7 @@ class Panel:
         self._rowstart = rowstart
         self._sleep = sleep
         self.busy = False
+        self._needs_window = True
         # The frame on the wire. The panel holds it so that it stays alive and
         # unchanged until `poll` sees it sent.
         self._frame = None
@@ -163,20 +171,14 @@ class Panel:
                 i += 1
                 self._sleep((500 if delay_ms == 0xFF else delay_ms) / 1000)
 
-    def start_push(self, frame):
-        """Start sending one full frame to the panel, and return.
+    def setup_window(self):
+        """Set the draw window, with this panel's column and row offsets, and
+        start a memory write. Boot only, and after a push that failed.
 
-        `frame` is `width * height` big-endian RGB565 pixels as a buffer of
-        bytes. This sets the draw window, with the panel's column and row
-        offsets, with short writes that finish before it returns. It then
-        starts the frame on the bus's DMA, with this panel's CS line low. It
-        sends no init command. The caller must not change `frame` before
-        `poll` returns true, and must not start another panel's push until
-        then.
+        The window is always the full frame. The panel stays in write mode
+        after `RAMWR` and wraps its address pointer at the end of the window,
+        so each later frame needs no command.
         """
-        if self.busy:
-            raise RuntimeError("a push is already on the wire")
-
         x_end = self._colstart + self._width - 1
         y_end = self._rowstart + self._height - 1
 
@@ -191,13 +193,37 @@ class Panel:
                 bytes((self._rowstart >> 8, self._rowstart & 0xFF, y_end >> 8, y_end & 0xFF)),
             )
             self._command(RAMWR)
-            self._dc.value = True
+        finally:
+            self._end()
+        self._needs_window = False
+
+    def start_push(self, frame):
+        """Start sending one full frame to the panel, and return.
+
+        `frame` is `width * height` big-endian RGB565 pixels as a buffer of
+        bytes. This starts the frame on the bus's DMA, with DC high and this
+        panel's CS line low. It sends no command: `setup_window` did that at
+        boot. When an earlier push raised, it calls `setup_window` first. The
+        caller must not change `frame` before `poll` returns true, and must
+        not start another panel's push until then.
+        """
+        if self.busy:
+            raise RuntimeError("a push is already on the wire")
+
+        if self._needs_window:
+            self.setup_window()
+        self._needs_window = True
+
+        self._dc.value = True
+        self._begin()
+        try:
             self._frame = frame
             self._bus.start(frame)
         except BaseException:
             self._frame = None
             self._end()
             raise
+        self._needs_window = False
         self.busy = True
 
     def poll(self):

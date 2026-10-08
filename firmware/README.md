@@ -105,18 +105,19 @@ limit, and 0040 only fixed repeat redraws of the same key.
 Task 0043 drops `displayio` for the panels. `st7735.py` has one `Panel`
 for each key. `code.py` pulses RST once at boot, holds it high, and runs
 each panel's init once (`st7735.init_panels`). After that the only thing
-the firmware sends a panel is `Panel.push(frame)`: it takes the shared bus
-under that panel's CS line, sets the draw window with the panel's column
-and row offsets, and writes the frame. It sends no init command and
-touches no RST, so a key's update never reaches another panel.
+the firmware sends a panel is a push of a frame: it sets the draw window
+with the panel's column and row offsets, and sends the frame, under that
+panel's CS line. It sends no init command and touches no RST, so a key's
+update never reaches another panel. Task 0045 changed how the frame goes out;
+see "Pushes by DMA."
 
-`DISPLAY_BAUDRATE` in `code.py` is 16 MHz. A frame push takes 21 ms at
-16 MHz and 79 ms at 4 MHz. On 2026-10-06 a test pattern of color bars and
+`DISPLAY_BAUDRATE` in `code.py` was 16 MHz for the `busio.SPI` driver of
+task 0043. A frame push took 21 ms at 16 MHz and 79 ms at 4 MHz. On 2026-10-06 a test pattern of color bars and
 1 px columns rendered cleanly on all six wired panels at 4, 8, 12, 16, and
 20 MHz. The RP2350 steps its SPI clock down from 150 MHz, so 16 MHz runs at
 15 MHz. Above about 19 MHz a push stays near 17 ms, because the CPU that
 feeds the FIFO is the limit, not the wire. A higher rate buys little unless
-a DMA transfer does the feeding.
+a DMA transfer does the feeding. Task 0045 adds that DMA transfer.
 
 See [`tasks/ongoing/0043-raw-spi-panels-init-once.md`](../tasks/ongoing/0043-raw-spi-panels-init-once.md)
 for the design decision. It replaces
@@ -153,7 +154,72 @@ A blinking key keeps its phase when an update arrives: the redraw shows the
 frame the key showed, in the new color, and the next toggle stays on its old
 500 ms schedule (task 0044). Only a due blink toggles the frame.
 
+## Pushes by DMA
+
+A push used to keep the CPU in `spi.write` for the whole transfer: 21 ms for
+one frame. Six blinking keys held it for 126 ms of every 500 ms, and every
+color change, flash write, or report waited behind them. Task 0045 sends the
+frame from the DMA instead.
+
+`pio_spi.PioBus` is a transmit-only SPI bus on one PIO state machine. It owns
+SCK (GP2) and MOSI (GP7). The program is two instructions, `out pins, 1 side 0`
+and `nop side 1`, assembled on the host because `adafruit_pioasm` is not on
+the board. That is SPI mode 0, most significant bit first, two PIO clocks per
+bit. The state machine runs at twice the baud rate, so `DISPLAY_BAUDRATE` of
+15 MHz is a whole divider of 5 from the 150 MHz system clock, and the SCK
+edges are evenly spaced. `PioBus.start(data)` calls `background_write` and
+returns; `PioBus.done` is true when the DMA has ended and the FIFO is empty.
+DC and every CS line stay with the CPU.
+
+`Panel.start_push(frame)` sets the draw window with three short blocking
+writes, then starts the frame and returns with CS low and `busy` set.
+`Panel.poll()` sets CS high once the bus is `done`. Until then the panel holds
+its frame, so the frame stays alive.
+
+All six panels share SCK and MOSI, so one push is on the wire at a time.
+`MacroPad.step` keeps a queue of keys. `_service_pushes` ends the push on the
+wire when it is done, then starts the next queued key. It runs at the start
+and the end of every `step`. A key has at most one frame in the queue, and a
+newer frame replaces an older one that has not started and keeps its place.
+`PUSH_STARTED` (trace code 9) marks a start, and `REFRESH_DONE` marks an end.
+
+**No frame is changed after it is built.** `display_render._compose` makes a
+new `Bitmap` for each rebuild, so a color change composes the new "back"
+frame while the old one, which may be on the wire, stays whole. The cached
+frames are byte views (`memoryview(bitmap).cast("B")`), because the DMA sends
+the items of its buffer, and a `Bitmap` of 16-bit pixels has 16-bit items.
+The blink schedule is still the CPU's: a flash write or a compose delays the
+next toggle. Task 0045 shortens each delay, but does not remove it.
+
 ## Latency
+
+**CPU time per push, by DMA** (task 0045's DoD-1, `make dma-spike`, RP2350,
+15 MHz, 2026-10-06, 5 pushes of a cached frame):
+
+```
+start_push 1190 us to 1251 us, total 18 ms, cpu_free_ms 17
+```
+
+A push is on the wire for 18 ms, and the CPU is free for 17 ms of it. The 1.2
+ms that `start_push` holds the CPU is the draw window: five short blocking
+writes of 200 us each, before the frame starts. Before task 0045 the CPU
+held the whole 21 ms. A color change still costs a 23 ms compose, but the
+compose now overlaps the previous push.
+
+**Blink gap with the DMA push** (task 0045's DoD-4, `SCENARIO=single`, keys 0
+to 2 blinking, 10 updates 2 s apart, measured between `PUSH_STARTED` records):
+
+```
+max gap 506.6 ms (limit 600)
+max gap 507.5 ms (limit 600)
+```
+
+Task 0044 measured 532.8 ms with the `spi.write` push, between `REFRESH_DONE`
+records. `SCENARIO=burst` and `SCENARIO=busyburst` both gave `decoded 6/6`.
+
+**Rate.** `DISPLAY_BAUDRATE` is 15 MHz, a whole PIO divider (5). On 2026-10-06 a
+person saw a test pattern of 8 color bars, 1 px columns, and a mark for each
+key on all six panels with no noise at 15 MHz. 25 MHz was not tried.
 
 **Display latency, measured on the board** from the trace of `macropadd
 --trace-file`, with `HOST_MESSAGE_DECODED` as the start:

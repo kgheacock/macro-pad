@@ -24,13 +24,45 @@ PIXEL_COUNT = 128 * 128
 
 
 class FakePanel:
-    """Records the frames pushed to one key's panel, as bytes."""
+    """Records the frames pushed to one key's panel, as bytes.
 
-    def __init__(self):
+    A push is on the wire for `polls_to_finish` calls to `poll`, and the
+    default of 0 means it is done when `step` first asks. `wire_log`, when a
+    test shares one list between panels, records each start and end in
+    order. `sent` holds the bytes of each frame as they were when its push
+    ended, which is when the DMA has finished reading the frame.
+    """
+
+    def __init__(self, polls_to_finish=0, wire_log=None, name=None):
         self.frames = []
+        self.sent = []
+        self.busy = False
+        self.polls_to_finish = polls_to_finish
+        self._wire_log = wire_log
+        self._name = name
+        self._frame = None
+        self._polls = 0
 
-    def push(self, frame):
+    def start_push(self, frame):
+        assert not self.busy, "a push is already on the wire"
+        self.busy = True
+        self._frame = frame
+        self._polls = 0
         self.frames.append(bytes(memoryview(frame)))
+        if self._wire_log is not None:
+            self._wire_log.append(("start", self._name))
+
+    def poll(self):
+        if self.busy:
+            if self._polls < self.polls_to_finish:
+                self._polls += 1
+                return False
+            self.sent.append(bytes(memoryview(self._frame)))
+            self.busy = False
+            self._frame = None
+            if self._wire_log is not None:
+                self._wire_log.append(("end", self._name))
+        return True
 
 
 class FakePanels:
@@ -558,6 +590,7 @@ def test_custom_glyph_paint_trace_order():
     assert key3_codes == [
         tracer_module.CUSTOM_GLYPH_DECODED,
         tracer_module.GLYPH_BUILT,
+        tracer_module.PUSH_STARTED,
         tracer_module.REFRESH_DONE,
     ]
 
@@ -796,3 +829,175 @@ def test_update_keeps_blink_phase():
     assert _last_frame(panels.per_key[5]) == _solid_frame(0x07E0)
     pad.step(1000 + 3 * BLINK_INTERVAL_US)
     assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)
+
+
+class _FakeTracer:
+    """Records every `record` call, in call order."""
+
+    def __init__(self):
+        self.records = []
+
+    def record(self, code, key, payload, now_us):
+        self.records.append((code, key, payload))
+
+    def drain(self, write):
+        pass
+
+
+def _slow_panels(polls_to_finish, wire_log=None):
+    """One `FakePanel` per key whose push stays on the wire for
+    `polls_to_finish` polls. `wire_log` is shared, so it shows the order of
+    every start and end across the panels.
+    """
+    panels = FakePanels(len(pins.KEYS))
+    panels.per_key = [
+        FakePanel(polls_to_finish=polls_to_finish, wire_log=wire_log, name=index)
+        for index in range(len(pins.KEYS))
+    ]
+    return panels
+
+
+def _steps(pad, count, now_us=0):
+    for _ in range(count):
+        pad.step(now_us)
+
+
+def test_step_starts_one_push_and_returns_while_it_is_on_the_wire():
+    panels = _slow_panels(polls_to_finish=3)
+    pad, switches, _, _, _, serial = _build_pad(panels=panels)
+
+    pad.step(0)  # power-on: six keys are dirty
+
+    started = [bool(panel.frames) for panel in panels.per_key]
+    assert started == [True, False, False, False, False, False]
+
+    switches[2].value = False  # a press while the push is on the wire
+    pad.step(DEBOUNCE_WINDOW_US * 2)
+
+    assert panels.per_key[1].frames == []
+    frames = _parse_frames(bytes(serial.written))
+    assert any(message_type == wire.MESSAGE_TYPE_EVENT for message_type, _ in frames)
+
+
+def test_back_frame_not_sent_after_a_color_change_during_a_push():
+    """DoD-3: a color change on a key, while a frame of that key is on the
+    wire, builds a new frame and leaves the one on the wire whole.
+    """
+    panels = _slow_panels(polls_to_finish=4)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
+    pad.step(0)  # key 0's first frame, in the default color, goes on the wire
+    assert panels.per_key[0].busy
+
+    hid_device.feed(_key_state_report(key_index=0, color=0xF800, emoji_id=0))
+    pad.step(1000)  # composes a new frame for key 0 while the old one is sent
+    assert panels.per_key[0].busy
+
+    _steps(pad, 60, now_us=2000)  # let every queued push end
+
+    assert panels.per_key[0].sent[0] == _solid_frame(DEFAULT_COLOR)
+    assert panels.per_key[0].sent[0] == panels.per_key[0].frames[0]
+    assert panels.per_key[0].sent[1] == _solid_frame(0xF800)
+
+
+def test_back_frame_not_sent_for_a_cached_blink_frame_that_is_rebuilt():
+    panels = _slow_panels(polls_to_finish=4)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
+    hid_device.feed(_key_state_report(key_index=0, color=0x001F, emoji_id=0, blink=True))
+    pad.step(0)
+    _steps(pad, 60, now_us=1000)  # every panel has its first frame, key 0 "on"
+    pad.step(BLINK_INTERVAL_US)  # a due blink: key 0's "off" frame is on the wire
+    assert panels.per_key[0].busy
+
+    hid_device.feed(_key_state_report(key_index=0, color=0x07E0, emoji_id=0, blink=True))
+    pad.step(BLINK_INTERVAL_US + 1000)  # rebuilds both cached frames
+    _steps(pad, 60, now_us=BLINK_INTERVAL_US + 2000)
+
+    off_frame = panels.per_key[0].sent[1]
+    assert off_frame == panels.per_key[0].frames[1]
+    assert off_frame == _solid_frame(0x0000)
+
+
+def test_pushes_do_not_overlap_and_run_in_queue_order():
+    """DoD-5: two pushes queued for different panels never overlap, and run
+    in queue order.
+    """
+    wire_log = []
+    panels = _slow_panels(polls_to_finish=2, wire_log=wire_log)
+    pad, _, _, _, _, _ = _build_pad(panels=panels)
+
+    pad.step(0)
+    _steps(pad, 60, now_us=1000)
+
+    assert wire_log == [
+        entry for key in range(6) for entry in (("start", key), ("end", key))
+    ]
+
+
+def test_pushes_do_not_overlap_when_keys_update_in_the_middle():
+    wire_log = []
+    panels = _slow_panels(polls_to_finish=2, wire_log=wire_log)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=4, color=0xF800, emoji_id=0))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(key_index=1, color=0x07E0, emoji_id=0))
+    _steps(pad, 80, now_us=2000)
+
+    kinds = [kind for kind, _ in wire_log]
+    assert kinds == ["start", "end"] * (len(kinds) // 2)
+    # Six first paints. An update to a key whose first paint is still queued
+    # replaces it, so the two updates add one or two pushes.
+    assert 2 * 7 <= len(kinds) <= 2 * 8
+
+
+def test_a_newer_frame_replaces_one_that_has_not_started_and_keeps_its_place():
+    wire_log = []
+    panels = _slow_panels(polls_to_finish=2, wire_log=wire_log)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
+    pad.step(0)  # key 0 on the wire; keys 1 to 5 queued with the default color
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF800, emoji_id=0))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(key_index=2, color=0x07E0, emoji_id=0))
+    pad.step(2000)
+    _steps(pad, 60, now_us=3000)
+
+    assert [name for kind, name in wire_log if kind == "start"] == [0, 1, 2, 3, 4, 5]
+    assert panels.per_key[2].frames == [_solid_frame(0x07E0)]
+
+
+def test_push_started_and_refresh_done_trace_each_push():
+    tracer = _FakeTracer()
+    panels = _slow_panels(polls_to_finish=2)
+    pad, _, _, _, _, _ = _build_pad(panels=panels, tracer=tracer)
+
+    pad.step(0)
+
+    key0 = [code for code, key, _ in tracer.records if key == 0]
+    assert key0 == [tracer_module.GLYPH_BUILT, tracer_module.PUSH_STARTED]
+
+    _steps(pad, 2, now_us=1000)
+
+    key0 = [code for code, key, _ in tracer.records if key == 0]
+    assert key0 == [
+        tracer_module.GLYPH_BUILT,
+        tracer_module.PUSH_STARTED,
+        tracer_module.REFRESH_DONE,
+    ]
+    assert tracer_module.PUSH_STARTED == 9
+
+
+def test_blinking_key_toggles_on_schedule_while_other_pushes_run():
+    panels = _slow_panels(polls_to_finish=2)
+    pad, _, _, _, hid_device, _ = _build_pad(panels=panels)
+    hid_device.feed(_key_state_report(key_index=0, color=0x001F, emoji_id=0, blink=True))
+    pad.step(0)
+    _steps(pad, 60, now_us=1000)
+    first = len(panels.per_key[0].frames)
+
+    pad.step(BLINK_INTERVAL_US - 1)
+    _steps(pad, 10, now_us=BLINK_INTERVAL_US - 1)
+    assert len(panels.per_key[0].frames) == first
+    _steps(pad, 10, now_us=BLINK_INTERVAL_US)
+
+    assert len(panels.per_key[0].frames) == first + 1

@@ -1,14 +1,14 @@
 ---
 id: "0048"
 title: "Blink every key on one shared clock, and flip all six panels at once"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-06"
-updated: "2026-10-06"
+updated: "2026-10-08"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0048-shared-blink-clock"
 related: ["0006", "0044", "0045", "0047", "0049"]
 tags: ["firmware", "blink", "pio", "dma", "hardware"]
 ---

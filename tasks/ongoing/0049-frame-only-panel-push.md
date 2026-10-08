@@ -101,18 +101,21 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — After `init_panels`, each panel has received one `CASET`, one `RASET` with its offsets, and one
+- [x] **DoD-1** — After `init_panels`, each panel has received one `CASET`, one `RASET` with its offsets, and one
   `RAMWR`. **Proof:** `python3 -m pytest test/test_st7735.py -k window_once`
-- [ ] **DoD-2** — A push after `init_panels` sends the frame bytes and no command.
+- [x] **DoD-2** — A push after `init_panels` sends the frame bytes and no command.
   **Proof:** `python3 -m pytest test/test_st7735.py -k frame_only_push`
-- [ ] **DoD-3** — After a push that raised, the next push sends the window and `RAMWR` first.
+- [x] **DoD-3** — After a push that raised, the next push sends the window and `RAMWR` first.
   **Proof:** `python3 -m pytest test/test_st7735.py -k window_after_failed_push`
 - [ ] **DoD-4** — On the board, `start_push` holds the CPU 500 us or less.
   **Proof:** `make dma-spike` prints `start_push` of 500 us or less for every trial
+  - Not confirmed: no board was attached. `tools/dma_spike.py` now fails a trial over 500 us (tested), but nobody has run it on the board.
 - [ ] **DoD-5** — After `make blink-trace SCENARIO=single`, the six panels show no shifted or wrapped image, and
   `max gap` is 600 ms or less. **Proof:** the `max gap` line, and the Notes of this spec
+  - Not confirmed: no board was attached, so `make blink-trace SCENARIO=single` did not run and no one looked at the panels.
 - [ ] **DoD-6** — `firmware/README.md` records the frame-only push and the measured `start_push` time.
   **Proof:** `firmware/README.md`, section "Latency"
+  - Partly done: the README describes the frame-only push, but the measured `start_push` time is missing until DoD-4 runs on the board.
 - [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 
 ## Risks

@@ -103,27 +103,54 @@ class PioBus:
         self._sm.deinit()
 
 
-# The parallel push. The leader makes SCK: 10 PIO cycles low, then 5 high, so
-# a bit takes 15 cycles and SCK is 150 MHz / 15 = 10 MHz. It also shifts the
-# frame's bits out to nowhere (`out null`), which is what paces it. Source:
+# The parallel push. Each follower shifts one panel's frame onto that panel's
+# own DIN line. The leader makes the one shared SCK, and moves on one byte at a
+# time: a follower pulls its next byte, then raises its own IRQ flag, and the
+# leader clocks 8 bits only when every follower of the group has raised its flag.
+# A follower whose DMA is starved, because the CPU is busy with the frames in
+# the same RAM, just holds the clock back. An earlier version let the leader
+# run on its own DMA stream, and a starved follower lost bits (task 0048).
+#
+# A bit takes 12 PIO cycles of the 150 MHz system clock: SCK is low for 7 and
+# high for 5, so SCK is 12.5 MHz, plus a few cycles between bytes. Source, for
+# a group of `n` followers, with `wait 1 irq i` for i in 0 to n - 1:
 #
 #     .side_set 1
 #     .wrap_target
-#         out null, 1 side 0 [9]
-#         nop         side 1 [4]
+#         wait 1 irq 0   side 0
+#         wait 1 irq 1   side 0
+#         wait 1 irq 2   side 0
+#         set x, 7       side 0
+#     bit:
+#         nop            side 0 [6]
+#         jmp x-- bit    side 1 [4]
 #     .wrap
-_LEADER_PROGRAM = array.array("H", (0x6961, 0xB442))
+_LEADER_PROGRAMS = (
+    None,
+    array.array("H", (0x20C0, 0xE027, 0xA642, 0x1442)),
+    array.array("H", (0x20C0, 0x20C1, 0xE027, 0xA642, 0x1443)),
+    array.array("H", (0x20C0, 0x20C1, 0x20C2, 0xE027, 0xA642, 0x1444)),
+)
 
-# Each follower watches SCK, with SCK as its first input pin, and puts the next
-# bit of its own frame on its own DIN line while SCK is low. A follower sees
-# SCK about 3 cycles late, so SCK needs the long low phase above. Source:
+# The follower in slot i of the group raises IRQ flag i. It watches SCK, with
+# SCK as its first input pin, and puts the next bit on its DIN line while SCK
+# is low. It sees SCK about 3 cycles late, so SCK needs the long low phase
+# above. Source, for slot 0:
 #
 #     .wrap_target
+#         pull block
+#         irq 0
+#         set x, 7
+#     bit:
 #         wait 0 pin 0
 #         out pins, 1
 #         wait 1 pin 0
+#         jmp x-- bit
 #     .wrap
-_FOLLOWER_PROGRAM = array.array("H", (0x2020, 0x6001, 0x20A0))
+_FOLLOWER_PROGRAMS = tuple(
+    array.array("H", (0x80A0, 0xC000 + slot, 0xE027, 0x2020, 0x6001, 0x20A0, 0x0043))
+    for slot in range(3)
+)
 
 # At most three panels take a frame at once. CircuitPython 10.2.1 puts every
 # state machine that shares an input pin (`exclusive_pin_use=False`) on one PIO
@@ -133,9 +160,11 @@ _FOLLOWER_PROGRAM = array.array("H", (0x2020, 0x6001, 0x20A0))
 # 3 ms. A push of six panels is two groups.
 MAX_GROUP = 3
 
-# 10 MHz is the fastest SCK that held in spike 2 (2026-10-06): no desync in 300
-# pushes. At 15 MHz a follower lost sync in 5 of 150 pushes.
-PARALLEL_BAUDRATE = 10_000_000
+# 12.5 MHz held in 400 groups on the board, with and without a CPU load
+# (2026-10-08). The 5 high cycles keep a follower, which sees SCK about 3 cycles
+# late, from missing an edge. A 15 MHz clock with 3 high cycles lost sync in 5
+# of 150 pushes in spike 2 (2026-10-06).
+PARALLEL_BAUDRATE = 12_500_000
 _PARALLEL_CLOCK_HZ = SYSTEM_CLOCK_HZ
 
 # A command or window goes through one `PioBus` on one panel's DIN line at this
@@ -143,9 +172,12 @@ _PARALLEL_CLOCK_HZ = SYSTEM_CLOCK_HZ
 # in spike 1.
 COMMAND_BAUDRATE = 15_000_000
 
-# A frame takes 26 ms at 10 MHz. A push that has not ended after this long is
-# treated as a desync.
+# A frame takes about 22 ms at 12.5 MHz. A push whose DMAs have not ended after
+# this long is treated as a desync. After the DMAs end, a follower needs only
+# microseconds to shift out the bytes left in its FIFO, so it has this long
+# to stall on its next `pull`.
 PUSH_TIMEOUT_NS = 200_000_000
+DRAIN_TIMEOUT_NS = 5_000_000
 
 
 class _PanelBus:
@@ -184,10 +216,10 @@ class ParallelBus:
     while a group is on the wire.
 
     A follower that misses a clock edge shifts its frame out of step, and a
-    frame push has no resync. `done` tells a follower that did not finish with
-    the leader from one that did: it tears all the machines down, sets
-    `desynced`, and returns true. The caller then sends the window and the
-    frames again (`app.MacroPad` does).
+    frame push has no resync. `done` finds such a follower: it does not stall
+    on its `pull` after its DMA ends, because it is still waiting for an edge.
+    `done` then tears all the machines down, sets `desynced`, and returns true.
+    The caller sends the window and the frames again (`app.MacroPad` does).
     """
 
     max_group = MAX_GROUP
@@ -233,9 +265,6 @@ class ParallelBus:
         self._deadline_ns = time.monotonic_ns() + PUSH_TIMEOUT_NS
         for key, frame in items:
             self._followers[key].background_write(frame)
-        # The leader's bytes go to `out null`, so any buffer of the right
-        # length paces it.
-        self._leader.background_write(items[0][1])
         self._group = keys
 
     @property
@@ -243,36 +272,31 @@ class ParallelBus:
         """True when no group is on the wire: every frame is sent, or the
         group desynced or timed out (then `desynced` is true).
 
-        Never blocks. The leader's DMA ends a few bytes before its last bit,
-        so this clears the leader's and the followers' stall flags once the
-        leader's DMA is done, and reads them on a later call, as
-        `PioBus.done` does. A state machine that is out of bytes stalls on its
-        `out`. A follower in step is stalled by then, because it has shifted
-        its last bit. A follower that is not is still writing, or is waiting
-        for a clock edge that will not come.
+        Never blocks. A follower's DMA ends a few bytes before its last bit,
+        so this clears the followers' stall flags once all their DMAs are
+        done, and reads them on a later call, as `PioBus.done` does. A follower
+        that has shifted its last bit stalls on its next `pull`. A follower
+        that is waiting for a clock edge it missed never does.
         """
         if not self._group:
             return True
-        if self._leader.writing:
-            return self._wait_or_desync()
+        now = time.monotonic_ns()
+        followers = [self._followers[key] for key in self._group]
+        if any(follower.writing for follower in followers):
+            return self._desync_after(self._deadline_ns, now)
         if not self._cleared:
-            self._leader.clear_txstall()
-            for key in self._group:
-                self._followers[key].clear_txstall()
+            for follower in followers:
+                follower.clear_txstall()
             self._cleared = True
-            return self._wait_or_desync()
-        if not self._leader.txstall:
-            return self._wait_or_desync()
-        for key in self._group:
-            follower = self._followers[key]
-            if follower.writing or not follower.txstall:
-                self._desync()
-                return True
-        self._group = []
-        return True
+            self._deadline_ns = now + DRAIN_TIMEOUT_NS
+            return False
+        if all(follower.txstall for follower in followers):
+            self._group = []
+            return True
+        return self._desync_after(self._deadline_ns, now)
 
-    def _wait_or_desync(self):
-        if time.monotonic_ns() < self._deadline_ns:
+    def _desync_after(self, deadline_ns, now):
+        if now < deadline_ns:
             return False
         self._desync()
         return True
@@ -298,30 +322,27 @@ class ParallelBus:
         followers do. Built the other way round, with the leader first and
         owning SCK, the followers never see a clock edge: their DMA stays
         busy and the push desyncs (measured on the board, 2026-10-08). So a
-        group of other panels rebuilds the leader too, about 3 ms in all.
+        group of other panels rebuilds the leader too, about 3 ms in all. The
+        leader waits for IRQ flags 0 to n - 1, and the follower in slot i of
+        the group raises flag i.
         """
         if self._leader is not None and set(self._followers) == set(keys):
             return
         self._teardown()
         try:
-            for key in keys:
+            for slot, key in enumerate(keys):
                 self._followers[key] = rp2pio.StateMachine(
-                    _FOLLOWER_PROGRAM,
+                    _FOLLOWER_PROGRAMS[slot],
                     frequency=_PARALLEL_CLOCK_HZ,
                     first_out_pin=self._dins[key],
                     first_in_pin=self._sck,
-                    auto_pull=True,
-                    pull_threshold=8,
                     out_shift_right=False,
                     exclusive_pin_use=False,
                 )
             self._leader = rp2pio.StateMachine(
-                _LEADER_PROGRAM,
+                _LEADER_PROGRAMS[len(keys)],
                 frequency=_PARALLEL_CLOCK_HZ,
                 first_sideset_pin=self._sck,
-                auto_pull=True,
-                pull_threshold=8,
-                out_shift_right=False,
                 exclusive_pin_use=False,
             )
         except BaseException:

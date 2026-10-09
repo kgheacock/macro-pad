@@ -137,22 +137,43 @@ def _live_followers():
     return [sm for sm in rp2pio.created if "first_out_pin" in sm.kwargs and "first_in_pin" in sm.kwargs and not sm.deinitialized]
 
 
-def test_the_programs_are_the_assembled_leader_and_follower():
+def test_the_programs_are_the_assembled_leaders_and_followers():
     # Assembled with adafruit_pioasm 1.3.8. Little-endian 16-bit words.
-    assert bytes(memoryview(pio_spi._LEADER_PROGRAM)) == bytes.fromhex("6169" "42b4")
-    assert bytes(memoryview(pio_spi._FOLLOWER_PROGRAM)) == bytes.fromhex("2020" "0160" "a020")
+    leaders = [
+        None if program is None else bytes(memoryview(program)).hex()
+        for program in pio_spi._LEADER_PROGRAMS
+    ]
+    assert leaders == [
+        None,
+        "c020" "27e0" "42a6" "4214",
+        "c020" "c120" "27e0" "42a6" "4314",
+        "c020" "c120" "c220" "27e0" "42a6" "4414",
+    ]
+    followers = [bytes(memoryview(program)).hex() for program in pio_spi._FOLLOWER_PROGRAMS]
+    assert followers == [
+        "a080" "00c0" "27e0" "2020" "0160" "a020" "4300",
+        "a080" "01c0" "27e0" "2020" "0160" "a020" "4300",
+        "a080" "02c0" "27e0" "2020" "0160" "a020" "4300",
+    ]
 
 
-def test_the_leader_makes_a_10_mhz_clock_from_150_mhz():
-    cycles_per_bit = 10 + 5  # `side 0 [9]`, then `side 1 [4]`
+def test_the_leader_makes_a_12_5_mhz_clock_from_150_mhz():
+    cycles_per_bit = 7 + 5  # `side 0 [6]`, then `side 1 [4]` after the jump's own cycle
 
-    assert pio_spi.SYSTEM_CLOCK_HZ / cycles_per_bit == pio_spi.PARALLEL_BAUDRATE == 10_000_000
+    assert pio_spi.SYSTEM_CLOCK_HZ / cycles_per_bit == pio_spi.PARALLEL_BAUDRATE == 12_500_000
 
 
-def test_a_frame_takes_26_ms_at_10_mhz():
+def test_sck_stays_high_for_at_least_five_cycles_so_a_late_follower_sees_it():
+    jmp_word = pio_spi._LEADER_PROGRAMS[3][-1]
+    delay = (jmp_word >> 8) & 0x0F  # 4 bits of delay, 1 bit of side-set
+
+    assert 1 + delay >= 5
+
+
+def test_a_frame_takes_21_ms_at_12_5_mhz():
     seconds = FRAME_BYTES * 8 / pio_spi.PARALLEL_BAUDRATE
 
-    assert round(seconds * 1000) == 26
+    assert round(seconds * 1000) == 21
 
 
 def test_a_group_has_at_most_three_panels_because_a_pio_block_has_four_machines():
@@ -171,14 +192,26 @@ def test_start_group_builds_the_followers_before_the_leader():
     assert leader.kwargs["exclusive_pin_use"] is False
     assert "first_out_pin" not in leader.kwargs
     assert leader.frequency == pio_spi.SYSTEM_CLOCK_HZ
+    assert leader.program == bytes(memoryview(pio_spi._LEADER_PROGRAMS[3]))
     assert [sm.kwargs["first_out_pin"] for sm in followers] == ["DIN1", "DIN3", "DIN5"]
-    for sm in followers:
+    for slot, sm in enumerate(followers):
+        assert sm.program == bytes(memoryview(pio_spi._FOLLOWER_PROGRAMS[slot]))
         assert sm.kwargs["first_in_pin"] == "SCK"
         assert sm.kwargs["exclusive_pin_use"] is False
-        assert sm.kwargs["auto_pull"] is True
-        assert sm.kwargs["pull_threshold"] == 8
         assert sm.kwargs["out_shift_right"] is False
+        assert not sm.kwargs.get("auto_pull")  # the program pulls a byte itself
         assert sm.frequency == pio_spi.SYSTEM_CLOCK_HZ
+
+
+def test_the_leader_waits_for_exactly_the_flags_of_the_followers_in_the_group():
+    for count in (1, 2, 3):
+        rp2pio.reset()
+        bus = _parallel()
+
+        _start_group(bus, keys=tuple(range(count)))
+
+        assert _leader().program == bytes(memoryview(pio_spi._LEADER_PROGRAMS[count]))
+
 
 
 def test_start_group_gives_each_follower_its_own_frame_without_copying_it():
@@ -188,7 +221,7 @@ def test_start_group_gives_each_follower_its_own_frame_without_copying_it():
 
     for index, frame in enumerate(frames):
         assert rp2pio.created[index].writes[0] is frame
-    assert _leader().writes[0] is frames[0]  # the leader's bytes pace it
+    assert _leader().writes == []  # the leader needs no data: the followers pace it
 
 
 def test_start_group_builds_only_the_followers_of_the_group():
@@ -235,17 +268,31 @@ def test_a_group_of_other_panels_rebuilds_the_followers_and_the_leader():
     assert _poll_until_done(bus)
 
 
-def test_done_is_false_until_the_leader_ends_and_every_follower_has_stalled():
+def test_done_is_false_until_every_follower_dma_ends_and_every_follower_has_stalled():
     bus = _parallel()
     _start_group(bus)
-    _leader().polls_to_finish = 2
+    rp2pio.created[1].polls_to_finish = 2  # the DMA of one follower is slow
 
-    assert bus.done is False  # the leader's DMA runs
+    assert bus.done is False  # a follower's DMA runs
     assert bus.done is False
-    assert bus.done is False  # the stall flags are cleared now
+    assert bus.done is False  # the DMAs are done, and the stall flags are cleared now
     assert bus.done is True
     assert bus.desynced is False
     assert bus.done is True  # nothing is on the wire any more
+
+
+def test_done_waits_for_the_last_bytes_to_shift_out_of_every_follower():
+    bus = _parallel()
+    _start_group(bus)
+    rp2pio.created[2].stall_polls = 3  # its last bytes are still shifting out
+
+    polls = 0
+    while not bus.done:
+        polls += 1
+        assert polls < 10
+
+    assert polls >= 3
+    assert bus.desynced is False
 
 
 def test_start_group_refuses_while_a_group_is_on_the_wire():
@@ -309,10 +356,12 @@ def test_a_command_while_a_group_is_on_the_wire_is_refused():
         bus.write(0, b"\x2c")
 
 
-def test_desync_recovery_rebuilds_the_leader_and_the_followers():
-    """DoD-4: a follower whose DMA still runs after the leader ended has lost
-    sync. The bus stops and frees all the machines, and says so.
+def test_desync_recovery_rebuilds_the_leader_and_the_followers(monkeypatch):
+    """DoD-4: a follower whose DMA never ends has lost sync, because it is
+    waiting for a clock edge it missed. The bus stops and frees all the
+    machines, and says so.
     """
+    monkeypatch.setattr(pio_spi, "PUSH_TIMEOUT_NS", 0)
     bus = _parallel()
     _start_group(bus)
     rp2pio.created[1].polls_to_finish = 10**9  # follower 1: its DMA never ends
@@ -331,7 +380,8 @@ def test_desync_recovery_rebuilds_the_leader_and_the_followers():
     assert bus.desynced is False
 
 
-def test_desync_recovery_finds_a_follower_that_waits_for_a_clock_edge():
+def test_desync_recovery_finds_a_follower_that_waits_for_a_clock_edge(monkeypatch):
+    monkeypatch.setattr(pio_spi, "DRAIN_TIMEOUT_NS", 0)
     bus = _parallel()
     _start_group(bus)
     rp2pio.created[2].never_stalls = True  # its DMA is done, but it is not drained
@@ -341,15 +391,14 @@ def test_desync_recovery_finds_a_follower_that_waits_for_a_clock_edge():
     assert bus.desynced is True
 
 
-def test_desync_recovery_gives_up_on_a_push_that_never_ends(monkeypatch):
-    monkeypatch.setattr(pio_spi, "PUSH_TIMEOUT_NS", 0)
+def test_a_follower_that_has_not_stalled_yet_is_given_time_to_drain():
     bus = _parallel()
     _start_group(bus)
-    _leader().polls_to_finish = 10**9  # the leader's DMA never ends
+    rp2pio.created[0].never_stalls = True
 
-    assert bus.done is True
-
-    assert bus.desynced is True
+    assert bus.done is False  # the DMAs are done: the flags are cleared
+    assert bus.done is False  # follower 0 has not stalled, but has time left
+    assert bus.desynced is False
 
 
 class _Recorder:
@@ -386,17 +435,20 @@ def _commands(sm):
     return [bytes(w) for w in sm.writes]
 
 
-def test_desync_recovery_resends_the_window_and_the_frame():
+def test_desync_recovery_resends_the_window_and_the_frame(monkeypatch):
     """DoD-4: a follower that does not finish with the leader makes the code
     rebuild, resend the window, and resend the frame.
     """
+    clock = [10**12]
+    monkeypatch.setattr(pio_spi.time, "monotonic_ns", lambda: clock[0])
     pad, bus, pins_ = _real_pad()
     pad.step(0)  # the windows of keys 0 to 2, then their frames on the wire
     first = list(rp2pio.created)
     # Three one-panel command machines, then three followers and the leader.
     assert len(first) == 3 + 1 + 3
     sent = [first[3 + key].writes[0] for key in range(3)]
-    first[4].polls_to_finish = 10**9  # the follower of key 1 loses sync
+    first[4].never_stalls = True  # the follower of key 1 waits for a clock edge
+    clock[0] += 2 * pio_spi.DRAIN_TIMEOUT_NS  # and the time to drain runs out
 
     pad.step(1000)
 

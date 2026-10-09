@@ -30,13 +30,12 @@ from idle_timer import IdleTimer
 DEFAULT_COLOR = 0x0000
 DEFAULT_EMOJI_ID = 0
 
-# How often a blinking key's visibility toggles. `render_key` toggles
-# once per call (task 0006's DoD-3), which assumed render_key was called
-# at some human-perceptible cadence; task 0022's main loop instead calls
-# it on every `step`, unthrottled, so a blinking key toggled thousands of
-# times a second and looked like a flicker-blended solid color instead of
-# a blink. Confirmed live during task 0031's key-0 bring-up. 500ms gives
-# a 1Hz blink.
+# One blink slot. All blinking keys show "on" in an even slot of the clock
+# (`now_us // BLINK_INTERVAL_US`) and "off" in an odd one, so they flash in
+# time whatever started each blink (task 0048). `render_key` used to toggle
+# on every call, and task 0022's main loop calls `step` unthrottled, so a
+# blinking key looked like a flicker-blended solid color (confirmed live
+# during task 0031's key-0 bring-up). 500ms gives a 1Hz blink.
 BLINK_INTERVAL_US = 500_000
 
 
@@ -141,10 +140,6 @@ class MacroPad:
             display_render.KeyState(emoji_id=DEFAULT_EMOJI_ID, color=DEFAULT_COLOR)
             for _ in switches
         ]
-        # Next `now_us` at which a blinking key is allowed to toggle
-        # visibility again; see BLINK_INTERVAL_US. `None` while the key does
-        # not blink, so a key that starts blinking gets a fresh schedule.
-        self._next_blink_us = [None] * len(switches)
         # Every key is dirty at power-on so the first step paints all six
         # displays, rather than leaving them on whatever the panel powered
         # up showing.
@@ -350,32 +345,25 @@ class MacroPad:
         return wrote_event
 
     def _render_dirty_keys(self, now_us):
-        """Redraw the keys that changed, plus every blinking key whose
-        BLINK_INTERVAL_US has elapsed since it last toggled.
+        """Redraw the keys that changed, plus every blinking key that shows
+        the wrong frame for the current blink slot.
 
-        `render_key` toggles a blinking key's frame only when asked, so
-        gating that toggle on elapsed wall-clock time, not on `step`'s own
-        iteration rate, is what makes it a human-visible blink instead of
-        a flicker. A redraw caused by a state change does not toggle and
-        does not move the key's schedule, so an update to a blinking key
-        keeps its phase (task 0044). A key that has just started to blink
-        gets its first schedule here.
+        The phase is a function of the clock, `blink_on = slot is even`, so
+        no key keeps a schedule. A key that starts to blink, an update to a
+        blinking key, and a `step` that comes many slots late all draw the
+        frame of the current slot, and a blinking key that already shows it
+        is not drawn (task 0048).
         """
+        blink_on = (now_us // BLINK_INTERVAL_US) % 2 == 0
         for index, key_state in enumerate(self.key_states):
-            next_blink_us = self._next_blink_us[index]
-            due_to_blink = (
-                key_state.blink and next_blink_us is not None and now_us >= next_blink_us
-            )
-            if index not in self._dirty and not due_to_blink:
+            if index not in self._dirty and not display_render.blink_is_due(
+                key_state, blink_on
+            ):
                 continue
 
             display_render.render_key(
-                self._ports[index], key_state, self._tracer, index, toggle=due_to_blink
+                self._ports[index], key_state, self._tracer, index, blink_on=blink_on
             )
-            if not key_state.blink:
-                self._next_blink_us[index] = None
-            elif due_to_blink or next_blink_us is None:
-                self._next_blink_us[index] = now_us + BLINK_INTERVAL_US
 
         self._dirty.clear()
 

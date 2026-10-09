@@ -61,8 +61,9 @@ ping-pong: check-circuitpy
 
 # `make blink-trace` runs a scripted run of key-state updates against the
 # board and prints its figures. SCENARIO is `single` (task 0044's DoD-5:
-# 10 updates to key 4 while keys 0 to 2 blink) or `burst` (DoD-6: 6 updates
-# back to back). It puts a tracing code.py on the board, so run `make flash`
+# 10 updates to key 4 while keys 0 to 2 blink), `burst` (DoD-6: 6 updates
+# back to back) or `sync` (task 0048's DoD-6: 10 updates to key 4 while all
+# six keys blink; it prints max skew, max span and max gap). It puts a tracing code.py on the board, so run `make flash`
 # afterward to restore the real one. It unmounts CIRCUITPY for the run,
 # because a mounted CIRCUITPY on macOS reloads the board and breaks CDC and
 # HID, and it mounts the volume again when the run ends, even if it failed.

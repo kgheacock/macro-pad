@@ -125,6 +125,14 @@ _LEADER_PROGRAM = array.array("H", (0x6961, 0xB442))
 #     .wrap
 _FOLLOWER_PROGRAM = array.array("H", (0x2020, 0x6001, 0x20A0))
 
+# At most three panels take a frame at once. CircuitPython 10.2.1 puts every
+# state machine that shares an input pin (`exclusive_pin_use=False`) on one PIO
+# block, and a block has four state machines. The leader owns SCK and takes one,
+# so three followers fit (measured on the board, 2026-10-08). `start_group`
+# rebuilds the followers when a group names other panels, which takes about
+# 2.7 ms. A push of six panels is two groups.
+MAX_GROUP = 3
+
 # 10 MHz is the fastest SCK that held in spike 2 (2026-10-06): no desync in 300
 # pushes. At 15 MHz a follower lost sync in 5 of 150 pushes.
 PARALLEL_BAUDRATE = 10_000_000
@@ -161,34 +169,35 @@ class _PanelBus:
 
 
 class ParallelBus:
-    """Six panels on one shared SCK and six DIN lines, one frame DMA each.
+    """Panels on one shared SCK and one DIN line each, with up to `max_group`
+    of them taking a frame at the same time.
 
     `sck` is a `microcontroller.Pin` and `dins` holds the DIN pin of each
     panel. One leader state machine makes SCK, and one follower for each panel
-    shifts that panel's frame onto its DIN line, so `start_group` sends the
-    frames of any panels at the same time. That is 7 of the 12 state machines
-    and 7 of the 16 DMA channels.
+    of the group shifts that panel's frame onto its DIN line, so `start_group`
+    sends the frames of up to three panels at once.
 
-    The bus is in one of two modes. In parallel mode the seven machines exist.
-    In command mode one `PioBus` exists on a single panel's DIN line, and
-    `write` sends a command to that panel alone. `write` and `start_group`
-    switch the mode when they need to, and refuse to while a group is on the
-    wire. A switch deinitialises the machines of the other mode and builds the
-    new ones.
+    The bus is in one of two modes. In parallel mode the leader and the
+    followers of the last group exist. In command mode one `PioBus` exists on a
+    single panel's DIN line, and `write` sends a command to that panel alone.
+    `write` and `start_group` switch the mode when they need to, and refuse to
+    while a group is on the wire.
 
     A follower that misses a clock edge shifts its frame out of step, and a
     frame push has no resync. `done` tells a follower that did not finish with
-    the leader from one that did: it tears all seven machines down, sets
+    the leader from one that did: it tears all the machines down, sets
     `desynced`, and returns true. The caller then sends the window and the
     frames again (`app.MacroPad` does).
     """
+
+    max_group = MAX_GROUP
 
     def __init__(self, sck, dins):
         self._sck = sck
         self._dins = list(dins)
         self.baudrate = PARALLEL_BAUDRATE
         self._leader = None
-        self._followers = None
+        self._followers = {}  # panel key -> follower state machine
         self._single = None
         self._single_key = None
         self._group = []
@@ -207,7 +216,7 @@ class ParallelBus:
 
     def start_group(self, items):
         """Start sending a frame to each panel in `items`, a sequence of
-        `(key, frame)`, and return at once.
+        `(key, frame)` with at most `max_group` panels, and return at once.
 
         Every frame is a buffer of the same length, which the caller keeps
         unchanged until `done` is true. The caller has already lowered CS on
@@ -215,14 +224,15 @@ class ParallelBus:
         """
         if self._group:
             raise RuntimeError("a group is already on the wire")
-        self._enter_parallel_mode()
+        if len(items) > MAX_GROUP:
+            raise ValueError("a group has at most {} panels".format(MAX_GROUP))
+        keys = [key for key, _ in items]
+        self._enter_parallel_mode(keys)
         self.desynced = False
         self._cleared = False
         self._deadline_ns = time.monotonic_ns() + PUSH_TIMEOUT_NS
-        keys = []
         for key, frame in items:
             self._followers[key].background_write(frame)
-            keys.append(key)
         # The leader's bytes go to `out null`, so any buffer of the right
         # length paces it.
         self._leader.background_write(items[0][1])
@@ -280,28 +290,11 @@ class ParallelBus:
         self._single = PioBus(self._sck, self._dins[key], COMMAND_BAUDRATE)
         self._single_key = key
 
-    def _enter_parallel_mode(self):
-        if self._leader is not None:
-            return
-        self._teardown()
-        # Followers first: the leader claims SCK as its side-set pin, and the
-        # followers only watch it (`exclusive_pin_use=False`).
-        followers = []
-        try:
-            for din in self._dins:
-                followers.append(
-                    rp2pio.StateMachine(
-                        _FOLLOWER_PROGRAM,
-                        frequency=_PARALLEL_CLOCK_HZ,
-                        first_out_pin=din,
-                        first_in_pin=self._sck,
-                        auto_pull=True,
-                        pull_threshold=8,
-                        out_shift_right=False,
-                        exclusive_pin_use=False,
-                    )
-                )
-            leader = rp2pio.StateMachine(
+    def _enter_parallel_mode(self, keys):
+        """Have the leader and exactly the followers of `keys`."""
+        if self._leader is None:
+            self._teardown()
+            self._leader = rp2pio.StateMachine(
                 _LEADER_PROGRAM,
                 frequency=_PARALLEL_CLOCK_HZ,
                 first_sideset_pin=self._sck,
@@ -309,26 +302,43 @@ class ParallelBus:
                 pull_threshold=8,
                 out_shift_right=False,
             )
+        if set(self._followers) == set(keys):
+            return
+        self._free_followers()
+        # The leader first: it claims SCK as its side-set pin, and the
+        # followers only watch it (`exclusive_pin_use=False`).
+        try:
+            for key in keys:
+                self._followers[key] = rp2pio.StateMachine(
+                    _FOLLOWER_PROGRAM,
+                    frequency=_PARALLEL_CLOCK_HZ,
+                    first_out_pin=self._dins[key],
+                    first_in_pin=self._sck,
+                    auto_pull=True,
+                    pull_threshold=8,
+                    out_shift_right=False,
+                    exclusive_pin_use=False,
+                )
         except BaseException:
-            for follower in followers:
-                follower.deinit()
+            self._free_followers()
             raise
-        self._followers = followers
-        self._leader = leader
+
+    def _free_followers(self):
+        followers = list(self._followers.values())
+        self._followers = {}
+        for follower in followers:
+            follower.stop_background_write()
+            follower.deinit()
 
     def _teardown(self):
         """Free every state machine of either mode. Safe to call twice."""
         self._group = []
-        machines = []
+        self._free_followers()
         if self._leader is not None:
-            machines.append(self._leader)
-        if self._followers is not None:
-            machines.extend(self._followers)
-        self._leader = None
-        self._followers = None
-        for machine in machines:
-            machine.stop_background_write()
-            machine.deinit()
+            leader = self._leader
+            self._leader = None
+            leader.stop_background_write()
+            leader.deinit()
         if self._single is not None:
             single = self._single
             self._single = None

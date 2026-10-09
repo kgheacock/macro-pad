@@ -121,6 +121,10 @@ class _FakePanelBus:
 
 
 class FakeParallelBus:
+    # `pio_spi.ParallelBus.max_group`: the leader and three followers fill one
+    # PIO block.
+    max_group = 3
+
     def __init__(self, bus, auto_finish=True):
         self._bus = bus
         self.pio = bus.pio
@@ -135,6 +139,7 @@ class FakeParallelBus:
     def start_group(self, items):
         assert self._group is None, "a group is already on the wire"
         assert self.pio._in_flight is None, "the bus is still sending a transfer"
+        assert len(items) <= self.max_group, "a group has at most {} panels".format(self.max_group)
         keys = [key for key, _ in items]
         low = [i for i, cs in enumerate(self._bus.cs) if cs.value is False]
         assert sorted(low) == sorted(keys), "CS is low on {}, group is {}".format(low, keys)

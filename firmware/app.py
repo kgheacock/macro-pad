@@ -106,9 +106,9 @@ class MacroPad:
     queue: a newer frame replaces an older one that has not started.
 
     With a `push_bus` (a `pio_spi.ParallelBus`), every key has its own MOSI
-    line and all the queued frames start together, as one group (task 0048).
-    Without one, the panels share SCK and MOSI and one push is on the wire at
-    a time.
+    line, and the queued frames start together in groups of at most
+    `push_bus.max_group` panels (task 0048). Without one, the panels share
+    SCK and MOSI and one push is on the wire at a time.
     """
 
     def __init__(
@@ -242,10 +242,12 @@ class MacroPad:
         self.resyncs += 1
 
     def _start_group(self):
-        """Start the queued pushes: all of them with a `push_bus`, else the
-        oldest one.
+        """Start the queued pushes: the oldest ones that fit one group with a
+        `push_bus`, else the oldest one.
         """
-        count = len(self._push_queue) if self._push_bus is not None else 1
+        count = 1
+        if self._push_bus is not None:
+            count = min(len(self._push_queue), self._push_bus.max_group)
         keys = self._push_queue[:count]
         del self._push_queue[:count]
         frames = [self._queued_frame[key_index] for key_index in keys]

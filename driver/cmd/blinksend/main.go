@@ -30,6 +30,11 @@ const (
 	singleUpdates = 10
 	singleSpacing = 2 * time.Second
 
+	// syncUpdates and syncSpacing are task 0048's DoD-6 scenario: 10 updates
+	// to key 4, 2 s apart, while all six keys blink.
+	syncUpdates = 10
+	syncSpacing = 2 * time.Second
+
 	// burstUpdates is the DoD-6 scenario: 6 updates sent back to back.
 	// transport.Device spaces them by minReportGap, so the run measures
 	// that gap.
@@ -47,7 +52,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, or warmup (send nothing)")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
 	if err := fs.Parse(args); err != nil {
@@ -65,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		script = sendBurst
 	case "busyburst":
 		script = sendBusyBurst
+	case "sync":
+		script = sendSync
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
 		// code.py has given an unreadable trace stream and no decoded
@@ -72,7 +79,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync or warmup\n", *scenario)
 		return 2
 	}
 
@@ -188,6 +195,28 @@ func sendBusyBurst(dev transport.Transport) error {
 		if err := dev.SendKeyState(ks); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// sendSync makes all six keys blink, then updates key 4 ten times, 2 s apart,
+// in alternating colors, keeping it blinking. The update is the second report
+// decoded for key 4, which tools/blink_trace.py uses as the start of its
+// window: the setup decodes key 4 once, and each update decodes it again.
+func sendSync(dev transport.Transport) error {
+	for key := byte(0); key < 6; key++ {
+		if err := dev.SendKeyState(keyState(key, 0x001F, true)); err != nil {
+			return err
+		}
+	}
+	time.Sleep(settle)
+
+	colors := [2]uint16{0xF800, 0x07E0}
+	for i := 0; i < syncUpdates; i++ {
+		if err := dev.SendKeyState(keyState(4, colors[i%2], true)); err != nil {
+			return err
+		}
+		time.Sleep(syncSpacing)
 	}
 	return nil
 }

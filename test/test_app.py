@@ -1084,27 +1084,41 @@ def _parallel_pad(tracer=None):
     return pad, bus, hid_device
 
 
-def test_parallel_push_starts_every_queued_frame_in_one_group():
-    """DoD-3: the frames due in one step start in one group."""
+def test_parallel_push_starts_the_queued_frames_in_groups_of_three():
+    """DoD-3: the frames due in one step start in groups, as many panels at a
+    time as the bus allows.
+    """
     pad, bus, _ = _parallel_pad()
 
     pad.step(0)  # power-on: six keys are dirty
 
-    assert bus.groups == [[0, 1, 2, 3, 4, 5]]
+    assert bus.groups == [[0, 1, 2], [3, 4, 5]]
     pad.step(1000)
     assert all(bus.frame_count(key) == 1 for key in range(6))
 
 
-def test_parallel_push_sends_the_windows_before_any_frame_and_no_commands_after():
+def test_parallel_push_starts_a_group_of_one_for_one_key():
     pad, bus, hid_device = _parallel_pad()
     pad.step(0)
     pad.step(1000)
+    pad.step(2000)
+
+    hid_device.feed(_key_state_report(key_index=4, color=0xF800, emoji_id=0))
+    pad.step(3000)
+
+    assert bus.groups[2:] == [[4]]
+
+
+def test_parallel_push_sends_the_windows_before_any_frame_and_no_commands_after():
+    pad, bus, hid_device = _parallel_pad()
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
     commands = [len(bus.commands(key)) for key in range(6)]
     assert all(count == 3 for count in commands)  # CASET, RASET, RAMWR
 
     hid_device.feed(_key_state_report(key_index=2, color=0xF800, emoji_id=0))
-    pad.step(2000)
     pad.step(3000)
+    pad.step(4000)
 
     assert [len(bus.commands(key)) for key in range(6)] == commands
     assert bus.image(2) == _solid_frame(0xF800)
@@ -1113,19 +1127,19 @@ def test_parallel_push_sends_the_windows_before_any_frame_and_no_commands_after(
 def test_parallel_push_lowers_cs_on_the_group_only():
     """DoD-3: no panel outside the group sees CS low."""
     pad, bus, hid_device = _parallel_pad()
-    pad.step(0)
-    pad.step(1000)
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
     cs_log = [list(bus.cs[key].log) for key in range(6)]
 
     hid_device.feed(_key_state_report(key_index=1, color=0xF800, emoji_id=0))
     hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0))
-    pad.step(2000)  # one report per step: key 1 starts alone
-    pad.step(3000)
+    pad.step(3000)  # one report per step: key 1 starts alone
     pad.step(4000)
+    pad.step(5000)
 
     for key in (0, 2, 3, 5):
         assert bus.cs[key].log == cs_log[key]
-    assert bus.groups[1:] == [[1], [4]]
+    assert bus.groups[2:] == [[1], [4]]
     assert all(bus.cs[key].value is True for key in range(6))
 
 
@@ -1137,20 +1151,24 @@ def test_parallel_push_groups_the_keys_that_wait_while_a_group_is_on_the_wire():
     pad.step(1000)
     hid_device.feed(_key_state_report(key_index=3, color=0x07E0, emoji_id=0))
     pad.step(2000)
-    assert bus.groups == [[0, 1, 2, 3, 4, 5]]
+    assert bus.groups == [[0, 1, 2]]
 
-    bus.finish()
-    pad.step(3000)
+    for now_us in (3000, 4000, 5000):
+        bus.finish()
+        pad.step(now_us)
 
-    assert bus.groups == [[0, 1, 2, 3, 4, 5], [0, 3]]
+    # Key 3 was already queued with its power-on frame, so its update replaced
+    # that frame, and key 0 waits for a group of its own.
+    assert bus.groups == [[0, 1, 2], [3, 4, 5], [0]]
+    assert bus.image(3) == _solid_frame(0x07E0)
 
 
 def test_parallel_push_traces_each_key_of_a_group():
     tracer = _FakeTracer()
     pad, bus, _ = _parallel_pad(tracer=tracer)
 
-    pad.step(0)
-    pad.step(1000)
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
 
     started = [key for code, key, _ in tracer.records if code == tracer_module.PUSH_STARTED]
     done = [key for code, key, _ in tracer.records if code == tracer_module.REFRESH_DONE]
@@ -1166,7 +1184,8 @@ def test_parallel_push_sends_a_desynced_group_again_with_its_windows():
     pad.step(1000)  # the group desyncs; the same step sends it again
 
     assert pad.resyncs == 1
-    assert bus.groups == [[0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5]]
-    assert [len(bus.commands(key)) for key in range(6)] == [6] * 6
-    pad.step(2000)
+    assert bus.groups[:2] == [[0, 1, 2], [0, 1, 2]]
+    assert [len(bus.commands(key)) for key in range(3)] == [6] * 3
+    for now_us in (2000, 3000):
+        pad.step(now_us)
     assert all(bus.frame_count(key) == 1 for key in range(6))

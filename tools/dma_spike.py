@@ -47,7 +47,7 @@ _MEASUREMENT = '''
 import time
 
 macro_pad.step(time.monotonic_ns() // 1000)
-while macro_pad._active_push is not None or macro_pad._push_queue:
+while macro_pad._active_keys or macro_pad._push_queue:
     macro_pad.step(time.monotonic_ns() // 1000)
 
 frame = macro_pad.key_states[0]._on_frame

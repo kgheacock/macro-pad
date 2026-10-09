@@ -45,16 +45,19 @@ DISPLAY_ROWSTART = 3
 # 150MHz system clock over a divider. 15MHz is a whole divider (5), so the
 # SCK edges are evenly spaced, and it is the rate the panels already ran at.
 # A frame push takes 22ms and holds the CPU for under 3ms of it.
-DISPLAY_BAUDRATE = 15_000_000
+# Task 0048 gives each panel its own DIN line, so six frames go out at once.
+# A follower state machine cannot slow the leader's clock, and at 15MHz it
+# lost sync in 5 of 150 pushes (2026-10-06), so the parallel push runs at the
+# 10MHz of `pio_spi.PARALLEL_BAUDRATE`: a push takes 26ms, for one panel or
+# six. Boot-time commands go through one panel's DIN at 15MHz.
 
 # `displayio` claims the display pins at boot. Release them so the raw SPI
 # driver can use them.
 displayio.release_displays()
 
-bus = pio_spi.PioBus(
+bus = pio_spi.ParallelBus(
     sck=getattr(board, pins.SPI_SCK),
-    mosi=getattr(board, pins.SPI_MOSI),
-    baudrate=DISPLAY_BAUDRATE,
+    dins=[getattr(board, key.din_pin) for key in pins.KEYS],
 )
 
 
@@ -70,7 +73,7 @@ rst = _output(pins.DISPLAY_RST, True)
 
 panels = [
     st7735.Panel(
-        bus,
+        bus.panel_bus(index),
         dc,
         _output(key.display_cs_pin, True),
         width=DISPLAY_WIDTH,
@@ -78,7 +81,7 @@ panels = [
         colstart=DISPLAY_COLSTART,
         rowstart=DISPLAY_ROWSTART,
     )
-    for key in pins.KEYS
+    for index, key in enumerate(pins.KEYS)
 ]
 
 # The one RST pulse and the one init of each panel. Nothing after this
@@ -87,9 +90,8 @@ st7735.init_panels(rst, panels)
 
 switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
 
-backlights = [
-    Backlight(pwmio.PWMOut(getattr(board, key.backlight_pin))) for key in pins.KEYS
-]
+# The six backlight inputs join on one pin, so there is one backlight.
+backlights = [Backlight(pwmio.PWMOut(getattr(board, pins.BACKLIGHT)))]
 
 macro_pad = MacroPad(
     switches=switches,
@@ -97,6 +99,7 @@ macro_pad = MacroPad(
     backlights=backlights,
     hid_device=usb_hid.devices[0],
     serial=usb_cdc.data,
+    push_bus=bus,
 )
 
 macro_pad.run()

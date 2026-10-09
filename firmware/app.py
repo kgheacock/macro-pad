@@ -90,8 +90,8 @@ class _KeyPort:
 
 
 class MacroPad:
-    """The whole device: six switches, six panels on one shared PIO SPI bus,
-    six backlights.
+    """The whole device: six switches, six panels on one shared SCK, and a
+    backlight.
 
     Every argument is injected rather than built here, which is what lets
     a test drive `step` one iteration at a time with fakes. `panels` holds
@@ -100,11 +100,15 @@ class MacroPad:
     alone — it releases no bus, pulses no reset line, and sends no init
     command, so the other five panels keep their image.
 
-    A push goes out by DMA and does not hold the loop (task 0045). All six
-    panels share SCK and MOSI, so one push is on the wire at a time. `step`
-    queues a frame for a key, starts the next queued push when the bus is
-    free, and polls the push on the wire. A key has at most one frame in the
+    A push goes out by DMA and does not hold the loop (task 0045). `step`
+    queues a frame for a key, starts the queued pushes when the bus is free,
+    and polls the pushes on the wire. A key has at most one frame in the
     queue: a newer frame replaces an older one that has not started.
+
+    With a `push_bus` (a `pio_spi.ParallelBus`), every key has its own MOSI
+    line and all the queued frames start together, as one group (task 0048).
+    Without one, the panels share SCK and MOSI and one push is on the wire at
+    a time.
     """
 
     def __init__(
@@ -117,6 +121,7 @@ class MacroPad:
         debounce_window_ms=7.5,
         idle_timer=None,
         tracer=None,
+        push_bus=None,
     ):
         self._switches = switches
         self._panels = panels
@@ -124,6 +129,7 @@ class MacroPad:
         self._hid_device = hid_device
         self._serial = serial
         self._tracer = tracer
+        self._push_bus = push_bus
         self._custom_glyph_reader = wire.CustomGlyphReader()
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
@@ -147,10 +153,13 @@ class MacroPad:
 
         self._ports = [_KeyPort(self, index) for index in range(len(switches))]
         # The key indexes waiting to push, oldest first, and the frame each
-        # waits with. `_active_push` is the key whose push is on the wire.
+        # waits with. `_active_keys` and `_active_frames` are the group on the
+        # wire. `resyncs` counts the groups that desynced and were sent again.
         self._push_queue = []
         self._queued_frame = [None] * len(switches)
-        self._active_push = None
+        self._active_keys = []
+        self._active_frames = []
+        self.resyncs = 0
 
     def step(self, now_us):
         """Run one iteration of the loop."""
@@ -178,26 +187,90 @@ class MacroPad:
         self._queued_frame[key_index] = frame
 
     def _service_pushes(self):
-        """End the push on the wire when it is done, then start the next.
+        """End the group on the wire when it is done, then start the next.
 
-        Returns at once when a push is still on the wire. Each push is on
-        the wire for about 20 ms, so this runs many times for one push.
+        Returns at once when a group is still on the wire. A group is on the
+        wire for about 26 ms, so this runs many times for one group.
         """
         while True:
-            if self._active_push is not None:
-                if not self._panels[self._active_push].poll():
+            if self._active_keys:
+                if not self._group_done():
                     return
-                self._record_trace(tracer_module.REFRESH_DONE, self._active_push)
-                self._active_push = None
 
             if not self._push_queue:
                 return
 
-            key_index = self._push_queue.pop(0)
-            frame = self._queued_frame[key_index]
+            self._start_group()
+
+    def _group_done(self):
+        """True when no group is on the wire any more.
+
+        A group that desynced (`pio_spi.ParallelBus.done`) is not done: its
+        frames go back to the front of the queue, and the panels send the
+        window again before the frames.
+        """
+        if self._push_bus is not None:
+            if not self._push_bus.done:
+                return False
+            if self._push_bus.desynced:
+                self._requeue_active_group()
+                return True
+
+        for key_index in self._active_keys:
+            if not self._panels[key_index].poll():
+                return False
+
+        for key_index in self._active_keys:
+            self._record_trace(tracer_module.REFRESH_DONE, key_index)
+        self._active_keys = []
+        self._active_frames = []
+        return True
+
+    def _requeue_active_group(self):
+        """Put the frames of a group that failed back in the queue, ahead of
+        the others, unless a newer frame is already waiting for that key.
+        """
+        requeue = []
+        for key_index, frame in zip(self._active_keys, self._active_frames):
+            self._panels[key_index].abort_push()
+            if self._queued_frame[key_index] is None:
+                self._queued_frame[key_index] = frame
+                requeue.append(key_index)
+        self._push_queue[0:0] = requeue
+        self._active_keys = []
+        self._active_frames = []
+        self.resyncs += 1
+
+    def _start_group(self):
+        """Start the queued pushes: all of them with a `push_bus`, else the
+        oldest one.
+        """
+        count = len(self._push_queue) if self._push_bus is not None else 1
+        keys = self._push_queue[:count]
+        del self._push_queue[:count]
+        frames = [self._queued_frame[key_index] for key_index in keys]
+        for key_index in keys:
             self._queued_frame[key_index] = None
-            self._panels[key_index].start_push(frame)
-            self._active_push = key_index
+
+        if self._push_bus is None:
+            self._panels[keys[0]].start_push(frames[0])
+        else:
+            # Every window goes out before any CS goes low: a command
+            # reaches the panel whose CS is low, over that panel's DIN alone.
+            for key_index in keys:
+                self._panels[key_index].prepare_push()
+            for key_index, frame in zip(keys, frames):
+                self._panels[key_index].begin_push(frame)
+            try:
+                self._push_bus.start_group(tuple(zip(keys, frames)))
+            except BaseException:
+                for key_index in keys:
+                    self._panels[key_index].abort_push()
+                raise
+
+        self._active_keys = keys
+        self._active_frames = frames
+        for key_index in keys:
             self._record_trace(tracer_module.PUSH_STARTED, key_index)
 
     def _record_trace(self, code, key_index):

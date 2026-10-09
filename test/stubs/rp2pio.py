@@ -13,7 +13,19 @@ last bytes still shifting out. An idle state machine is stalled, so the flag
 is set at once when no transfer is in flight and no bytes are left. A
 `background_write` does not clear the flag: it stays set from the idle time
 before, until a test or `PioBus.done` clears it.
+
+`created` lists every `StateMachine` built since the last `reset`, in order, so
+a test can see which were built first and which were freed (`deinitialized`).
+A test makes a follower lose sync in one of two ways, after the transfer
+starts: `polls_to_finish = 10**9` keeps `writing` true (its DMA still runs), and
+`never_stalls = True` keeps `txstall` false (it waits for a clock edge).
 """
+
+created = []
+
+
+def reset():
+    del created[:]
 
 
 class StateMachine:
@@ -28,6 +40,10 @@ class StateMachine:
         self._drain_left = 0
         self._in_flight = False
         self._polls = 0
+        self.never_stalls = False
+        self.deinitialized = False
+        self.stops = 0
+        created.append(self)
 
     def background_write(self, once=None, **kwargs):
         assert not self._in_flight, "a background write is already running"
@@ -46,11 +62,22 @@ class StateMachine:
         self._in_flight = False
         self._drain_left = self.stall_polls
 
+    def stop_background_write(self):
+        self.stops += 1
+        self._in_flight = False
+        self._drain_left = 0
+
+    def deinit(self):
+        assert not self.deinitialized, "deinit twice"
+        self.deinitialized = True
+
     def clear_txstall(self):
         self._stalled = False
 
     @property
     def txstall(self):
+        if self.never_stalls:
+            return False
         if not self._in_flight:
             if self._drain_left > 0:
                 self._drain_left -= 1

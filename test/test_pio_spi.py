@@ -129,11 +129,12 @@ def _poll_until_done(bus, limit=10):
 
 
 def _leader():
-    return rp2pio.created[0]
+    """The newest state machine that makes SCK."""
+    return [sm for sm in rp2pio.created if "first_sideset_pin" in sm.kwargs][-1]
 
 
 def _live_followers():
-    return [sm for sm in rp2pio.created[1:] if not sm.deinitialized]
+    return [sm for sm in rp2pio.created if "first_out_pin" in sm.kwargs and "first_in_pin" in sm.kwargs and not sm.deinitialized]
 
 
 def test_the_programs_are_the_assembled_leader_and_follower():
@@ -159,14 +160,15 @@ def test_a_group_has_at_most_three_panels_because_a_pio_block_has_four_machines(
     assert _parallel().max_group == 3
 
 
-def test_start_group_builds_the_leader_before_the_followers():
+def test_start_group_builds_the_followers_before_the_leader():
     bus = _parallel()
 
     _start_group(bus, keys=(1, 3, 5))
 
-    leader, followers = rp2pio.created[0], rp2pio.created[1:]
+    followers, leader = rp2pio.created[:3], rp2pio.created[3]
     assert len(rp2pio.created) == 4
     assert leader.kwargs["first_sideset_pin"] == "SCK"
+    assert leader.kwargs["exclusive_pin_use"] is False
     assert "first_out_pin" not in leader.kwargs
     assert leader.frequency == pio_spi.SYSTEM_CLOCK_HZ
     assert [sm.kwargs["first_out_pin"] for sm in followers] == ["DIN1", "DIN3", "DIN5"]
@@ -185,7 +187,7 @@ def test_start_group_gives_each_follower_its_own_frame_without_copying_it():
     frames = _start_group(bus)
 
     for index, frame in enumerate(frames):
-        assert rp2pio.created[1 + index].writes[0] is frame
+        assert rp2pio.created[index].writes[0] is frame
     assert _leader().writes[0] is frames[0]  # the leader's bytes pace it
 
 
@@ -196,7 +198,7 @@ def test_start_group_builds_only_the_followers_of_the_group():
     bus.start_group(((1, frame), (4, frame)))
 
     assert len(rp2pio.created) == 3
-    assert [sm.kwargs["first_out_pin"] for sm in rp2pio.created[1:]] == ["DIN1", "DIN4"]
+    assert [sm.kwargs["first_out_pin"] for sm in rp2pio.created[:2]] == ["DIN1", "DIN4"]
 
 
 def test_start_group_refuses_a_group_of_four():
@@ -219,15 +221,16 @@ def test_a_group_of_the_same_panels_reuses_the_machines():
     assert bus.desynced is False
 
 
-def test_a_group_of_other_panels_rebuilds_the_followers_and_keeps_the_leader():
+def test_a_group_of_other_panels_rebuilds_the_followers_and_the_leader():
     bus = _parallel()
     _start_group(bus, keys=(0, 1, 2))
     assert _poll_until_done(bus)
 
     _start_group(bus, keys=(3, 4, 5))
 
-    assert _leader().deinitialized is False
-    assert all(sm.deinitialized for sm in rp2pio.created[1:4])
+    assert all(sm.deinitialized for sm in rp2pio.created[:4])
+    assert len(rp2pio.created) == 8
+    assert rp2pio.created[7] is _leader() and not _leader().deinitialized
     assert [sm.kwargs["first_out_pin"] for sm in _live_followers()] == ["DIN3", "DIN4", "DIN5"]
     assert _poll_until_done(bus)
 
@@ -312,7 +315,7 @@ def test_desync_recovery_rebuilds_the_leader_and_the_followers():
     """
     bus = _parallel()
     _start_group(bus)
-    rp2pio.created[2].polls_to_finish = 10**9  # follower 1: its DMA never ends
+    rp2pio.created[1].polls_to_finish = 10**9  # follower 1: its DMA never ends
 
     assert _poll_until_done(bus)
 
@@ -331,7 +334,7 @@ def test_desync_recovery_rebuilds_the_leader_and_the_followers():
 def test_desync_recovery_finds_a_follower_that_waits_for_a_clock_edge():
     bus = _parallel()
     _start_group(bus)
-    rp2pio.created[3].never_stalls = True  # its DMA is done, but it is not drained
+    rp2pio.created[2].never_stalls = True  # its DMA is done, but it is not drained
 
     assert _poll_until_done(bus)
 
@@ -390,24 +393,24 @@ def test_desync_recovery_resends_the_window_and_the_frame():
     pad, bus, pins_ = _real_pad()
     pad.step(0)  # the windows of keys 0 to 2, then their frames on the wire
     first = list(rp2pio.created)
-    # Three one-panel command machines, then the leader and three followers.
+    # Three one-panel command machines, then three followers and the leader.
     assert len(first) == 3 + 1 + 3
-    sent = [first[4 + key].writes[0] for key in range(3)]
-    first[5].polls_to_finish = 10**9  # the follower of key 1 loses sync
+    sent = [first[3 + key].writes[0] for key in range(3)]
+    first[4].polls_to_finish = 10**9  # the follower of key 1 loses sync
 
     pad.step(1000)
 
     assert pad.resyncs == 1
     assert all(sm.deinitialized for sm in first)
     after = rp2pio.created[len(first):]
-    # The window goes out again through one panel's DIN at a time, then a new
-    # leader and three new followers send the same three frames.
+    # The window goes out again through one panel's DIN at a time, then three
+    # new followers and a new leader send the same three frames.
     command_machines = after[:3]
     assert [sm.kwargs["first_out_pin"] for sm in command_machines] == DINS[:3]
     for sm in command_machines:
         assert _commands(sm)[0] == bytes((st7735.CASET,))
         assert _commands(sm)[-1] == bytes((st7735.RAMWR,))
-    leader, followers = after[3], after[4:7]
+    followers, leader = after[3:6], after[6]
     assert leader.kwargs["first_sideset_pin"] == "SCK"
     assert [sm.kwargs["first_out_pin"] for sm in followers] == DINS[:3]
     assert [sm.writes[0] for sm in followers] == sent

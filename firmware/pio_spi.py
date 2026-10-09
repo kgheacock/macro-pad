@@ -129,8 +129,8 @@ _FOLLOWER_PROGRAM = array.array("H", (0x2020, 0x6001, 0x20A0))
 # state machine that shares an input pin (`exclusive_pin_use=False`) on one PIO
 # block, and a block has four state machines. The leader owns SCK and takes one,
 # so three followers fit (measured on the board, 2026-10-08). `start_group`
-# rebuilds the followers when a group names other panels, which takes about
-# 2.7 ms. A push of six panels is two groups.
+# rebuilds the machines when a group names other panels, which takes about
+# 3 ms. A push of six panels is two groups.
 MAX_GROUP = 3
 
 # 10 MHz is the fastest SCK that held in spike 2 (2026-10-06): no desync in 300
@@ -291,22 +291,18 @@ class ParallelBus:
         self._single_key = key
 
     def _enter_parallel_mode(self, keys):
-        """Have the leader and exactly the followers of `keys`."""
-        if self._leader is None:
-            self._teardown()
-            self._leader = rp2pio.StateMachine(
-                _LEADER_PROGRAM,
-                frequency=_PARALLEL_CLOCK_HZ,
-                first_sideset_pin=self._sck,
-                auto_pull=True,
-                pull_threshold=8,
-                out_shift_right=False,
-            )
-        if set(self._followers) == set(keys):
+        """Have the leader and exactly the followers of `keys`.
+
+        The followers are built first and the leader last, and the leader
+        claims SCK non-exclusively (`exclusive_pin_use=False`), as the
+        followers do. Built the other way round, with the leader first and
+        owning SCK, the followers never see a clock edge: their DMA stays
+        busy and the push desyncs (measured on the board, 2026-10-08). So a
+        group of other panels rebuilds the leader too, about 3 ms in all.
+        """
+        if self._leader is not None and set(self._followers) == set(keys):
             return
-        self._free_followers()
-        # The leader first: it claims SCK as its side-set pin, and the
-        # followers only watch it (`exclusive_pin_use=False`).
+        self._teardown()
         try:
             for key in keys:
                 self._followers[key] = rp2pio.StateMachine(
@@ -319,8 +315,17 @@ class ParallelBus:
                     out_shift_right=False,
                     exclusive_pin_use=False,
                 )
+            self._leader = rp2pio.StateMachine(
+                _LEADER_PROGRAM,
+                frequency=_PARALLEL_CLOCK_HZ,
+                first_sideset_pin=self._sck,
+                auto_pull=True,
+                pull_threshold=8,
+                out_shift_right=False,
+                exclusive_pin_use=False,
+            )
         except BaseException:
-            self._free_followers()
+            self._teardown()
             raise
 
     def _free_followers(self):

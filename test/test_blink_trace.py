@@ -203,3 +203,14 @@ def test_sync_run_without_an_update_fails():
 
     assert blink_trace.report(blink_trace.load_trace(lines), "sync", out) is False
     assert "no update to key 4" in out.getvalue()
+
+
+def test_trace_codes_match_the_firmware_tracer():
+    # The tool reads records by code. A wrong code finds no record, and a
+    # figure built from it reads 0.0 ms and passes (found on 2026-10-10).
+    sys.path.insert(0, str(Path(__file__).parent.parent / "firmware"))
+    import tracer as tracer_module
+
+    assert blink_trace.HOST_MESSAGE_DECODED == tracer_module.HOST_MESSAGE_DECODED
+    assert blink_trace.PUSH_STARTED == tracer_module.PUSH_STARTED
+    assert blink_trace.REFRESH_DONE == tracer_module.REFRESH_DONE

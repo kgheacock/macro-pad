@@ -126,7 +126,7 @@ ticked.
   resend the frame. **Proof:** `python3 -m pytest test/test_pio_spi.py -k desync_recovery`
 - [ ] **DoD-5** — `firmware/pins.py` and `hardware/README.md` give each key's DIN on its old backlight pin and one
   shared backlight on GP7. **Proof:** `python3 -m pytest test/test_pins.py`, and the Pinout table of `hardware/README.md`
-- [x] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 35 ms or less,
+- [ ] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 35 ms or less,
   `max span` is 40 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
 - [ ] **DoD-7** — A person sees six blinking keys flash in time, and sees no noise on any panel at 10 MHz.
   **Proof:** the Notes of this spec
@@ -158,6 +158,7 @@ ticked.
 - `docs/0.85inch_ScreenKey_Module.pdf` shows the PWM pin on the enable pin of a PAM2804 with a 10 kΩ pull-up.
 - A timer-paced DMA chain (Approach B of task 0045) was dropped from this spec. It keeps a phase through a stall, but
   it still sends six frames in turn on one bus.
-- Board run, 2026-10-10, `make blink-trace SCENARIO=sync`, two runs of 42 slots: max skew 31.0 and 31.2 ms, max span 0.0 ms,
-  max gap 501.4 and 507.7 ms. The skew missed the first limit of 30 ms by about 1 ms in both runs, so the owner raised the
-  limit to 35 ms.
+- Board run, 2026-10-10, `make blink-trace SCENARIO=sync`, two runs of 42 slots: max skew 31.0 and 31.2 ms, max span 34.1
+  and 42.0 ms, max gap 501.4 and 507.7 ms. The skew missed the first limit of 30 ms by about 1 ms in both runs, so the
+  owner raised it to 35 ms. The second run missed the span limit of 40 ms. The tool first printed a span of 0.0 ms,
+  because it read `REFRESH_DONE` as code 10, not 8; the figures here come from the same traces with the code fixed.

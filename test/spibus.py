@@ -15,7 +15,8 @@ and `FakeBus.frame_count(key)` read back what each panel was sent.
 `FakeParallelBus` has the shape of `pio_spi.ParallelBus`: `start_group` begins
 the frames of several panels at once, and `done` and `desynced` say how the
 group ended. It checks that the panels whose CS line is low are exactly the
-panels of the group. `FakeBus.groups` lists the keys of each group started.
+panels of the group. `prepare_group` must come while every CS line is high, and `FakeParallelBus.prepared`
+lists the keys it was given. `FakeBus.groups` lists the keys of each group started.
 With `fail_groups = n`, the next `n` groups desync: `done` ends them with
 `desynced` true and the panels get no frame.
 
@@ -131,10 +132,17 @@ class FakeParallelBus:
         self.auto_finish = auto_finish
         self.fail_groups = 0
         self.desynced = False
+        self.prepared = []  # the keys of each group `prepare_group` built
         self._group = None  # [(key, data, frame)] of the group on the wire
 
     def panel_bus(self, key):
         return _FakePanelBus(self, key)
+
+    def prepare_group(self, keys):
+        assert self._group is None, "a group is already on the wire"
+        low = [i for i, cs in enumerate(self._bus.cs) if cs.value is False]
+        assert low == [], "the machines are built with CS low on {}".format(low)
+        self.prepared.append(list(keys))
 
     def start_group(self, items):
         assert self._group is None, "a group is already on the wire"

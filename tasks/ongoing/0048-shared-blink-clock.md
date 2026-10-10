@@ -7,7 +7,7 @@ updated: "2026-10-08"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/48"
 branch: "0048-shared-blink-clock"
 related: ["0006", "0044", "0045", "0047", "0049"]
 tags: ["firmware", "blink", "pio", "dma", "hardware"]
@@ -132,7 +132,7 @@ ticked.
   **Proof:** the Notes of this spec
 - [ ] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 10 MHz rate,
   and the measured figures. **Proof:** `firmware/README.md`, section "Latency"
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** the PR body
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 
 ## Risks
 

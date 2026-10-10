@@ -130,7 +130,7 @@ ticked.
   `max span` is 40 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
 - [ ] **DoD-7** — A person sees six blinking keys flash in time, and sees no noise on any panel at 10 MHz.
   **Proof:** the Notes of this spec
-- [ ] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 10 MHz rate,
+- [x] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 12.5 MHz rate,
   and the measured figures. **Proof:** `firmware/README.md`, section "Latency"
 - [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 

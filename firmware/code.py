@@ -55,6 +55,10 @@ DISPLAY_ROWSTART = 3
 # driver can use them.
 displayio.release_displays()
 
+# A reload leaves the last run's state machines enabled, and a stale leader
+# holds SCK low. Nothing of this run exists yet, so stop them all first.
+pio_spi.stop_stale_state_machines()
+
 bus = pio_spi.ParallelBus(
     sck=getattr(board, pins.SPI_SCK),
     dins=[getattr(board, key.din_pin) for key in pins.KEYS],
@@ -102,4 +106,8 @@ macro_pad = MacroPad(
     push_bus=bus,
 )
 
+# No `try/finally` that frees the bus here: a reload that freed the machines
+# while their DMA was running left a DMA channel stuck, and the next run hung on
+# its first panel command (2026-10-09). `stop_stale_state_machines` above is the
+# cleanup.
 macro_pad.run()

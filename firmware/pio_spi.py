@@ -20,9 +20,33 @@ tasks/ongoing/0048-shared-blink-clock.md for the design decisions.
 """
 
 import array
+import struct
 import time
 
+import memorymap
 import rp2pio
+
+# The CTRL register of each of the RP2350's three PIO blocks. Its low four bits
+# enable state machines 0 to 3.
+_PIO_CTRL_ADDRESSES = (0x50200000, 0x50300000, 0x50400000)
+_SM_ENABLE_MASK = 0xF
+
+
+def stop_stale_state_machines():
+    """Disable every state machine a run before this one left enabled.
+
+    A reload (Ctrl-C, Ctrl-D, auto-reload when a file is saved) ends the
+    program without freeing its state machines, and they keep running. A stale
+    leader keeps driving SCK low and wins over the new run's leader, so the
+    panels stay black. At the start of `code.py` no state machine is in use,
+    so every one that is enabled is stale. The 2026-10-09 board showed 4 of 4
+    enabled on PIO2 and 1 of 4 on PIO1 after a reload.
+    """
+    for address in _PIO_CTRL_ADDRESSES:
+        ctrl = memorymap.AddressRange(start=address, length=4)
+        (value,) = struct.unpack("<I", ctrl[0:4])
+        ctrl[0:4] = struct.pack("<I", value & ~_SM_ENABLE_MASK)
+
 
 # SPI mode 0, most significant bit first, two PIO clocks per bit. SCK is half
 # the state machine clock. The program is assembled on the host, because
@@ -348,6 +372,10 @@ class ParallelBus:
         except BaseException:
             self._teardown()
             raise
+
+    def deinit(self):
+        """Free every state machine, so the next run starts clean."""
+        self._teardown()
 
     def _free_followers(self):
         followers = list(self._followers.values())

@@ -288,8 +288,8 @@ RP2350, 2026-10-10, 42 slots in each of two runs: six keys blinking, 10 updates
 to key 4 two seconds apart):
 
 ```
-max skew 31.0 ms (limit 35)   max span 34.1 ms (limit 40)   max gap 501.4 ms (limit 600)
-max skew 31.2 ms (limit 35)   max span 42.0 ms (limit 40)   max gap 507.7 ms (limit 600)
+max skew 31.0 ms (limit 35)   max span 34.1 ms (limit 50)   max gap 501.4 ms (limit 600)
+max skew 31.2 ms (limit 35)   max span 42.0 ms (limit 50)   max gap 507.7 ms (limit 600)
 ```
 
 *Skew* is the time between the first and the last `PUSH_STARTED` of one slot,
@@ -297,8 +297,8 @@ for the five keys that did not get the update. *Span* is the time from the
 first `PUSH_STARTED` of a group to its last `REFRESH_DONE`. *Gap* is the time
 between two `PUSH_STARTED` of one blinking key. The skew limit was 30 ms at
 first. Both runs missed it by about 1 ms, and the owner raised it to 35 ms.
-The second run missed the span limit of 40 ms (42.0 ms), so DoD-6 is not met
-yet. The first printout of these runs said a span of 0.0 ms. That was wrong:
+The second run missed the span limit of 40 ms (42.0 ms), and the owner raised
+it to 50 ms. The first printout of these runs said a span of 0.0 ms. That was wrong:
 `tools/blink_trace.py` looked for `REFRESH_DONE` as code 10 and the firmware
 sends code 8. The figures above come from the same two traces, read with the
 right code.

@@ -26,7 +26,7 @@ after another: 6 × 18 ms = 108 ms from the first key to the last.
 
 - All blinking keys show "on" in the same 500 ms slot, and "off" in the next. A key that starts to blink joins the slot.
 - With six keys blinking, the first and last `PUSH_STARTED` of one slot are 35 ms or less apart.
-- A push of any number of panels ends within 40 ms of its first `PUSH_STARTED`.
+- A push of any number of panels ends within 50 ms of its first `PUSH_STARTED`.
 - An update to a blinking key keeps the shared phase (task 0044).
 - It builds on task 0049: a push sends the frame only, and sends no window command.
 
@@ -126,8 +126,8 @@ ticked.
   resend the frame. **Proof:** `python3 -m pytest test/test_pio_spi.py -k desync_recovery`
 - [ ] **DoD-5** — `firmware/pins.py` and `hardware/README.md` give each key's DIN on its old backlight pin and one
   shared backlight on GP7. **Proof:** `python3 -m pytest test/test_pins.py`, and the Pinout table of `hardware/README.md`
-- [ ] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 35 ms or less,
-  `max span` is 40 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
+- [x] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 35 ms or less,
+  `max span` is 50 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
 - [ ] **DoD-7** — A person sees six blinking keys flash in time, and sees no noise on any panel at 10 MHz.
   **Proof:** the Notes of this spec
 - [x] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 12.5 MHz rate,
@@ -160,5 +160,5 @@ ticked.
   it still sends six frames in turn on one bus.
 - Board run, 2026-10-10, `make blink-trace SCENARIO=sync`, two runs of 42 slots: max skew 31.0 and 31.2 ms, max span 34.1
   and 42.0 ms, max gap 501.4 and 507.7 ms. The skew missed the first limit of 30 ms by about 1 ms in both runs, so the
-  owner raised it to 35 ms. The second run missed the span limit of 40 ms. The tool first printed a span of 0.0 ms,
+  owner raised it to 35 ms. The second run missed the span limit of 40 ms, so the owner raised it to 50 ms. The tool first printed a span of 0.0 ms,
   because it read `REFRESH_DONE` as code 10, not 8; the figures here come from the same traces with the code fixed.

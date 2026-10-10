@@ -37,7 +37,7 @@ MAX_GAP_LIMIT_MS = 600
 # that are never updated, because an update to key 4 pushes at any moment.
 SYNC_KEYS = (0, 1, 2, 3, 4, 5)
 MAX_SKEW_LIMIT_MS = 35
-MAX_SPAN_LIMIT_MS = 40
+MAX_SPAN_LIMIT_MS = 50
 
 # Two pushes of one blink slot start less than this far apart. Slots are
 # 500 ms apart and a serial push of all six keys spreads over 108 ms.

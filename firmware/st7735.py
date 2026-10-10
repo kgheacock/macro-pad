@@ -107,7 +107,8 @@ class Panel:
 
     `_needs_window` is true when the panel may not be in write mode with its
     window set: before the first `setup_window`, and after a push that
-    raised. The next `start_push` then sends the window first.
+    raised or did not finish (`abort_push`). The next push then sends the
+    window first.
     """
 
     def __init__(
@@ -197,6 +198,30 @@ class Panel:
             self._end()
         self._needs_window = False
 
+    def prepare_push(self):
+        """Send the window first when the panel may not be in write mode.
+
+        A group of pushes calls this on every panel before `begin_push` on any
+        of them, because a command goes out with only its own panel's CS low.
+        """
+        if self._needs_window:
+            self.setup_window()
+
+    def begin_push(self, frame):
+        """Set DC high and lower this panel's CS, for `frame` on the wire.
+
+        This starts no DMA: `start_push` does that for one panel, and
+        `pio_spi.ParallelBus.start_group` for several. The panel is `busy`
+        until `poll` sees the frame sent, or `abort_push` is called. The
+        caller must not change `frame` before then.
+        """
+        if self.busy:
+            raise RuntimeError("a push is already on the wire")
+        self._dc.value = True
+        self._begin()
+        self._frame = frame
+        self.busy = True
+
     def start_push(self, frame):
         """Start sending one full frame to the panel, and return.
 
@@ -210,21 +235,24 @@ class Panel:
         if self.busy:
             raise RuntimeError("a push is already on the wire")
 
-        if self._needs_window:
-            self.setup_window()
-        self._needs_window = True
-
-        self._dc.value = True
-        self._begin()
+        self.prepare_push()
+        self.begin_push(frame)
         try:
-            self._frame = frame
             self._bus.start(frame)
         except BaseException:
-            self._frame = None
-            self._end()
+            self.abort_push()
             raise
-        self._needs_window = False
-        self.busy = True
+
+    def abort_push(self):
+        """Release CS and drop the frame of a push that did not finish.
+
+        The panel may have taken part of the frame, so the next push sends the
+        window first.
+        """
+        self._end()
+        self._frame = None
+        self.busy = False
+        self._needs_window = True
 
     def poll(self):
         """Release CS once the frame is on the wire. Return True when the

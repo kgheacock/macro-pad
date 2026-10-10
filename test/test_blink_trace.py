@@ -120,3 +120,97 @@ def test_traced_code_adds_a_tracer_to_the_real_code_py():
 def test_traced_code_refuses_a_code_py_it_does_not_recognise():
     with pytest.raises(ValueError):
         blink_trace.traced_code("print('hello')\n")
+
+
+def _event(code, key, device_us):
+    return _trace_line(code, key, device_us)
+
+
+def _sync_run(starts_us, push_ms=26):
+    """A `sync` run: the setup decodes all six keys, key 4 is updated at 1.25 s,
+    then six blink slots. `starts_us` is how far after the slot each key's
+    push starts. Each push ends `push_ms` after its own start.
+    """
+    lines = [_decoded(key, 0, 1000 * key) for key in range(6)]
+    lines.append(_decoded(4, 0, 1_250_000))  # the first update, between two slots
+    lines.append(_event(blink_trace.PUSH_STARTED, 4, 1_251_000))
+    lines.append(_event(blink_trace.REFRESH_DONE, 4, 1_251_000 + push_ms * 1000))
+    for slot in range(2, 8):
+        for key, offset in zip(range(6), starts_us):
+            start = slot * 500_000 + 2000 + offset
+            lines.append(_event(blink_trace.PUSH_STARTED, key, start))
+            lines.append(_event(blink_trace.REFRESH_DONE, key, start + push_ms * 1000))
+    return lines
+
+
+def test_sync_run_with_parallel_pushes_passes():
+    records = blink_trace.load_trace(_sync_run([0, 100, 200, 300, 400, 500]))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "sync", out) is True
+    text = out.getvalue()
+    assert "slots 5" in text
+    assert "max skew 0.5 ms (limit 35)" in text
+    assert "max span 26.5 ms (limit 50)" in text
+    assert "max gap 500.0 ms (limit 600)" in text
+
+
+def test_sync_run_with_pushes_in_turn_fails_on_skew():
+    # Six pushes of 18 ms, one after the other: 90 ms from the first start to
+    # the last, 108 ms to the last end.
+    records = blink_trace.load_trace(_sync_run([0, 18_000, 36_000, 54_000, 72_000, 90_000], 18))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "sync", out) is False
+    assert "max skew 90.0 ms (limit 35)" in out.getvalue()
+
+
+def test_sync_skew_ignores_the_updated_key():
+    # Key 4 starts 40 ms after the others in every slot, like an update does.
+    records = blink_trace.load_trace(_sync_run([0, 0, 0, 0, 40_000, 0]))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "sync", out) is True
+    assert "max skew 0.0 ms" in out.getvalue()
+
+
+def test_sync_run_with_a_slow_push_fails_on_span():
+    records = blink_trace.load_trace(_sync_run([0, 0, 0, 0, 0, 0], push_ms=55))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "sync", out) is False
+    assert "max span 55.0 ms (limit 50)" in out.getvalue()
+
+
+def test_sync_run_with_a_missed_blink_fails_on_gap():
+    lines = [line for line in _sync_run([0] * 6)]
+    # Drop key 0's pushes of slot 4 and its done record.
+    drop = 4 * 500_000 + 2000
+    lines = [
+        line
+        for line in lines
+        if not (json.loads(line).get("key_index") == 0 and json.loads(line).get("device_us", 0) in (drop, drop + 26_000))
+    ]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(lines), "sync", out) is False
+    assert "max gap 1000.0 ms (limit 600)" in out.getvalue()
+
+
+def test_sync_run_without_an_update_fails():
+    lines = [_decoded(key, 0, 1000 * key) for key in range(6)]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(lines), "sync", out) is False
+    assert "no update to key 4" in out.getvalue()
+
+
+def test_trace_codes_match_the_firmware_tracer():
+    # The tool reads records by code. A wrong code finds no record, and a
+    # figure built from it reads 0.0 ms and passes (found on 2026-10-10).
+    sys.path.insert(0, str(Path(__file__).parent.parent / "firmware"))
+    import tracer as tracer_module
+
+    assert blink_trace.HOST_MESSAGE_DECODED == tracer_module.HOST_MESSAGE_DECODED
+    assert blink_trace.PUSH_STARTED == tracer_module.PUSH_STARTED
+    assert blink_trace.REFRESH_DONE == tracer_module.REFRESH_DONE

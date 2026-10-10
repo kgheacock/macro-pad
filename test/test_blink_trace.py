@@ -151,7 +151,7 @@ def test_sync_run_with_parallel_pushes_passes():
     text = out.getvalue()
     assert "slots 5" in text
     assert "max skew 0.5 ms (limit 35)" in text
-    assert "max span 26.5 ms (limit 40)" in text
+    assert "max span 26.5 ms (limit 50)" in text
     assert "max gap 500.0 ms (limit 600)" in text
 
 
@@ -175,11 +175,11 @@ def test_sync_skew_ignores_the_updated_key():
 
 
 def test_sync_run_with_a_slow_push_fails_on_span():
-    records = blink_trace.load_trace(_sync_run([0, 0, 0, 0, 0, 0], push_ms=45))
+    records = blink_trace.load_trace(_sync_run([0, 0, 0, 0, 0, 0], push_ms=55))
     out = io.StringIO()
 
     assert blink_trace.report(records, "sync", out) is False
-    assert "max span 45.0 ms (limit 40)" in out.getvalue()
+    assert "max span 55.0 ms (limit 50)" in out.getvalue()
 
 
 def test_sync_run_with_a_missed_blink_fails_on_gap():

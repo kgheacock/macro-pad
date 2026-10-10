@@ -270,6 +270,22 @@ class ParallelBus:
         self._enter_command_mode(key)
         self._single.write(data)
 
+    def prepare_group(self, keys):
+        """Build the state machines for a group of `keys`, so `start_group`
+        finds them ready.
+
+        The caller does this before it lowers any CS. Building the machines
+        sets up the SCK pin again, which can put an edge on SCK. A panel with
+        its CS low reads that edge as a clock, so its frame arrives one bit
+        late: every pixel takes the low bit of the pixel before it as its top
+        bit.
+        """
+        if self._group:
+            raise RuntimeError("a group is already on the wire")
+        if len(keys) > MAX_GROUP:
+            raise ValueError("a group has at most {} panels".format(MAX_GROUP))
+        self._enter_parallel_mode(list(keys))
+
     def start_group(self, items):
         """Start sending a frame to each panel in `items`, a sequence of
         `(key, frame)` with at most `max_group` panels, and return at once.

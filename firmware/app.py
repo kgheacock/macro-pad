@@ -261,6 +261,10 @@ class MacroPad:
             # reaches the panel whose CS is low, over that panel's DIN alone.
             for key_index in keys:
                 self._panels[key_index].prepare_push()
+            # The machines are built while every CS is high, because building
+            # them can put an edge on SCK that a selected panel would read as
+            # a clock.
+            self._push_bus.prepare_group(keys)
             for key_index, frame in zip(keys, frames):
                 self._panels[key_index].begin_push(frame)
             try:

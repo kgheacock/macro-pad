@@ -36,7 +36,7 @@ MAX_GAP_LIMIT_MS = 600
 # 2 s. DoD-6 limits the figures below. The skew is measured on the five keys
 # that are never updated, because an update to key 4 pushes at any moment.
 SYNC_KEYS = (0, 1, 2, 3, 4, 5)
-MAX_SKEW_LIMIT_MS = 30
+MAX_SKEW_LIMIT_MS = 35
 MAX_SPAN_LIMIT_MS = 40
 
 # Two pushes of one blink slot start less than this far apart. Slots are

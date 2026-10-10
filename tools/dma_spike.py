@@ -90,7 +90,14 @@ def spike_code(code):
         raise ValueError(
             "firmware/code.py has no single {!r} to replace".format(_RUN_CALL)
         )
-    return code.replace(_RUN_CALL, _MEASUREMENT.strip("\n"))
+    # `run()` sits inside a `try`, so the measurement takes the call's indent.
+    line_start = code.rfind("\n", 0, code.index(_RUN_CALL)) + 1
+    indent = code[line_start : code.index(_RUN_CALL)]
+    measurement = "\n".join(
+        indent + line if line and number else line
+        for number, line in enumerate(_MEASUREMENT.strip("\n").split("\n"))
+    )
+    return code.replace(_RUN_CALL, measurement)
 
 
 def parse_figures(text):

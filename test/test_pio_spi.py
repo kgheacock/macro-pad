@@ -1,3 +1,4 @@
+import memorymap
 import pytest
 import rp2pio
 
@@ -105,6 +106,7 @@ DINS = ["DIN0", "DIN1", "DIN2", "DIN3", "DIN4", "DIN5"]
 
 def setup_function():
     rp2pio.reset()
+    memorymap.reset()
 
 
 def _parallel():
@@ -467,3 +469,63 @@ def test_desync_recovery_resends_the_window_and_the_frame(monkeypatch):
     assert [sm.kwargs["first_out_pin"] for sm in followers] == DINS[:3]
     assert [sm.writes[0] for sm in followers] == sent
     assert [cs.value for cs in pins_.cs[:3]] == [True] * 3  # the resent group has ended
+
+
+# --- Stale state machines (2026-10-09) ---
+
+PIO_CTRL = (0x50200000, 0x50300000, 0x50400000)
+
+
+def test_stop_stale_state_machines_clears_the_enable_bits_of_all_three_pio_blocks():
+    for address in PIO_CTRL:
+        memorymap.registers[address] = 0b1111
+
+    pio_spi.stop_stale_state_machines()
+
+    assert [memorymap.registers[address] for address in PIO_CTRL] == [0, 0, 0]
+
+
+def test_stop_stale_state_machines_keeps_the_other_ctrl_bits():
+    memorymap.registers[PIO_CTRL[1]] = 0xF0F  # SM_ENABLE 0b1111, plus bits 8 to 11
+    memorymap.registers[PIO_CTRL[2]] = 0b1001
+
+    pio_spi.stop_stale_state_machines()
+
+    assert memorymap.registers[PIO_CTRL[1]] == 0xF00
+    assert memorymap.registers[PIO_CTRL[2]] == 0
+
+
+def test_stop_stale_state_machines_writes_only_the_three_ctrl_registers():
+    pio_spi.stop_stale_state_machines()
+
+    assert sorted(address for address, _ in memorymap.writes) == sorted(PIO_CTRL)
+
+
+def test_deinit_frees_the_leader_and_the_followers():
+    bus = _parallel()
+    _start_group(bus)
+    assert _poll_until_done(bus)
+
+    bus.deinit()
+
+    assert len(rp2pio.created) == 4
+    assert all(sm.deinitialized for sm in rp2pio.created)
+
+
+def test_deinit_frees_the_command_machine():
+    bus = _parallel()
+    bus.write(2, b"\x2c")
+
+    bus.deinit()
+
+    assert rp2pio.created[0].deinitialized
+
+
+def test_deinit_twice_is_safe():
+    bus = _parallel()
+    _start_group(bus)
+
+    bus.deinit()
+    bus.deinit()
+
+    assert all(sm.deinitialized for sm in rp2pio.created)

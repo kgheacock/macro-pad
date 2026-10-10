@@ -5,9 +5,12 @@ from collections import namedtuple
 # collections.namedtuple, not typing.NamedTuple's class syntax: this
 # board's CircuitPython build ships no `typing` module.
 #
-# `din_pin` is the key's own MOSI line (task 0048). Keys 1 to 5 sit on the pin
-# that used to carry the key's backlight PWM. Key 0 is on GP12 instead: GP0's
-# breadboard row never carried a signal to its module on the first rewire.
+# `din_pin` is the key's own MOSI line (task 0048). Keys 0 to 3 and 5 sit on the
+# pin that used to carry the key's backlight PWM. Key 4 is on GP12 instead:
+# GP0's breadboard row never carried a signal to its module on the first rewire.
+#
+# The keys are numbered in the order they were installed, which is not the order
+# of the wiring: the table was renumbered once, after task 0048.
 KeyPins = namedtuple("KeyPins", ["switch_pin", "display_cs_pin", "din_pin"])
 
 
@@ -27,10 +30,10 @@ MIC_DATA = "GP21"
 # implement `__class_getitem__` on builtins, so subscripting `list` here
 # raises `TypeError` at import time, before any hardware object is built.
 KEYS = [
+    KeyPins(switch_pin="GP17", display_cs_pin="GP8", din_pin="GP27"),
+    KeyPins(switch_pin="GP15", display_cs_pin="GP6", din_pin="GP22"),
+    KeyPins(switch_pin="GP18", display_cs_pin="GP9", din_pin="GP28"),
+    KeyPins(switch_pin="GP16", display_cs_pin="GP3", din_pin="GP26"),
     KeyPins(switch_pin="GP13", display_cs_pin="GP4", din_pin="GP12"),
     KeyPins(switch_pin="GP14", display_cs_pin="GP5", din_pin="GP1"),
-    KeyPins(switch_pin="GP15", display_cs_pin="GP6", din_pin="GP22"),
-    KeyPins(switch_pin="GP16", display_cs_pin="GP3", din_pin="GP26"),
-    KeyPins(switch_pin="GP17", display_cs_pin="GP8", din_pin="GP27"),
-    KeyPins(switch_pin="GP18", display_cs_pin="GP9", din_pin="GP28"),
 ]

@@ -49,21 +49,22 @@ pin connections in one diagram.
 
 | Function | Pin(s) |
 |---|---|
-| Shared SPI (hardware SPI0): SCK / MOSI | GP2 / GP7 |
+| Shared SCK (clock for all 6 panels) | GP2 |
+| 6× DIN (per-key MOSI, driven by PIO) | GP12, GP1, GP22, GP26, GP27, GP28 (keys 0 to 5) |
 | 6× CS (plain GPIO, software-toggled) | GP3, GP4, GP5, GP6, GP8, GP9 |
 | Shared DC | GP10 |
 | Shared RST | GP11 |
 | 6× KEY inputs | GP13–GP18 |
 | I2S mic: BCLK / WS / DATA | GP19 / GP20 / GP21 |
-| 6× BL (per-key backlight PWM) | GP0, GP1, GP22, GP26, GP27, GP28 |
+| Shared BL (the six backlight inputs joined on one PWM pin) | GP7 |
 
-**MOSI is on GP7, not GP3.** GP3 is SPI0's other hardware TX-capable
-pin, but on the breadboard it sits directly across from the 3V3 row
-(VCC/BULK squares) and would have added a 6-wire DIN fan-out to an
-already crowded row. GP7 is also SPI0 TX, so it swapped places with
-4CS, which is a single wire and doesn't mind sitting across from that
-row. SCK stays on GP2 &mdash; its own opposite row (RESET) has nothing
-else wired to it.
+**Each key has its own DIN line (task 0048).** The six panels share SCK, DC and
+RST, and each panel's DIN is its own PIO output, so up to three frames go out
+at once. Keys 1 to 5 use the pin that carried the key's backlight PWM before.
+Key 0's DIN is on GP12, not GP0: GP0's breadboard row never carried a signal
+to its module on the first rewire, so GP0 is unused. The six backlight inputs
+now join on one pin, GP7, which was the shared MOSI before. A backlight is on
+or off for all six keys together. CS stays a plain GPIO for each key.
 
 **Decoupling:** one 10µF aluminum electrolytic cap across the 3V3/GND
 rail rows, right where the Pico's 3V3 and GND wires land on the

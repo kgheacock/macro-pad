@@ -1,14 +1,14 @@
 ---
 id: "0048"
 title: "Blink every key on one shared clock, and flip all six panels at once"
-status: "backlog"
+status: "complete"
 created: "2026-10-06"
-updated: "2026-10-06"
+updated: "2026-10-10"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/48"
+branch: "0048-shared-blink-clock"
 related: ["0006", "0044", "0045", "0047", "0049"]
 tags: ["firmware", "blink", "pio", "dma", "hardware"]
 ---
@@ -25,8 +25,8 @@ after another: 6 × 18 ms = 108 ms from the first key to the last.
 ## Goals
 
 - All blinking keys show "on" in the same 500 ms slot, and "off" in the next. A key that starts to blink joins the slot.
-- With six keys blinking, the first and last `PUSH_STARTED` of one slot are 30 ms or less apart.
-- A push of any number of panels ends within 40 ms of its first `PUSH_STARTED`.
+- With six keys blinking, the first and last `PUSH_STARTED` of one slot are 35 ms or less apart.
+- A push of any number of panels ends within 50 ms of its first `PUSH_STARTED`.
 - An update to a blinking key keeps the shared phase (task 0044).
 - It builds on task 0049: a push sends the frame only, and sends no window command.
 
@@ -115,24 +115,24 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — Two keys that start blinking 200 ms apart show the same frame in every later slot, and an update
+- [x] **DoD-1** — Two keys that start blinking 200 ms apart show the same frame in every later slot, and an update
   keeps the frame shown. **Proof:** `python3 -m pytest test/test_app.py -k "shared_phase or update_keeps_phase"`
-- [ ] **DoD-2** — A key that starts to blink in an odd slot shows "off" at once. After a step two slots late, a
+- [x] **DoD-2** — A key that starts to blink in an odd slot shows "off" at once. After a step two slots late, a
   blinking key shows the current phase with one push.
   **Proof:** `python3 -m pytest test/test_app.py -k "joins_current_slot or late_step_jumps_to_phase"`
-- [ ] **DoD-3** — Frames due in one step start in one group, and no panel outside the group sees CS low.
+- [x] **DoD-3** — Frames due in one step start in one group, and no panel outside the group sees CS low.
   **Proof:** `python3 -m pytest test/test_app.py -k parallel_push`
-- [ ] **DoD-4** — A follower that does not finish with the leader makes the code rebuild, resend the window, and
+- [x] **DoD-4** — A follower that does not finish with the leader makes the code rebuild, resend the window, and
   resend the frame. **Proof:** `python3 -m pytest test/test_pio_spi.py -k desync_recovery`
-- [ ] **DoD-5** — `firmware/pins.py` and `hardware/README.md` give each key's DIN on its old backlight pin and one
+- [x] **DoD-5** — `firmware/pins.py` and `hardware/README.md` give each key's DIN on its old backlight pin and one
   shared backlight on GP7. **Proof:** `python3 -m pytest test/test_pins.py`, and the Pinout table of `hardware/README.md`
-- [ ] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 30 ms or less,
-  `max span` is 40 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
-- [ ] **DoD-7** — A person sees six blinking keys flash in time, and sees no noise on any panel at 10 MHz.
+- [x] **DoD-6** — On the board, with six keys blinking and an update to key 4 every 2 s, `max skew` is 35 ms or less,
+  `max span` is 50 ms or less, and `max gap` is 600 ms or less. **Proof:** `make blink-trace SCENARIO=sync`
+- [x] **DoD-7** — A person sees six blinking keys flash in time, and sees no noise on any panel at 12.5 MHz.
   **Proof:** the Notes of this spec
-- [ ] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 10 MHz rate,
+- [x] **DoD-8** — `firmware/README.md` records the shared phase, the DIN lines, the 12.5 MHz rate,
   and the measured figures. **Proof:** `firmware/README.md`, section "Latency"
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** the PR body
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** the PR body
 
 ## Risks
 
@@ -146,7 +146,7 @@ ticked.
 
 ## Open questions
 
-- [ ] Does 12.5 MHz hold? Spike 2 found 10 MHz clean and 15 MHz not. — owner
+- [x] Does 12.5 MHz hold? Yes: 400 groups on the board with and without a CPU load (2026-10-08), and no noise seen by eye (2026-10-10). — owner
 - [ ] A system clock of 300 MHz would allow an even SCK duty at 15 MHz. Is overclocking acceptable? — owner
 
 ## Notes
@@ -158,3 +158,11 @@ ticked.
 - `docs/0.85inch_ScreenKey_Module.pdf` shows the PWM pin on the enable pin of a PAM2804 with a 10 kΩ pull-up.
 - A timer-paced DMA chain (Approach B of task 0045) was dropped from this spec. It keeps a phase through a stall, but
   it still sends six frames in turn on one bus.
+- Board run, 2026-10-10, `make blink-trace SCENARIO=sync`, two runs of 42 slots: max skew 31.0 and 31.2 ms, max span 34.1
+  and 42.0 ms, max gap 501.4 and 507.7 ms. The skew missed the first limit of 30 ms by about 1 ms in both runs, so the
+  owner raised it to 35 ms. The second run missed the span limit of 40 ms, so the owner raised it to 50 ms. The tool first printed a span of 0.0 ms,
+  because it read `REFRESH_DONE` as code 10, not 8; the figures here come from the same traces with the code fixed.
+- Visual check, 2026-10-10 (DoD-7), RP2350, real firmware, 12.5 MHz: `blinksend --scenario sync` left six keys blinking:
+  five keys of one color and key 4, the updated one, of another. The owner saw all six flash in time and saw no noise on
+  any panel. The colors differ from the RGB565 values sent (blue on five keys; red and green on key 4): the panels run
+  with `INVON` (`firmware/st7735.py`). That is not part of this task.

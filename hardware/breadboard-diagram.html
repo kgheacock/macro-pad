@@ -102,6 +102,18 @@
   .sig-pwm  { background: #111111; color: #fff; } /* black */
   .sig-rst  { background: #e5484d; color: #fff; } /* red */
   .sig-bulk { background: #0d9488; color: #fff; }
+
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .25rem; }
+  table.rewire { border-collapse: collapse; margin-top: .75rem; font-size: .9rem; }
+  table.rewire th, table.rewire td {
+    border: 1px solid rgba(128, 128, 128, .5);
+    padding: .3rem .7rem;
+    text-align: left;
+  }
+  table.rewire td.mono, table.rewire th.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .8rem;
+  }
 </style>
 </head>
 <body>
@@ -109,9 +121,7 @@
 <p class="subtitle">
   All 6 GPIO pin connections for the Waveshare 0.85&quot; ScreenKey
   <em>Module</em> variant (9-pin SPI Control Interface) wired to the
-  Pimoroni Pico Plus 2. Labels match
-  <code>firmware/pins.py</code> and the Pinout table in
-  <code>hardware/README.md</code>; colors match the wire harness in use
+  Pimoroni Pico Plus 2. Colors match the wire harness in use
   (see the legend). Each Pico pin carries a breadboard coordinate:
   rows run C to V (20 rows, one per pin on each Pico edge, top to
   bottom) and columns run 1 to 8 left to right, so the left edge of the
@@ -119,11 +129,17 @@
   C1, VBUS is C8, GP15 is V1). Pin rows run top to bottom in the same
   physical order as the two 20-pin edges on the Pico Plus 2's silkscreen
   (<code>docs/ppico_plus_2_pinout_diagram.pdf</code>) &mdash; GND and 3V3
-  are wired from the top-right power pins. CLK (GP2) and DIN (GP7) sit on
-  non-adjacent rows: both are still hardware SPI0 pins (SCK and TX), but
-  GP3 &mdash; SPI0's other TX-capable pin &mdash; sat directly across
-  from the crowded VCC/BULK row, so DIN moved to GP7 and swapped places
-  with 4CS, which is a single wire and doesn't mind the crowding. BULK
+  are wired from the top-right power pins. <strong>This is the layout for
+  task 0048 (parallel panel push).</strong> Each key has its own DIN line,
+  on the pin that used to carry that key's backlight PWM: GP0, GP1, GP22,
+  GP26, GP27, GP28 for keys 1 to 6. A PIO state machine drives each DIN
+  line, and one more drives the shared CLK on GP2. The six backlight
+  inputs now join on GP7, which becomes one shared PWM output. (The
+  module's PWM pin drives a boost-converter enable through a 10&nbsp;k&ohm;
+  pull-up, so six inputs on one pin load GP7 by about 2&nbsp;mA.) CLK, CS,
+  DC, RST, KEY, GND, VCC and the mic do not move. <code>firmware/pins.py</code>
+  and the Pinout table follow this layout when task 0048 step 2 lands; until
+  then they still show the old one. BULK
   marks the single 10&micro;F aluminum electrolytic cap at the point
   where 3V3/GND first land on the breadboard, bridging the rail before
   it fans out to all 6 modules &mdash; it is not a GPIO connection. Each
@@ -149,7 +165,7 @@
 <div class="board">
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-pwm">1PWM</span></span>
+    <span class="squares"><span class="square sig-din">1DIN</span></span>
     <span class="pin-name wired">GP0</span><span class="coord">C1</span>
   </div>
   <div class="spine-cell">USB-C</div>
@@ -159,7 +175,7 @@
   </div>
 
   <div class="pin-cell side-left">
-    <span class="squares"><span class="square sig-pwm">2PWM</span></span>
+    <span class="squares"><span class="square sig-din">2DIN</span></span>
     <span class="pin-name wired">GP1</span><span class="coord">D1</span>
   </div>
   <div class="spine-cell"></div>
@@ -239,7 +255,7 @@
   <div class="pin-cell side-right">
     <span class="coord">I8</span>
     <span class="pin-name wired">GP28</span>
-    <span class="squares"><span class="square sig-pwm">6PWM</span></span>
+    <span class="squares"><span class="square sig-din">6DIN</span></span>
   </div>
 
   <div class="pin-cell side-left">
@@ -259,17 +275,17 @@
   <div class="pin-cell side-right">
     <span class="coord">K8</span>
     <span class="pin-name wired">GP27</span>
-    <span class="squares"><span class="square sig-pwm">5PWM</span></span>
+    <span class="squares"><span class="square sig-din">5DIN</span></span>
   </div>
 
   <div class="pin-cell side-left">
     <span class="squares">
-      <span class="square sig-din">1DIN</span>
-      <span class="square sig-din">2DIN</span>
-      <span class="square sig-din">3DIN</span>
-      <span class="square sig-din">4DIN</span>
-      <span class="square sig-din">5DIN</span>
-      <span class="square sig-din">6DIN</span>
+      <span class="square sig-pwm">1PWM</span>
+      <span class="square sig-pwm">2PWM</span>
+      <span class="square sig-pwm">3PWM</span>
+      <span class="square sig-pwm">4PWM</span>
+      <span class="square sig-pwm">5PWM</span>
+      <span class="square sig-pwm">6PWM</span>
     </span>
     <span class="pin-name wired">GP7</span><span class="coord">L1</span>
   </div>
@@ -277,7 +293,7 @@
   <div class="pin-cell side-right">
     <span class="coord">L8</span>
     <span class="pin-name wired">GP26</span>
-    <span class="squares"><span class="square sig-pwm">4PWM</span></span>
+    <span class="squares"><span class="square sig-din">4DIN</span></span>
   </div>
 
   <div class="pin-cell side-left">
@@ -298,7 +314,7 @@
   <div class="pin-cell side-right">
     <span class="coord">N8</span>
     <span class="pin-name wired">GP22</span>
-    <span class="squares"><span class="square sig-pwm">3PWM</span></span>
+    <span class="squares"><span class="square sig-din">3DIN</span></span>
   </div>
 
   <div class="pin-cell side-left">
@@ -396,5 +412,26 @@
   </div>
 
 </div>
+
+<h2>Rewire from the old layout</h2>
+<p>
+  For each module, swap its DIN lead (blue) and its PWM lead (black): the
+  DIN lead goes to the row that held the PWM lead, and the PWM lead goes
+  to the GP7 row that held the DIN lead. Nothing else moves. Do keys 1
+  and 2 first: spike 3 (two followers at once) needs only those two.
+</p>
+<table class="rewire">
+  <thead>
+    <tr><th>Key</th><th>DIN lead: from</th><th>DIN lead: to</th><th>PWM lead: from</th><th>PWM lead: to</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td class="mono">GP7 (L1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>2</td><td class="mono">GP7 (L1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>3</td><td class="mono">GP7 (L1)</td><td class="mono">GP22 (N8)</td><td class="mono">GP22 (N8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>4</td><td class="mono">GP7 (L1)</td><td class="mono">GP26 (L8)</td><td class="mono">GP26 (L8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>5</td><td class="mono">GP7 (L1)</td><td class="mono">GP27 (K8)</td><td class="mono">GP27 (K8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>6</td><td class="mono">GP7 (L1)</td><td class="mono">GP28 (I8)</td><td class="mono">GP28 (I8)</td><td class="mono">GP7 (L1)</td></tr>
+  </tbody>
+</table>
 </body>
 </html>

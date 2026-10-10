@@ -134,7 +134,7 @@ class FakeHID:
         return self.queued.pop(0)
 
 
-def _build_pad(idle_timer=None, tracer=None, panels=None):
+def _build_pad(idle_timer=None, tracer=None, panels=None, push_bus=None):
     switches = [make_switch(getattr(board, key.switch_pin)) for key in pins.KEYS]
     panels = panels if panels is not None else FakePanels(len(pins.KEYS))
     backlights = [FakeBacklight() for _ in pins.KEYS]
@@ -149,6 +149,7 @@ def _build_pad(idle_timer=None, tracer=None, panels=None):
         serial=serial,
         idle_timer=idle_timer,
         tracer=tracer,
+        push_bus=push_bus,
     )
     return pad, switches, panels, backlights, hid_device, serial
 
@@ -514,7 +515,7 @@ def test_blink_key_redraws_only_after_blink_interval_elapses():
     so redrawing every call toggled visibility far faster than a human
     can see as a blink (confirmed live during task 0031's key-0
     bring-up). It should redraw once immediately (the state change
-    itself), then again only once BLINK_INTERVAL_US has elapsed.
+    itself), then again only when the next blink slot starts.
     """
     pad, _, panels, _, hid_device, _ = _build_pad()
 
@@ -527,11 +528,11 @@ def test_blink_key_redraws_only_after_blink_interval_elapses():
     pad.step(1000)  # the state change itself: always redraws
     assert len(panels.per_key[5].frames) == 2
 
-    pad.step(2000)  # far short of BLINK_INTERVAL_US since the last toggle
+    pad.step(2000)  # the same blink slot
     pad.step(3000)
     assert len(panels.per_key[5].frames) == 2
 
-    pad.step(1000 + BLINK_INTERVAL_US)  # interval elapsed
+    pad.step(BLINK_INTERVAL_US)  # the next slot starts
     assert len(panels.per_key[5].frames) == 3
 
     assert len(panels.per_key[0].frames) == 1
@@ -797,38 +798,106 @@ def test_custom_glyph_wakes_backlight():
 
 
 
-def test_update_keeps_blink_phase():
-    """An update to a blinking key draws the frame the key showed, with the
-    new color. The next toggle stays on the old schedule.
+def test_update_keeps_phase():
+    """An update to a blinking key draws the frame of the current slot, with
+    the new color, so it never moves the key off the shared phase.
     """
     pad, _, panels, _, hid_device, _ = _build_pad()
     pad.step(0)
     hid_device.feed(_key_state_report(key_index=5, color=0x001F, emoji_id=0, blink=True))
     pad.step(1000)
-    assert _last_frame(panels.per_key[5]) == _solid_frame(0x001F)  # "on"
-    pad.step(1000 + BLINK_INTERVAL_US)
-    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)  # "off"
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x001F)  # slot 0: "on"
+    pad.step(BLINK_INTERVAL_US + 1000)
+    assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)  # slot 1: "off"
     shown = len(panels.per_key[5].frames)
 
-    # An update while "off": the key stays "off", in the new color.
+    # An update in an "off" slot: the key stays "off", in the new color.
     hid_device.feed(_key_state_report(key_index=5, color=0xF800, emoji_id=0, blink=True))
-    pad.step(1000 + BLINK_INTERVAL_US + 200_000)
+    pad.step(BLINK_INTERVAL_US + 200_000)
     assert len(panels.per_key[5].frames) == shown + 1
     assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)
 
-    # No toggle until the old schedule, then "on" in the new color.
-    pad.step(1000 + 2 * BLINK_INTERVAL_US - 1)
+    # No redraw until the slot ends, then "on" in the new color.
+    pad.step(2 * BLINK_INTERVAL_US - 1)
     assert len(panels.per_key[5].frames) == shown + 1
-    pad.step(1000 + 2 * BLINK_INTERVAL_US)
+    pad.step(2 * BLINK_INTERVAL_US)
     assert len(panels.per_key[5].frames) == shown + 2
     assert _last_frame(panels.per_key[5]) == _solid_frame(0xF800)
 
-    # An update while "on": the key stays "on".
+    # An update in an "on" slot: the key stays "on".
     hid_device.feed(_key_state_report(key_index=5, color=0x07E0, emoji_id=0, blink=True))
-    pad.step(1000 + 2 * BLINK_INTERVAL_US + 100_000)
+    pad.step(2 * BLINK_INTERVAL_US + 100_000)
     assert _last_frame(panels.per_key[5]) == _solid_frame(0x07E0)
-    pad.step(1000 + 3 * BLINK_INTERVAL_US)
+    pad.step(3 * BLINK_INTERVAL_US)
     assert _last_frame(panels.per_key[5]) == _solid_frame(0x0000)
+
+
+def test_keys_that_start_blinking_apart_show_a_shared_phase():
+    """DoD-1: two keys that start to blink 200 ms apart show the same frame
+    in every later slot.
+    """
+    pad, _, panels, _, hid_device, _ = _build_pad()
+    pad.step(0)
+    hid_device.feed(_key_state_report(key_index=1, color=0x001F, emoji_id=0, blink=True))
+    pad.step(100_000)
+    hid_device.feed(_key_state_report(key_index=2, color=0x001F, emoji_id=0, blink=True))
+    pad.step(300_000)
+
+    for slot in range(1, 7):
+        now_us = slot * BLINK_INTERVAL_US + 10_000
+        pad.step(now_us)
+        expected = _solid_frame(0x001F if slot % 2 == 0 else 0x0000)
+        assert _last_frame(panels.per_key[1]) == expected
+        assert _last_frame(panels.per_key[2]) == expected
+
+
+def test_a_key_that_starts_blinking_joins_current_slot():
+    """DoD-2: a key that starts to blink in an odd slot shows "off" at once,
+    and shows "on" when the next slot starts.
+    """
+    pad, _, panels, _, hid_device, _ = _build_pad()
+    pad.step(0)
+
+    hid_device.feed(_key_state_report(key_index=3, color=0x001F, emoji_id=0, blink=True))
+    pad.step(BLINK_INTERVAL_US + 50_000)  # slot 1
+
+    assert len(panels.per_key[3].frames) == 2
+    assert _last_frame(panels.per_key[3]) == _solid_frame(0x0000)
+
+    pad.step(2 * BLINK_INTERVAL_US)  # slot 2
+
+    assert _last_frame(panels.per_key[3]) == _solid_frame(0x001F)
+
+
+def test_a_late_step_jumps_to_phase_with_one_push():
+    """DoD-2: after a step that comes slots late, a blinking key shows the
+    current phase, drawn once. It does not replay the slots it missed.
+    """
+    pad, _, panels, _, hid_device, _ = _build_pad()
+    hid_device.feed(_key_state_report(key_index=0, color=0x001F, emoji_id=0, blink=True))
+    pad.step(0)
+    shown = len(panels.per_key[0].frames)
+
+    pad.step(5 * BLINK_INTERVAL_US + 10_000)  # slot 5, five slots late
+    assert len(panels.per_key[0].frames) == shown + 1
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0x0000)
+
+    pad.step(5 * BLINK_INTERVAL_US + 20_000)  # same slot: nothing to draw
+    assert len(panels.per_key[0].frames) == shown + 1
+
+    pad.step(8 * BLINK_INTERVAL_US)  # slot 8, "on"
+    assert len(panels.per_key[0].frames) == shown + 2
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0x001F)
+
+
+def test_a_steady_key_is_not_redrawn_by_the_blink_slot():
+    pad, _, panels, _, _, _ = _build_pad()
+    pad.step(0)
+
+    pad.step(BLINK_INTERVAL_US)
+    pad.step(2 * BLINK_INTERVAL_US)
+
+    assert all(len(panel.frames) == 1 for panel in panels.per_key)
 
 
 class _FakeTracer:
@@ -1001,3 +1070,122 @@ def test_blinking_key_toggles_on_schedule_while_other_pushes_run():
     _steps(pad, 10, now_us=BLINK_INTERVAL_US)
 
     assert len(panels.per_key[0].frames) == first + 1
+
+
+def _parallel_pad(tracer=None):
+    """A pad of real `st7735.Panel`s, each on its own DIN line of a fake
+    `ParallelBus`. Returns the pad, the fake bus, and the HID device.
+    """
+    bus = FakeBus(key_count=len(pins.KEYS))
+    panels = [bus.panel(index, parallel=True) for index in range(len(pins.KEYS))]
+    pad, _, _, _, hid_device, _ = _build_pad(
+        panels=panels, push_bus=bus.parallel, tracer=tracer
+    )
+    return pad, bus, hid_device
+
+
+def test_parallel_push_starts_the_queued_frames_in_groups_of_three():
+    """DoD-3: the frames due in one step start in groups, as many panels at a
+    time as the bus allows.
+    """
+    pad, bus, _ = _parallel_pad()
+
+    pad.step(0)  # power-on: six keys are dirty
+
+    assert bus.groups == [[0, 1, 2], [3, 4, 5]]
+    pad.step(1000)
+    assert all(bus.frame_count(key) == 1 for key in range(6))
+
+
+def test_parallel_push_starts_a_group_of_one_for_one_key():
+    pad, bus, hid_device = _parallel_pad()
+    pad.step(0)
+    pad.step(1000)
+    pad.step(2000)
+
+    hid_device.feed(_key_state_report(key_index=4, color=0xF800, emoji_id=0))
+    pad.step(3000)
+
+    assert bus.groups[2:] == [[4]]
+
+
+def test_parallel_push_sends_the_windows_before_any_frame_and_no_commands_after():
+    pad, bus, hid_device = _parallel_pad()
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
+    commands = [len(bus.commands(key)) for key in range(6)]
+    assert all(count == 3 for count in commands)  # CASET, RASET, RAMWR
+
+    hid_device.feed(_key_state_report(key_index=2, color=0xF800, emoji_id=0))
+    pad.step(3000)
+    pad.step(4000)
+
+    assert [len(bus.commands(key)) for key in range(6)] == commands
+    assert bus.image(2) == _solid_frame(0xF800)
+
+
+def test_parallel_push_lowers_cs_on_the_group_only():
+    """DoD-3: no panel outside the group sees CS low."""
+    pad, bus, hid_device = _parallel_pad()
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
+    cs_log = [list(bus.cs[key].log) for key in range(6)]
+
+    hid_device.feed(_key_state_report(key_index=1, color=0xF800, emoji_id=0))
+    hid_device.feed(_key_state_report(key_index=4, color=0x07E0, emoji_id=0))
+    pad.step(3000)  # one report per step: key 1 starts alone
+    pad.step(4000)
+    pad.step(5000)
+
+    for key in (0, 2, 3, 5):
+        assert bus.cs[key].log == cs_log[key]
+    assert bus.groups[2:] == [[1], [4]]
+    assert all(bus.cs[key].value is True for key in range(6))
+
+
+def test_parallel_push_groups_the_keys_that_wait_while_a_group_is_on_the_wire():
+    pad, bus, hid_device = _parallel_pad()
+    bus.parallel.auto_finish = False
+    pad.step(0)  # the first group is on the wire
+    hid_device.feed(_key_state_report(key_index=0, color=0xF800, emoji_id=0))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(key_index=3, color=0x07E0, emoji_id=0))
+    pad.step(2000)
+    assert bus.groups == [[0, 1, 2]]
+
+    for now_us in (3000, 4000, 5000):
+        bus.finish()
+        pad.step(now_us)
+
+    # Key 3 was already queued with its power-on frame, so its update replaced
+    # that frame, and key 0 waits for a group of its own.
+    assert bus.groups == [[0, 1, 2], [3, 4, 5], [0]]
+    assert bus.image(3) == _solid_frame(0x07E0)
+
+
+def test_parallel_push_traces_each_key_of_a_group():
+    tracer = _FakeTracer()
+    pad, bus, _ = _parallel_pad(tracer=tracer)
+
+    for now_us in (0, 1000, 2000):
+        pad.step(now_us)
+
+    started = [key for code, key, _ in tracer.records if code == tracer_module.PUSH_STARTED]
+    done = [key for code, key, _ in tracer.records if code == tracer_module.REFRESH_DONE]
+    assert started == [0, 1, 2, 3, 4, 5]
+    assert sorted(done) == [0, 1, 2, 3, 4, 5]
+
+
+def test_parallel_push_sends_a_desynced_group_again_with_its_windows():
+    pad, bus, _ = _parallel_pad()
+    bus.parallel.fail_groups = 1
+
+    pad.step(0)
+    pad.step(1000)  # the group desyncs; the same step sends it again
+
+    assert pad.resyncs == 1
+    assert bus.groups[:2] == [[0, 1, 2], [0, 1, 2]]
+    assert [len(bus.commands(key)) for key in range(3)] == [6] * 3
+    for now_us in (2000, 3000):
+        pad.step(now_us)
+    assert all(bus.frame_count(key) == 1 for key in range(6))

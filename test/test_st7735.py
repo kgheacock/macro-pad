@@ -317,3 +317,30 @@ def test_panel_can_push_again_after_poll_sees_the_last_push_sent():
 
     assert bus.frame_count(0) == 2
     assert bus.image(0) == b"\x01\x02" * (FRAME_BYTES // 2)
+
+
+def test_abort_push_releases_cs_and_makes_the_next_push_send_the_window():
+    bus = FakeBus(key_count=1)
+    panel = bus.panel(0)
+    panel.setup_window()
+    panel.prepare_push()
+    panel.begin_push(bytes(FRAME_BYTES))
+    assert panel.busy and bus.cs[0].value is False
+
+    panel.abort_push()
+
+    assert not panel.busy and bus.cs[0].value is True
+    windows = len(bus.commands(0))
+    panel.start_push(bytes(FRAME_BYTES))
+    assert bus.commands(0)[windows:] == [st7735.CASET, st7735.RASET, st7735.RAMWR]
+
+
+def test_prepare_push_sends_no_window_to_a_panel_that_is_in_write_mode():
+    bus = FakeBus(key_count=1)
+    panel = bus.panel(0)
+    panel.setup_window()
+    commands = list(bus.commands(0))
+
+    panel.prepare_push()
+
+    assert bus.commands(0) == commands

@@ -115,8 +115,8 @@ def test_real_black_is_drawn_not_skipped():
 
 
 def test_blink_uses_cached_frame():
-    """DoD-2: once a blinking key's frames are built, a toggle pushes the
-    other cached frame and calls no fill or blit.
+    """DoD-2: once a blinking key's frames are built, a change of slot pushes
+    the other cached frame and calls no fill or blit.
     """
     panel = FakePanel()
     key = KeyState(
@@ -125,12 +125,12 @@ def test_blink_uses_cached_frame():
         blink=True,
         pixels=_glyph(0xF800, transparent_corner=True),
     )
-    render_key(panel, key)  # builds both frames
+    render_key(panel, key, blink_on=True)  # builds both frames
     bitmaptools.calls.clear()
 
-    render_key(panel, key)
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=False)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert bitmaptools.calls == []
     assert panel.frame_objects[1] is panel.frame_objects[3]
@@ -205,8 +205,8 @@ def test_first_paint_of_a_blinking_key_shows_the_on_frame():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x07E0, blink=True)
 
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames == [_solid(0x07E0), _solid(0x0000)]
 
@@ -220,9 +220,9 @@ def test_blink_of_a_transparent_glyph_flips_the_background_not_the_glyph():
         pixels=_glyph(0xF800, transparent_corner=True),
     )
 
-    render_key(panel, key)
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
+    render_key(panel, key, blink_on=True)
 
     on, off = panel.frames[0], panel.frames[1]
     assert _pixel(on, 0) == 0x07E0
@@ -235,8 +235,8 @@ def test_blink_of_an_opaque_glyph_hides_the_whole_glyph():
     panel = FakePanel()
     key = KeyState(emoji_id=0xFE, color=0x07E0, blink=True, pixels=_glyph(0xF800))
 
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames == [_solid(0xF800), _solid(0x07E0)]
 
@@ -245,8 +245,8 @@ def test_blink_of_an_opaque_glyph_on_a_black_key_still_hides_the_glyph():
     panel = FakePanel()
     key = KeyState(emoji_id=0xFE, color=0x0000, blink=True, pixels=_glyph(0xF800))
 
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames == [_solid(0xF800), _solid(0x0000)]
 
@@ -255,8 +255,8 @@ def test_blink_of_a_key_with_no_glyph_flips_between_color_and_black():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x07E0, blink=True)
 
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames == [_solid(0x07E0), _solid(0x0000)]
 
@@ -272,19 +272,19 @@ def test_blink_turned_on_later_builds_the_off_frame_once():
     assert [call[0] for call in bitmaptools.calls] == ["fill_region"]
     bitmaptools.calls.clear()
 
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=False)
+    render_key(panel, key, blink_on=True)
     assert bitmaptools.calls == []
 
 
 def test_blink_turned_off_shows_the_on_frame_again():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x07E0, blink=True)
-    render_key(panel, key)
-    render_key(panel, key)  # off
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)  # off
 
     key.blink = False
-    render_key(panel, key)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames[-1] == _solid(0x07E0)
     assert key._off_frame is None
@@ -293,12 +293,12 @@ def test_blink_turned_off_shows_the_on_frame_again():
 def test_color_change_while_blinking_rebuilds_both_frames():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x07E0, blink=True)
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     key.color = 0x001F
-    render_key(panel, key)
-    render_key(panel, key)
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
 
     assert panel.frames[-2] == _solid(0x001F)
     assert panel.frames[-1] == _solid(0x0000)
@@ -365,24 +365,51 @@ def test_render_key_records_nothing_without_a_tracer():
     assert len(panel.frames) == 1
 
 
-def test_redraw_without_toggle_keeps_the_frame_a_blinking_key_showed():
+def test_a_blinking_key_draws_the_frame_of_the_slot_it_is_given():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x001F, blink=True)
 
-    render_key(panel, key)  # first paint: "on"
-    render_key(panel, key)  # toggle: "off"
+    render_key(panel, key, blink_on=True)
+    render_key(panel, key, blink_on=False)
     key.color = 0xF800
-    render_key(panel, key, toggle=False)  # a state change: still "off"
-    render_key(panel, key)  # toggle: "on", in the new color
+    render_key(panel, key, blink_on=False)  # a state change in an "off" slot
+    render_key(panel, key, blink_on=True)
 
     assert _pixel(panel.frames[2], 0) == 0x0000
     assert _pixel(panel.frames[3], 0) == 0xF800
 
 
-def test_first_paint_without_toggle_shows_the_on_frame_of_a_blinking_key():
+def test_a_key_that_starts_to_blink_in_an_off_slot_draws_off_at_once():
     panel = FakePanel()
     key = KeyState(emoji_id=0, color=0x001F, blink=True)
 
-    render_key(panel, key, toggle=False)
+    render_key(panel, key, blink_on=False)
 
-    assert _pixel(panel.frames[0], 0) == 0x001F
+    assert panel.frames == [_solid(0x0000)]
+
+
+def test_a_steady_key_draws_on_in_any_slot():
+    panel = FakePanel()
+    key = KeyState(emoji_id=0, color=0x001F)
+
+    render_key(panel, key, blink_on=False)
+
+    assert panel.frames == [_solid(0x001F)]
+
+
+def test_blink_is_due_when_the_shown_frame_is_not_the_slot_frame():
+    panel = FakePanel()
+    key = KeyState(emoji_id=0, color=0x001F, blink=True)
+    render_key(panel, key, blink_on=True)
+
+    assert display_render.blink_is_due(key, True) is False
+    assert display_render.blink_is_due(key, False) is True
+
+
+def test_a_steady_key_is_never_due_to_blink():
+    panel = FakePanel()
+    key = KeyState(emoji_id=0, color=0x001F)
+    render_key(panel, key)
+
+    assert display_render.blink_is_due(key, False) is False
+    assert display_render.blink_is_due(key, True) is False

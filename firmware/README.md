@@ -256,8 +256,8 @@ key shows the frame of the current slot, and a `step` that comes many slots
 late draws the current slot, not the missed ones.
 
 *DIN lines.* Each key has its own DIN (MOSI) line, and the six panels share
-SCK, DC, and RST. Keys 1 to 5 use the pin that carried the key's backlight
-PWM: GP1, GP22, GP26, GP27, GP28. Key 0 uses GP12, because GP0's breadboard
+SCK, DC, and RST. Keys 0 to 3 and 5 use the pin that carried the key's backlight
+PWM: GP27, GP22, GP28, GP26, GP1. Key 4 uses GP12, because GP0's breadboard
 row never carried a signal. The six backlight inputs join on one PWM pin, GP7.
 `firmware/pins.py` and the Pinout table of `hardware/README.md` list the lines.
 

@@ -131,8 +131,8 @@
   (<code>docs/ppico_plus_2_pinout_diagram.pdf</code>) &mdash; GND and 3V3
   are wired from the top-right power pins. <strong>This is the layout for
   task 0048 (parallel panel push).</strong> Each key has its own DIN line,
-  on the pin that used to carry that key's backlight PWM: GP0, GP1, GP22,
-  GP26, GP27, GP28 for keys 1 to 6. A PIO state machine drives each DIN
+  on the pin that used to carry that key's backlight PWM: GP27, GP22,
+  GP28, GP26, GP0, GP1 for keys 1 to 6 (numbered in installation order). A PIO state machine drives each DIN
   line, and one more drives the shared CLK on GP2. The six backlight
   inputs now join on GP7, which becomes one shared PWM output. (The
   module's PWM pin drives a boost-converter enable through a 10&nbsp;k&ohm;
@@ -417,20 +417,20 @@
 <p>
   For each module, swap its DIN lead (blue) and its PWM lead (black): the
   DIN lead goes to the row that held the PWM lead, and the PWM lead goes
-  to the GP7 row that held the DIN lead. Nothing else moves. Do keys 1
-  and 2 first: spike 3 (two followers at once) needs only those two.
+  to the GP7 row that held the DIN lead. Nothing else moves. Do keys 5
+  and 6 first: spike 3 (two followers at once) needs only those two.
 </p>
 <table class="rewire">
   <thead>
     <tr><th>Key</th><th>DIN lead: from</th><th>DIN lead: to</th><th>PWM lead: from</th><th>PWM lead: to</th></tr>
   </thead>
   <tbody>
-    <tr><td>1</td><td class="mono">GP7 (L1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP7 (L1)</td></tr>
-    <tr><td>2</td><td class="mono">GP7 (L1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP7 (L1)</td></tr>
-    <tr><td>3</td><td class="mono">GP7 (L1)</td><td class="mono">GP22 (N8)</td><td class="mono">GP22 (N8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>1</td><td class="mono">GP7 (L1)</td><td class="mono">GP27 (K8)</td><td class="mono">GP27 (K8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>2</td><td class="mono">GP7 (L1)</td><td class="mono">GP22 (N8)</td><td class="mono">GP22 (N8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>3</td><td class="mono">GP7 (L1)</td><td class="mono">GP28 (I8)</td><td class="mono">GP28 (I8)</td><td class="mono">GP7 (L1)</td></tr>
     <tr><td>4</td><td class="mono">GP7 (L1)</td><td class="mono">GP26 (L8)</td><td class="mono">GP26 (L8)</td><td class="mono">GP7 (L1)</td></tr>
-    <tr><td>5</td><td class="mono">GP7 (L1)</td><td class="mono">GP27 (K8)</td><td class="mono">GP27 (K8)</td><td class="mono">GP7 (L1)</td></tr>
-    <tr><td>6</td><td class="mono">GP7 (L1)</td><td class="mono">GP28 (I8)</td><td class="mono">GP28 (I8)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>5</td><td class="mono">GP7 (L1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP0 (C1)</td><td class="mono">GP7 (L1)</td></tr>
+    <tr><td>6</td><td class="mono">GP7 (L1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP1 (D1)</td><td class="mono">GP7 (L1)</td></tr>
   </tbody>
 </table>
 </body>

@@ -151,8 +151,9 @@ Two frames for each of six keys use 384 KB of the board's heap, which has
 about 8 MB free.
 
 A blinking key keeps its phase when an update arrives: the redraw shows the
-frame the key showed, in the new color, and the next toggle stays on its old
-500 ms schedule (task 0044). Only a due blink toggles the frame.
+frame of the current blink slot, in the new color (task 0044, changed by task
+0048; see "Shared blink phase" in "Latency"). Only a blink that shows the
+wrong frame for the slot is redrawn.
 
 ## Pushes by DMA
 
@@ -162,7 +163,10 @@ color change, flash write, or report waited behind them. Task 0045 sends the
 frame from the DMA instead.
 
 `pio_spi.PioBus` is a transmit-only SPI bus on one PIO state machine. It owns
-SCK (GP2) and MOSI (GP7). The program is two instructions, `out pins, 1 side 0`
+SCK (GP2) and one MOSI line. Task 0048 moved that line: it is one panel's DIN
+line (GP7 is now the shared backlight), and `PioBus` sends the init and window
+commands. Frames go by `ParallelBus`; see "Shared blink phase" in "Latency".
+The program is two instructions, `out pins, 1 side 0`
 and `nop side 1`, assembled on the host because `adafruit_pioasm` is not on
 the board. That is SPI mode 0, most significant bit first, two PIO clocks per
 bit. The state machine runs at twice the baud rate, so `DISPLAY_BAUDRATE` of
@@ -185,8 +189,9 @@ has started. A push that raises leaves it set, so the next `start_push`
 calls `setup_window()` first. A panel that leaves write mode some other way,
 for example by a brownout, stays wrong until a push fails.
 
-All six panels share SCK and MOSI, so one push is on the wire at a time.
-`MacroPad.step` keeps a queue of keys. `_service_pushes` ends the push on the
+In task 0045 all six panels shared SCK and MOSI, so one push was on the wire
+at a time. Task 0048 gave each panel its own DIN line, and up to three queued
+frames now go out at once (see "Latency"). `MacroPad.step` keeps a queue of keys. `_service_pushes` ends the push on the
 wire when it is done, then starts the next queued key. It runs at the start
 and the end of every `step`. A key has at most one frame in the queue, and a
 newer frame replaces an older one that has not started and keeps its place.
@@ -241,6 +246,63 @@ records. `SCENARIO=burst` and `SCENARIO=busyburst` both gave `decoded 6/6`.
 person saw a test pattern of 8 color bars, 1 px columns, and a mark for each
 key on all six panels with no noise at 15 MHz. 25 MHz was not tried.
 
+**Shared blink phase, DIN lines, and the 12.5 MHz push** (task 0048).
+
+*Shared phase.* Every blinking key shows "on" in an even 500 ms slot of one
+clock (`now_us // BLINK_INTERVAL_US`) and "off" in an odd slot. No key keeps a
+schedule of its own, so keys that start 200 ms apart flash in time. A key that
+starts to blink in an odd slot shows "off" at once, an update to a blinking
+key shows the frame of the current slot, and a `step` that comes many slots
+late draws the current slot, not the missed ones.
+
+*DIN lines.* Each key has its own DIN (MOSI) line, and the six panels share
+SCK, DC, and RST. Keys 1 to 5 use the pin that carried the key's backlight
+PWM: GP1, GP22, GP26, GP27, GP28. Key 0 uses GP12, because GP0's breadboard
+row never carried a signal. The six backlight inputs join on one PWM pin, GP7.
+`firmware/pins.py` and the Pinout table of `hardware/README.md` list the lines.
+
+*Parallel push.* Frames due in one step start together, in groups of at most
+three: one PIO block holds a leader that makes SCK and three followers that
+each shift one panel's frame onto its DIN line. CircuitPython puts the state
+machines that share SCK on one block of four, so a push of six panels is two
+groups. The leader clocks a byte only when every follower of the group has
+asked for it, so a follower whose DMA waits for the CPU holds the clock back,
+and no bit is lost. A group on the wire takes about 26 ms. Commands never go
+through a follower. `PioBus` sends them on one panel's DIN line at 15 MHz.
+
+*Rate.* SCK is 12.5 MHz: 7 PIO cycles low and 5 high, in a bit of 12 cycles of
+the 150 MHz system clock. A follower sees SCK about 3 cycles late, so SCK needs
+the long low phase. In spike 2 (2026-10-06) 10 MHz gave 0 desyncs in 300 pushes
+and 15 MHz gave 5 in 150. At 12.5 MHz 400 groups held on the board, with and
+without a CPU load (2026-10-08). A person has not yet looked at the panels at
+12.5 MHz for noise (the visual check of task 0048's DoD-7).
+
+*Recovery.* If a follower does not finish with the leader, or the group does not
+end in time, `ParallelBus.done` tears the machines down and sets `desynced`.
+The code then rebuilds the group, sends the window again, and sends the frames
+again. `MacroPad.resyncs` counts these. At startup `code.py` stops state
+machines left over from an earlier run.
+
+*Measured on the board* (task 0048's DoD-6, `make blink-trace SCENARIO=sync`,
+RP2350, 2026-10-10, 42 slots in each of two runs: six keys blinking, 10 updates
+to key 4 two seconds apart):
+
+```
+max skew 31.0 ms (limit 35)   max span 34.1 ms (limit 40)   max gap 501.4 ms (limit 600)
+max skew 31.2 ms (limit 35)   max span 42.0 ms (limit 40)   max gap 507.7 ms (limit 600)
+```
+
+*Skew* is the time between the first and the last `PUSH_STARTED` of one slot,
+for the five keys that did not get the update. *Span* is the time from the
+first `PUSH_STARTED` of a group to its last `REFRESH_DONE`. *Gap* is the time
+between two `PUSH_STARTED` of one blinking key. The skew limit was 30 ms at
+first. Both runs missed it by about 1 ms, and the owner raised it to 35 ms.
+The second run missed the span limit of 40 ms (42.0 ms), so DoD-6 is not met
+yet. The first printout of these runs said a span of 0.0 ms. That was wrong:
+`tools/blink_trace.py` looked for `REFRESH_DONE` as code 10 and the firmware
+sends code 8. The figures above come from the same two traces, read with the
+right code.
+
 **Display latency, measured on the board** from the trace of `macropadd
 --trace-file`, with `HOST_MESSAGE_DECODED` as the start:
 
@@ -262,10 +324,6 @@ leveling, and a status plugin that changes a key every few seconds can use
 the flash's erase cycles in days. So the board writes nothing (task 0044).
 After a power cycle every key shows the power-on default until the host
 driver replays each key's last state; see "Custom glyphs and key state."
-
-A blinking key keeps its phase when an update arrives: the redraw shows the
-frame the key showed, in the new color, and the next toggle stays on its old
-500 ms schedule. Only a due blink toggles the frame.
 
 **Reports in a burst** (task 0044's DoD-6, RP2350, 2026-10-06). The board holds
 one HID report, and its loop reads one per pass, so a report that arrives

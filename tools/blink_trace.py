@@ -23,7 +23,7 @@ from pathlib import Path
 # Trace codes, as in firmware/tracer.py.
 HOST_MESSAGE_DECODED = 1
 PUSH_STARTED = 9
-REFRESH_DONE = 10
+REFRESH_DONE = 8
 
 # The largest allowed gap, in milliseconds, between two PUSH_STARTED records
 # of one blinking key. Task 0044's DoD-5 allowed 650. Task 0045's DoD-4 allows

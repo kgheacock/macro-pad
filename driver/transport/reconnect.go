@@ -246,8 +246,10 @@ func (r *Reconnecting) forward(dev Transport) {
 // SendKeyState implements Transport. It remembers ks, and sends it when a
 // device is connected.
 func (r *Reconnecting) SendKeyState(ks KeyState) error {
+	asked := time.Now()
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
+	waited := time.Since(asked)
 
 	r.mu.Lock()
 	previous, hadKey := r.keys[ks.KeyIndex]
@@ -270,9 +272,13 @@ func (r *Reconnecting) SendKeyState(ks KeyState) error {
 	r.mu.Unlock()
 
 	if dev == nil {
+		r.logf("setKeyState key=%d sendMu wait=%s, no device connected", ks.KeyIndex, waited.Round(time.Millisecond))
 		return nil
 	}
-	return dev.SendKeyState(ks)
+	wrote := time.Now()
+	err := dev.SendKeyState(ks)
+	r.logf("setKeyState key=%d sendMu wait=%s board write=%s err=%v", ks.KeyIndex, waited.Round(time.Millisecond), time.Since(wrote).Round(time.Millisecond), err)
+	return err
 }
 
 // SendCustomGlyph implements Transport. It remembers the glyph, and sends

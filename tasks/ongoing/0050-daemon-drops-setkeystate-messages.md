@@ -1,14 +1,14 @@
 ---
 id: "0050"
 title: "Find why macropadd drops setKeyState messages, and fix it"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-10"
 updated: "2026-10-10"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0050-daemon-drops-setkeystate-messages"
 related: ["0028", "0030", "0036"]
 tags: ["driver", "plugin", "daemon", "reliability"]
 ---

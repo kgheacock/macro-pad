@@ -270,11 +270,63 @@ adaptive to how fast a person presses — see the task 0013 spec's Risks.
 | `doublePress` | `plugin.Server`, resolved from raw events | Two short clicks on the same key, the second starting inside the double-press window |
 | `longPress` | `plugin.Server`, resolved from raw events | The key was held 500ms or more before release |
 | `processWaiting` | `macrodriver signal`, from a Claude Code `Notification` hook | The owned session is waiting on input |
-| `processDone` | `macrodriver signal`, from a Claude Code `Stop` hook | The owned session finished its turn |
+| `processDone` | `macrodriver signal`, from a Claude Code `Stop` hook; `session.ITerm2`, on a command that exits 0 | The owned session finished its turn |
+| `processRunning` | `session.ITerm2`, on a command start | A command began in the bound iTerm2 session |
+| `processExited` | `session.ITerm2`, on a command that exits nonzero | A command in the bound iTerm2 session failed |
 
 `name` is not restricted to this table — a plugin may broadcast its own
-vocabulary — but only these five names carry a meaning any other plugin
+vocabulary — but only these seven names carry a meaning any other plugin
 in this repository recognizes.
+
+### Attaching a key to an iTerm2 session
+
+`session.BindITerm2` binds a key to a terminal tab that is already open,
+by iTerm2's session ID. It uses iTerm2's own Python API, so it needs no
+Accessibility or Automation permission prompt and no tmux. Text goes in
+through `async_send_text`. iTerm2's shell-integration events come back as
+`signal` messages for the key (see "Signal vocabulary," above):
+
+| Shell integration event | `signal` |
+|---|---|
+| Prompt shown | `processWaiting` |
+| Command start | `processRunning` |
+| Command finish, exit 0 | `processDone` |
+| Command finish, exit nonzero | `processExited` |
+
+Requirements, for the iTerm2 path only. The tmux path needs none of them:
+
+- iTerm2 3.4 or later. This is the oldest version this backend assumes.
+  Task 0015 did not test an older one.
+- **Settings > General > Magic > Enable Python API** turned on. While it
+  is off, `BindITerm2` returns `session.ErrITerm2APIDisabled` at once.
+  It does not hang.
+- Python 3 and the official package: `pip install iterm2`. Without the
+  package, `BindITerm2` returns `session.ErrITerm2PackageMissing`.
+- [Shell integration](https://iterm2.com/documentation-shell-integration.html)
+  installed in the shell of the target session. Without it, text still
+  goes in, but no signal comes back.
+
+The session ID is the part of `$ITERM_SESSION_ID` after the colon. For
+`w0t0p0:6A5D0F2C-...`, use `6A5D0F2C-...`. A human configures it. This
+backend does not pick a session on its own. An unknown ID returns
+`session.ErrITerm2SessionNotFound`.
+
+```go
+s, err := session.BindITerm2(ctx, session.ITerm2Config{
+    KeyIndex:    0,
+    SessionID:   "6A5D0F2C-...",
+    Broadcaster: server, // a *plugin.Server
+})
+if err != nil {
+    return err // errors.Is(err, session.ErrITerm2APIDisabled), and so on
+}
+defer s.Close()
+s.SendKeys("y\n")
+```
+
+The Go side starts `driver/iterm2bridge/bridge.py` (embedded in the
+binary) as a subprocess and talks to it in JSON lines. A new backend
+needs only to satisfy `session.Session`.
 
 ### Go plugin helpers
 

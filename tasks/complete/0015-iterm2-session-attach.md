@@ -1,13 +1,13 @@
 ---
 id: "0015"
 title: "Attach a key to an existing iTerm2 session over its WebSocket API"
-status: "ongoing"
+status: "complete"
 created: "2026-08-06"
 updated: "2026-10-11"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/53"
 branch: "0015-iterm2-session-attach"
 related: ["0011", "0013", "0016", "0028"]
 tags: ["driver", "iterm2", "terminal"]
@@ -139,7 +139,7 @@ Files to change:
 - [x] **DoD-6** — `driver/README.md` documents the iTerm2 backend, the
   Python dependency, and the API-enable toggle. **Proof:**
   `driver/README.md`
-- [ ] **DoD-7** — The PR body links to this spec. **Proof:** the PR in
+- [x] **DoD-7** — The PR body links to this spec. **Proof:** the PR in
   the `pr` field
 
 ## Risks

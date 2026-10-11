@@ -3,10 +3,13 @@ package plugin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -952,4 +955,89 @@ func TestServer_SlowAudioClientDoesNotBlockOthers(t *testing.T) {
 		t.Fatalf("InjectEvent: %v", err)
 	}
 	waitForCondition(t, time.Second, func() bool { return len(healthy.rawMessages()) > 0 })
+}
+
+// logCollector gathers the lines a Server reports through SetLogf.
+type logCollector struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logCollector) logf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
+
+func (l *logCollector) has(substr string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if strings.Contains(line, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// failingSendDev is a transport whose SendKeyState always fails.
+type failingSendDev struct {
+	*transport.Emulator
+}
+
+func (failingSendDev) SendKeyState(transport.KeyState) error {
+	return errors.New("hid write: device gone")
+}
+
+// A setKeyState the server cannot apply writes a log line with the reason,
+// instead of vanishing. See task 0050.
+func TestServer_LogsSetKeyStateThatCannotBeApplied(t *testing.T) {
+	emu := transport.NewEmulator()
+	defer emu.Close()
+
+	cases := []struct {
+		name string
+		dev  transport.Transport
+		msg  Message
+		want string
+	}{
+		{"missing payload", emu, Message{Kind: KindSetKeyState}, "setKeyState dropped: " + errMissingPayload.Error()},
+		{"device error", failingSendDev{emu}, Message{Kind: KindSetKeyState, SetKeyState: &SetKeyStatePayload{KeyIndex: 4}}, "setKeyState key=4 failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(tc.dev, nil)
+			logs := &logCollector{}
+			s.SetLogf(logs.logf)
+
+			conn := newFakeConn()
+			if s.addClient(conn) == nil {
+				t.Fatal("addClient rejected the only connected client")
+			}
+			conn.send(t, tc.msg)
+
+			waitForCondition(t, time.Second, func() bool { return logs.has(tc.want) })
+		})
+	}
+}
+
+// A setKeyState that applies writes one line when it is read and one when it
+// is applied, so a gap between the two shows where a message waited.
+func TestServer_LogsSetKeyStateRead(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+	logs := &logCollector{}
+	s.SetLogf(logs.logf)
+
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("addClient rejected the only connected client")
+	}
+	conn.send(t, Message{Kind: KindSetKeyState, SetKeyState: &SetKeyStatePayload{KeyIndex: 2}})
+
+	waitForCondition(t, time.Second, func() bool { return logs.has("setKeyState key=2 applied in") })
+	if !logs.has("setKeyState read key=2") {
+		t.Fatal("no line for the read of setKeyState key=2")
+	}
 }

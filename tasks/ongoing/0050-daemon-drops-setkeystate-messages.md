@@ -105,19 +105,25 @@ ticked.
   connection, 5 s apart, and prints `applied N/50` from `keys.json`. The
   baseline run on the board is in Notes. **Proof:** the command, and the Notes
   line
+  - Not confirmed: `cmd/setkeyrepro` is written and tested against the emulator. The baseline run on the board is not done.
 - [ ] **DoD-2** — The daemon logs one line for each `setKeyState` with the
   key, the wait for `sendMu`, and the time of the board write. **Proof:**
   `macropadd` output during the repro run
+  - Not confirmed: the log lines exist and are tested. No `macropadd` output from a repro run on the board is recorded.
 - [ ] **DoD-3** — The cause is named in Notes with the log lines that show it.
   **Proof:** the Notes section of this spec
+  - Not confirmed: the cause is not named. It needs the board run from DoD-1.
 - [ ] **DoD-4** — After the fix, three repro runs print `applied 50/50`.
   **Proof:** the three outputs in Notes
-- [ ] **DoD-5** — A message that cannot be applied (bad color, or a device
+  - Not confirmed: no fix was made, because no cause is named.
+- [x] **DoD-5** — A message that cannot be applied (bad color, or a device
   error) writes one log line with the reason. **Proof:** `go test ./driver/plugin/...`
 - [ ] **DoD-6** — A test reproduces the named cause. It fails on `main` and
   passes on the branch. **Proof:** `go test ./driver/plugin/... ./driver/transport/...`
+  - Not confirmed: no test of the named cause exists, because no cause is named.
 - [ ] **DoD-7** — `driver/README.md` records the cause and the behavior.
   **Proof:** `driver/README.md`
+  - Not confirmed: `driver/README.md` records the log lines and the repro command, but not a cause.
 - [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks

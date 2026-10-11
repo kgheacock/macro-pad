@@ -216,6 +216,27 @@ def test_the_leader_waits_for_exactly_the_flags_of_the_followers_in_the_group():
 
 
 
+def test_prepare_group_builds_the_machines_and_start_group_reuses_them():
+    bus = _parallel()
+
+    bus.prepare_group((1, 3, 5))
+    built = list(rp2pio.created)
+    _start_group(bus, keys=(1, 3, 5))
+
+    assert len(built) == 4
+    assert rp2pio.created == built
+
+
+def test_prepare_group_refuses_a_group_on_the_wire_and_a_group_too_big():
+    bus = _parallel()
+    _start_group(bus)
+
+    with pytest.raises(RuntimeError):
+        bus.prepare_group((3, 4, 5))
+    with pytest.raises(ValueError):
+        _parallel().prepare_group((0, 1, 2, 3))
+
+
 def test_start_group_gives_each_follower_its_own_frame_without_copying_it():
     bus = _parallel()
 

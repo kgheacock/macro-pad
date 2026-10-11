@@ -119,24 +119,24 @@ Files to change:
 
 ## Definition of done
 
-- [ ] **DoD-1** — Binding key 0 to an existing iTerm2 session ID and
+- [x] **DoD-1** — Binding key 0 to an existing iTerm2 session ID and
   sending `"y\n"` delivers that text into the target tab. **Proof:**
   `go test ./driver/session/... -run TestITerm2_SendText` against a mock
   bridge
-- [ ] **DoD-2** — A prompt-shown notification on the bound session
+- [x] **DoD-2** — A prompt-shown notification on the bound session
   broadcasts a `signal` named `processWaiting`. **Proof:** `go test
   ./driver/session/... -run TestITerm2_PromptBroadcastsWaiting`
-- [ ] **DoD-3** — A command-start notification broadcasts a `signal`
+- [x] **DoD-3** — A command-start notification broadcasts a `signal`
   named `processRunning`. **Proof:** `go test ./driver/session/... -run
   TestITerm2_CommandStartBroadcastsRunning`
-- [ ] **DoD-4** — A command-finished notification broadcasts
+- [x] **DoD-4** — A command-finished notification broadcasts
   `processDone` on exit 0 and `processExited` on a nonzero exit.
   **Proof:** `go test ./driver/session/... -run
   TestITerm2_CommandFinishedMapsExitCode`
-- [ ] **DoD-5** — With iTerm2's Python API toggle off, binding a key
+- [x] **DoD-5** — With iTerm2's Python API toggle off, binding a key
   returns a named error identifying the missing toggle. **Proof:** `go
   test ./driver/session/... -run TestITerm2_APIDisabled`
-- [ ] **DoD-6** — `driver/README.md` documents the iTerm2 backend, the
+- [x] **DoD-6** — `driver/README.md` documents the iTerm2 backend, the
   Python dependency, and the API-enable toggle. **Proof:**
   `driver/README.md`
 - [ ] **DoD-7** — The PR body links to this spec. **Proof:** the PR in

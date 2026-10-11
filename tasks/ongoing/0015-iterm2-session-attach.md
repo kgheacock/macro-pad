@@ -1,14 +1,14 @@
 ---
 id: "0015"
 title: "Attach a key to an existing iTerm2 session over its WebSocket API"
-status: "backlog"
+status: "ongoing"
 created: "2026-08-06"
-updated: "2026-08-15"
+updated: "2026-10-11"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0015-iterm2-session-attach"
 related: ["0011", "0013", "0016", "0028"]
 tags: ["driver", "iterm2", "terminal"]
 ---

@@ -1097,6 +1097,17 @@ def test_parallel_push_starts_the_queued_frames_in_groups_of_three():
     assert all(bus.frame_count(key) == 1 for key in range(6))
 
 
+def test_parallel_push_builds_each_group_before_any_cs_goes_low():
+    """Building the PIO machines can put an edge on SCK, which a panel with
+    CS low reads as a clock, so its frame arrives one bit late.
+    """
+    pad, bus, _ = _parallel_pad()
+
+    pad.step(0)
+
+    assert bus.parallel.prepared == [[0, 1, 2], [3, 4, 5]]
+
+
 def test_parallel_push_starts_a_group_of_one_for_one_key():
     pad, bus, hid_device = _parallel_pad()
     pad.step(0)

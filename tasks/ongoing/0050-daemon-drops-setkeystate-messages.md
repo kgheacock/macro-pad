@@ -7,7 +7,7 @@ updated: "2026-10-10"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/52"
 branch: "0050-daemon-drops-setkeystate-messages"
 related: ["0028", "0030", "0036"]
 tags: ["driver", "plugin", "daemon", "reliability"]
@@ -124,7 +124,7 @@ ticked.
 - [ ] **DoD-7** — `driver/README.md` records the cause and the behavior.
   **Proof:** `driver/README.md`
   - Not confirmed: `driver/README.md` records the log lines and the repro command, but not a cause.
-- [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

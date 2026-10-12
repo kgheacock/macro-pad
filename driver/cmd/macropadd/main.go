@@ -110,6 +110,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "macropadd: listening on 127.0.0.1:%d\n", *port)
 
 	srv := plugin.NewServer(fan.Subscribe(), injector)
+	srv.SetLogf(func(format string, args ...any) {
+		fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
+	})
 	runErr := srv.Run(ctx, *port)
 
 	dev.Close()

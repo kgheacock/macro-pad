@@ -6,6 +6,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -263,6 +264,14 @@ func (s *Server) readPump(c *client) {
 	for {
 		var msg Message
 		if err := c.conn.ReadJSON(&msg); err != nil {
+			// A message the server cannot decode ends the connection. Say
+			// why, so the client's later I/O failure has a cause in the log.
+			// A close or a read error is the normal end and stays quiet.
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+				s.logf("closing connection: cannot decode message: %v", err)
+			}
 			return
 		}
 		switch msg.Kind {
@@ -308,6 +317,8 @@ func (s *Server) readPump(c *client) {
 			c.audioSubscribed.Store(true)
 		case KindUnsubscribeAudio:
 			c.audioSubscribed.Store(false)
+		default:
+			s.logf("message dropped: unknown kind %q", msg.Kind)
 		}
 	}
 }

@@ -107,6 +107,12 @@ dma-spike: check-circuitpy
 	echo "Run 'make flash' to restore the real code.py."; \
 	exit $$status
 
+# `make macropadd` runs the plugin daemon against the board. It needs the
+# real firmware on the board, so run `make flash` first if needed.
+.PHONY: macropadd
+macropadd:
+	cd driver && go run ./cmd/macropadd --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID)
+
 .PHONY: e2e
 e2e: flash
 	cd driver && MACROPAD_VENDOR_ID=$(PINGPONG_VENDOR_ID) MACROPAD_PRODUCT_ID=$(PINGPONG_PRODUCT_ID) \

@@ -527,6 +527,36 @@ included — onto a key is a separate, broader task; see
 [`tasks/backlog/0037-render-static-html-on-a-key.md`](../tasks/backlog/0037-render-static-html-on-a-key.md).
 See task 0036.
 
+### Diagnosing a lost `setKeyState`
+
+`macropadd` prints one set of lines for each `setKeyState` it reads (task
+0050). A message that vanishes now shows where it stopped:
+
+```text
+macropadd: setKeyState read key=4
+macropadd: setKeyState key=4 sendMu wait=2.9s board write=12ms err=<nil>
+macropadd: setKeyState key=4 applied in 2.9s
+```
+
+- `read` means the server decoded the message. A client that sees no `read`
+  line did not get its message to the server.
+- `sendMu wait` is how long the send waited behind another send or the
+  replay of saved state after a reconnect. A custom glyph takes about 3 s to
+  cross, so a wait of seconds is normal while one is in flight.
+- `board write` is the time of the HID write to the board.
+- `dropped: <reason>` means the payload was missing, and `failed after ...:
+  <reason>` means the device write returned an error. Both are logged, and
+  neither closes the connection.
+
+To count the messages that reach `keys.json`, run the daemon against the
+board, and in another terminal run:
+
+```sh
+go run ./cmd/setkeyrepro            # 50 messages, one per connection, 5 s apart
+```
+
+It prints one line for each message and `applied N/50` at the end.
+
 ### Bounds
 
 A slow or stalled client cannot grow the daemon's memory past a fixed

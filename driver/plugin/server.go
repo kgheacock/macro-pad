@@ -6,6 +6,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -131,6 +132,11 @@ type Server struct {
 	// client learns a key's confirmed state without waiting for its own
 	// broadcast to arrive. See task 0036.
 	stateCache map[byte]Message
+
+	// logf reports each setKeyState the server reads, applies, or cannot
+	// apply. It is never nil: NewServer sets a no-op, and SetLogf replaces
+	// it before Run. See task 0050.
+	logf func(format string, args ...any)
 }
 
 // NewServer creates a Server bridging dev, and starts the goroutine that
@@ -147,6 +153,7 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 		injector:   injector,
 		clients:    make(map[*client]struct{}),
 		stateCache: make(map[byte]Message),
+		logf:       func(string, ...any) {},
 		upgrader: websocket.Upgrader{
 			// The localhost bind and maxClients are this server's only
 			// access control (see the task spec's Non-goals); a browser
@@ -159,6 +166,16 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 	})
 	go s.dispatchLoop()
 	return s
+}
+
+// SetLogf makes the server report each setKeyState it reads, and whether it
+// applied it or why it could not. Call it before Run. A nil logf turns the
+// reports off.
+func (s *Server) SetLogf(logf func(format string, args ...any)) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	s.logf = logf
 }
 
 // Run opens a WebSocket server bound to 127.0.0.1:port and serves it
@@ -247,15 +264,30 @@ func (s *Server) readPump(c *client) {
 	for {
 		var msg Message
 		if err := c.conn.ReadJSON(&msg); err != nil {
+			// A message the server cannot decode ends the connection. Say
+			// why, so the client's later I/O failure has a cause in the log.
+			// A close or a read error is the normal end and stays quiet.
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+				s.logf("closing connection: cannot decode message: %v", err)
+			}
 			return
 		}
 		switch msg.Kind {
 		case KindSetKeyState:
 			ks, err := msg.SetKeyState.toKeyState()
 			if err != nil {
+				s.logf("setKeyState dropped: %v", err)
 				continue
 			}
-			s.dev.SendKeyState(ks)
+			s.logf("setKeyState read key=%d", ks.KeyIndex)
+			start := time.Now()
+			if err := s.dev.SendKeyState(ks); err != nil {
+				s.logf("setKeyState key=%d failed after %s: %v", ks.KeyIndex, time.Since(start).Round(time.Millisecond), err)
+			} else {
+				s.logf("setKeyState key=%d applied in %s", ks.KeyIndex, time.Since(start).Round(time.Millisecond))
+			}
 			s.rememberState(msg.SetKeyState.KeyIndex, msg)
 			s.broadcast(msg)
 		case KindSetCustomGlyph:
@@ -285,6 +317,8 @@ func (s *Server) readPump(c *client) {
 			c.audioSubscribed.Store(true)
 		case KindUnsubscribeAudio:
 			c.audioSubscribed.Store(false)
+		default:
+			s.logf("message dropped: unknown kind %q", msg.Kind)
 		}
 	}
 }

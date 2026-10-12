@@ -1041,3 +1041,37 @@ func TestServer_LogsSetKeyStateRead(t *testing.T) {
 		t.Fatal("no line for the read of setKeyState key=2")
 	}
 }
+
+// A message the server cannot decode, and a message with a kind it does not
+// know, each write a log line with the reason. Before, both vanished with no
+// trace: the first closed the connection, the second left it open and did
+// nothing. See task 0050.
+func TestServer_LogsMessagesItCannotDecodeOrRoute(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"color is a string", `{"kind":"setKeyState","setKeyState":{"keyIndex":4,"color":"0xF800"}}`, "cannot decode message"},
+		{"color is above 65535", `{"kind":"setKeyState","setKeyState":{"keyIndex":4,"color":70000}}`, "cannot decode message"},
+		{"key index is above 255", `{"kind":"setKeyState","setKeyState":{"keyIndex":300}}`, "cannot decode message"},
+		{"unknown kind", `{"kind":"set_key_state"}`, `unknown kind "set_key_state"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := transport.NewEmulator()
+			defer dev.Close()
+			s := NewServer(dev, dev)
+			logs := &logCollector{}
+			s.SetLogf(logs.logf)
+
+			conn := newFakeConn()
+			if s.addClient(conn) == nil {
+				t.Fatal("addClient rejected the only connected client")
+			}
+			conn.incoming <- []byte(tc.raw)
+
+			waitForCondition(t, time.Second, func() bool { return logs.has(tc.want) })
+		})
+	}
+}

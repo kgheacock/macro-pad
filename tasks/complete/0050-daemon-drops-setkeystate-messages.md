@@ -142,8 +142,13 @@ What the task left behind:
 - `cmd/setkeyrepro`, which counts the messages that reach `keys.json`.
 - A measured finding for a follow-up: a burst closer than about 200 ms builds
   a queue behind `sendMu`, because each board write then takes about 155 ms.
-  The last of 100 messages sent 100 ms apart waited 5 s. A new task can coalesce
-  the writes. Reopen this task if a drop shows in the log with a `read` line and
+  The last of 100 messages sent 100 ms apart waited 5 s. **Deferred, not
+  planned:** write a spec only when a client sends faster than about 5 messages
+  a second, such as a color slider or an animation. A client that throttles
+  itself to one send per 200 ms needs no daemon change. A fix would give each
+  key one writer that keeps only the newest state, and it would drop the
+  states in between. No client is known to send that fast; the key-state page
+  (0036) was not checked. Reopen this task if a drop shows in the log with a `read` line and
   no `applied` line, or with no `read` line from a client that connected.
 
 ## Risks

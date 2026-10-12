@@ -1,9 +1,9 @@
 ---
 id: "0050"
 title: "Find why macropadd drops setKeyState messages, and fix it"
-status: "ongoing"
+status: "complete"
 created: "2026-10-10"
-updated: "2026-10-10"
+updated: "2026-10-11"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -126,6 +126,31 @@ ticked.
   - Not confirmed: `driver/README.md` records the log lines and the repro command, but not a cause.
 - [x] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
+## Resolution
+
+Closed as **cannot reproduce** on 2026-10-11. About 300 well-formed
+`setKeyState` messages on the real board, at spacings from 100 ms to 5 s, were
+all read and applied (see Notes). No cause for the first report is named, so
+DoD-3, DoD-4, DoD-6 and DoD-7 are not ticked and are not met. DoD-1 and DoD-2
+are met except that the board baseline was run by the implementer, not
+recorded in the form the item names.
+
+What the task left behind:
+
+- Logging for each `setKeyState` (read, `sendMu` wait, board write, applied or
+  failed), and for a message the server cannot decode or route.
+- `cmd/setkeyrepro`, which counts the messages that reach `keys.json`.
+- A measured finding for a follow-up: a burst closer than about 200 ms builds
+  a queue behind `sendMu`, because each board write then takes about 155 ms.
+  The last of 100 messages sent 100 ms apart waited 5 s. **Deferred, not
+  planned:** write a spec only when a client sends faster than about 5 messages
+  a second, such as a color slider or an animation. A client that throttles
+  itself to one send per 200 ms needs no daemon change. A fix would give each
+  key one writer that keeps only the newest state, and it would drop the
+  states in between. No client is known to send that fast; the key-state page
+  (0036) was not checked. Reopen this task if a drop shows in the log with a `read` line and
+  no `applied` line, or with no `read` line from a client that connected.
+
 ## Risks
 
 - The log changes the timing and hides the drop → log after the work, not before.
@@ -135,8 +160,8 @@ ticked.
 
 ## Open questions
 
-- [ ] Does a drop happen with no client reading `keys.json`? — owner, in the
-  baseline run
+- [x] Does a drop happen with no client reading `keys.json`? — the repro reads
+  it every 100 ms and saw no drop; not tested with no reader (see Notes)
 - [ ] Does the board stall `hid.Write` while it pushes frames or saves flash?
   — owner, from the write times in the log
 
@@ -150,3 +175,54 @@ Seen on 2026-10-10 with the real board:
   seconds of a change usually failed. `websocat` once reported `I/O failure`.
 - `emojiId` 0 deleted `glyph-N.bin`, as `driver/README.md` says. That is not a
   drop.
+
+Board runs on 2026-10-11 (real board, `macropadd` from this branch, key 4):
+
+- `setkeyrepro` with the defaults (50 messages, 5 s apart): `applied 50/50`.
+  Each message showed in `keys.json` after about 102 ms. In the daemon log,
+  `sendMu wait=0s` and `board write` was 2 to 9 ms for every message.
+- `setkeyrepro -interval 1s`: `applied 50/50`.
+- `setkeyrepro -interval 2s -count 20`, started while the daemon replayed 6
+  saved keys after its start: `applied 20/20`. The first message waited 417 ms
+  for `sendMu` and showed after 513 ms. Later messages waited 0 s.
+- So the daemon does not lose a well-formed `setKeyState` that arrives on its
+  own connection, at idle, at 1 s spacing, or during a replay. The cause is
+  not named. DoD-1 has its baseline (`applied 50/50`); DoD-3, DoD-4, DoD-6 and
+  DoD-7 stay open.
+- The repro measures the daemon only: `keys.json` is written before the board
+  write, so it cannot show a board that ignores a write that returned no error.
+- Two paths still dropped a message with no log. Both now log (test
+  `TestServer_LogsMessagesItCannotDecodeOrRoute`):
+  - `ReadJSON` fails on a message it cannot decode (`color` as a string such as
+    `"0xF800"`, `color` above 65535, `keyIndex` above 255). `readPump` returns
+    and the connection closes, with no log. A long-lived client such as
+    `websocat` then reports `I/O failure` on its next send.
+  - A message with an unknown `kind` (for example `set_key_state`) matched no
+    `case`, so the connection stayed open and nothing happened.
+  These match "no echo, no change, no log", but nothing yet shows that the
+  failing clients send such messages.
+- The repro replaced the saved state of key 4, and `emojiId` 0 deleted
+  `glyph-4.bin`. The state directory was restored from a copy afterward.
+
+Burst runs on 2026-10-11 (same board, key 4; counts are from the daemon log,
+because the repro's 100 ms poll cannot judge a message at a 100 ms spacing and
+printed `applied 5/100` for that reason):
+
+- 100 messages, 100 ms apart: the daemon logged 100 `read`, 100 `applied`, and
+  no `failed`, `dropped`, `closing`, or `unknown` line. `keys.json` ended on
+  the last color (0x0163). No message was lost.
+- Every `board write` took 150 to 160 ms, not 2 to 9 ms. Each message waited on
+  `sendMu` about 50 ms longer than the one before it. The last one waited
+  5.0 s, and applied about 10 s after the run started, 5 s after the last
+  send ended.
+- 20 messages at 200 ms, 400 ms, and 700 ms apart: all `read` and `applied`,
+  `board write` about 5 to 6 ms, no backlog. The change is between 100 ms and
+  200 ms.
+- So a burst builds a queue behind `sendMu`: while the board writes take about
+  155 ms, each message waits for all the ones before it. A client that reads
+  `keys.json`, or watches the board, a few seconds after it sends sees no
+  effect yet. That fits "a send within a few seconds of a change usually
+  failed" in the first Notes. It is a delay, not a loss.
+- Not shown: why a write takes 155 ms after a write that came less than about
+  200 ms before it, and 5 ms after one that came more. It may be a minimum
+  time that the board needs for each update. The firmware has not been read.

@@ -11,9 +11,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/kgheacock/macro-pad/driver/plugin"
 	"github.com/kgheacock/macro-pad/driver/recorder"
+	"github.com/kgheacock/macro-pad/driver/statedb"
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
 
@@ -34,6 +36,14 @@ func defaultStateDir() string {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return runCtx(ctx, args, stdout, stderr, nil)
+}
+
+// runCtx is run with the lifetime in ctx. A test passes onEmulator to get
+// the emulator that --emulate creates, so it can read what the daemon sent.
+func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmulator func(*transport.Emulator)) int {
 	fs := flag.NewFlagSet("macropadd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	vendorID := fs.Uint("vendor-id", 0, "USB vendor ID of the macro pad, e.g. 0x2E8A")
@@ -44,18 +54,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key is saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
 	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
+	stateDB := fs.String("state-db", "", "SQLite file holding the page tree to show on the keys; the daemon polls it and shows the children of the active node (see task 0051); empty disables")
+	stateDBPoll := fs.Duration("state-db-poll", 250*time.Millisecond, "how often to poll --state-db")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	var dev transport.Transport
 	var injector plugin.Injector
 	if *emulate {
 		emu := transport.NewEmulator()
 		dev, injector = emu, emu
+		if onEmulator != nil {
+			onEmulator(emu)
+		}
 	} else {
 		// The board keeps no key state across a power cycle (task 0044), so
 		// this transport remembers each key's last state and replays it
@@ -107,6 +119,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "macropadd: recording to %s\n", *traceFile)
 	}
 
+	// pollCtx ends the state-db poller when the server stops, whether
+	// ctx ended or the server failed to start. pollDone signals it has
+	// stopped, so dev.Close below cannot race a send.
+	pollCtx, stopPoll := context.WithCancel(ctx)
+	defer stopPoll()
+	var pollDone chan struct{}
+	if *stateDB != "" {
+		logf := func(format string, args ...any) {
+			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
+		}
+		poller, err := statedb.New(*stateDB, dev, logf)
+		if err != nil {
+			dev.Close()
+			fmt.Fprintln(stderr, "macropadd: state-db:", err)
+			return 1
+		}
+		pollDone = make(chan struct{})
+		go func() {
+			defer close(pollDone)
+			defer poller.Close()
+			poller.Run(pollCtx, *stateDBPoll)
+		}()
+		fmt.Fprintf(stdout, "macropadd: polling %s every %s\n", *stateDB, *stateDBPoll)
+	}
+
 	fmt.Fprintf(stdout, "macropadd: listening on 127.0.0.1:%d\n", *port)
 
 	srv := plugin.NewServer(fan.Subscribe(), injector)
@@ -115,6 +152,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	})
 	runErr := srv.Run(ctx, *port)
 
+	stopPoll()
+	if pollDone != nil {
+		<-pollDone
+	}
 	dev.Close()
 	if recDone != nil {
 		<-recDone

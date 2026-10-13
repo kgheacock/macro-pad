@@ -1,13 +1,13 @@
 ---
 id: "0052"
 title: "An append-only event log reduces to the nodes and state tables that 0051 polls"
-status: "ongoing"
+status: "complete"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/59"
 branch: "0052-event-log-reduces-to-state-db"
 related: ["0051", "0013", "0028"]
 tags: ["driver", "sqlite", "state", "event-log"]
@@ -102,7 +102,7 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [x] **DoD-5** — With the 0051 poller on the same file, `Append` of a `status` change reaches a fake `Transport` within 1 s. **Proof:** `go test ./statelog -run TestPollerSeesAppend`
 - [x] **DoD-6** — `driver/README.md` records the event types and the rule that writers use `statelog`. **Proof:** `driver/README.md`, section "Event log"
 - [x] **DoD-7** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
-- [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

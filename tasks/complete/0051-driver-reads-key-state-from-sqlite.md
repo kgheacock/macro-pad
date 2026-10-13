@@ -1,13 +1,13 @@
 ---
 id: "0051"
 title: "macropadd polls a SQLite page tree and shows the active page on the keys"
-status: "ongoing"
+status: "complete"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/58"
 branch: "0051-driver-reads-key-state-from-sqlite"
 related: ["0013", "0028", "0038", "0050", "0052"]
 tags: ["driver", "daemon", "sqlite", "state"]
@@ -130,7 +130,7 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [x] **DoD-7** — `macropadd --emulate --state-db FILE` shows the child's color on the emulator within 1 s. **Proof:** `go test ./cmd/macropadd -run TestStateDBFlag`
 - [x] **DoD-8** — `driver/README.md` records the schema, `--state-db`, and `--state-db-poll`. **Proof:** `driver/README.md`, section "State database"
 - [x] **DoD-9** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
 - [x] **DoD-11** — RUNNING, DONE, ERROR, WARN, and NULL send `0x3AFF`, `0x16C9`, `0xF800`, `0xFFE0`, and `0xFFFF`, with no blink. **Proof:** `go test ./statedb -run TestStatusColors`
 - [x] **DoD-12** — Each of the six `assets/*.png` files is 128×128 and decodes with `transport.DecodePNGToRGB565`. **Proof:** `go test ./statedb -run TestChannelAssets`
 

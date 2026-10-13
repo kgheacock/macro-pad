@@ -1,14 +1,14 @@
 ---
 id: "0052"
 title: "An append-only event log reduces to the nodes and state tables that 0051 polls"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0052-event-log-reduces-to-state-db"
 related: ["0051", "0013", "0028"]
 tags: ["driver", "sqlite", "state", "event-log"]
 ---

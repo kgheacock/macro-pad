@@ -478,18 +478,6 @@ Run it alongside `macropadd` and the hook example above; a real Claude
 Code session's `Notification` and `Stop` hooks then drive the key's
 color with no other process in between.
 
-### Window switcher: `driver/examples/window-switcher`
-
-[`driver/examples/window-switcher`](examples/window-switcher) binds each
-key to a macOS desktop (through its Ctrl+N shortcut), an app, or an app
-window, and brings it forward on a press. With no config, key N switches
-to desktop N+1. Its README covers the config file, the macOS settings it
-needs, and how to test it. See task 0053.
-
-```bash
-go run ./driver/examples/window-switcher --dry-run
-```
-
 ### Virtual pad, with no board attached
 
 `--emulate` opens an in-memory `transport.Emulator` instead of a real

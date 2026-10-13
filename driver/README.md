@@ -104,6 +104,58 @@ A glyph takes about 3 s to cross to the board with the daemon's other replay
 connected). While one crosses, other sends wait their turn, but a state
 update still reaches the files at once and `Close` does not wait.
 
+## State database
+
+`macropadd --state-db PATH` polls a SQLite file and shows the children of the
+active node on keys 0–5. A child's `position` is its key index. A key with no
+child is color 0 with emoji 0 and no blink. See task 0051.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--state-db PATH` | empty (off) | SQLite file to poll. The daemon opens it read-only and never writes it. The daemon exits if it cannot open the file. |
+| `--state-db-poll D` | `250ms` | How often to poll. |
+
+The schema is `driver/statedb/schema.sql`. `nodes` and `state` are a
+projection; task 0052 reduces an event log into them.
+
+- `nodes(id, parent_id, position, channel, message, status, children_rev)`.
+  `UNIQUE(parent_id, position)`. `ON DELETE CASCADE` removes a node's
+  children with it; the writer's connection needs `foreign_keys` on.
+- `state(id, active_node_id)`. One row, `id = 1`.
+- `children_rev` counts changes to the visible fields of a node's children.
+  The writer bumps it on the parent. A write that changes no visible field
+  must not bump it, because the poller trusts it.
+
+`status` gives the key color. `NULL` is white. An unknown name logs one line
+and gives color 0. No status blinks.
+
+| status | color | RGB565 |
+|---|---|---|
+| `RUNNING` | blue `#3D5CFF` | `0x3AFF` |
+| `DONE` | green `#12D84A` | `0x16C9` |
+| `ERROR` | red | `0xF800` |
+| `WARN` | yellow | `0xFFE0` |
+| `NULL` | white | `0xFFFF` |
+
+`channel` and `message` are read and compared, but not drawn yet. The icons
+for each channel are in `assets/`.
+
+**How the poller stays cheap.** It holds one connection. Each tick it reads
+`PRAGMA data_version`; if that is unchanged, it stops. Otherwise it reads
+`(active_node_id, children_rev)`; if that pair is unchanged, it stops. Only a
+changed pair reads the children and sends six `KeyState` messages. The
+`children_rev` rule above is what keeps a write that changes no visible field
+from reaching the board.
+
+**One writer per key.** A plugin and the database can both set one key. The
+last write wins, and the poller sends only when the pair changes, so a plugin's
+color stays until the next database change. A page switch sends six messages
+in a burst; on the board, task 0050 measured about 155 ms per write in a burst,
+so a switch may take about 1 s.
+
+**Errors.** A read error is logged and retried on the next tick. The board
+keeps its last state. This covers a database on a stale or network mount.
+
 ## Connectivity check
 
 `driver/cmd/pingpong` sends a ping — a Key state message with the

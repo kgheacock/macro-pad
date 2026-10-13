@@ -7,7 +7,7 @@ updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/62"
 branch: "claude/project-thread-p5qq77"
 related: ["0030", "0042", "0053"]
 tags: ["driver", "plugin", "macos", "screencapturekit"]

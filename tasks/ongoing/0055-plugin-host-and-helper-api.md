@@ -1,13 +1,13 @@
 ---
 id: "0055"
 title: "Run every Go plugin in one plugin host with a shared helper API"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/63"
+pr: null
 branch: "claude/project-thread-trlli9"
 related: ["0013", "0028", "0030", "0051", "0053", "0054"]
 tags: ["driver", "plugin", "api", "macos"]
@@ -206,7 +206,10 @@ type Host interface {
 	// Pages.
 	Visible() bool
 	OnVisible(fn func(visible bool))
+	Page() string
+	Pages() []string
 	ShowPage(name string) error
+	OnPageChange(fn func(page string)) // every instance, after any switch
 
 	// Cross-plugin bus, in process only.
 	Publish(topic string, v any)
@@ -221,12 +224,12 @@ type Host interface {
 }
 
 type Key interface {
-	SetColor(c keyimg.Color)            // solid color, no glyph
-	SetState(name string)               // Alert, Waiting, Done (api.SetState)
-	SetBlink(on bool)
+	SetColor(c keyimg.Color) error      // solid color, no glyph
+	SetState(name string) error         // Alert, Waiting, Done (api.SetState)
+	SetBlink(on bool) error
 	SetImage(img image.Image) error     // scaled and encoded to 128x128 PNG
 	SetPNG(png []byte) error
-	Clear()
+	Clear() error
 }
 ```
 
@@ -245,9 +248,13 @@ queue drops the next call and logs it, matching the server's
 drop-rather-than-block rule (task 0028). A 250 ms Accessibility call in
 one plugin does not delay another.
 
-Signals not tied to an owned key, such as a broadcast from a non-Go
-plugin, go to every instance that subscribed to that name with
-`OnSignal`.
+Presses, releases, and click signals (`singlePress`, `doublePress`,
+`longPress`) go only to the owner on the active page. Every other
+signal, such as `processWaiting`, goes to every instance that owns the
+key on any page, so a status plugin on a hidden page stays current and
+shows the right state when its page comes back. A signal on a key no
+instance owns, such as a broadcast from a non-Go plugin, goes to every
+instance that subscribed to that name with `OnSignal`.
 
 ### Config file
 
@@ -332,7 +339,6 @@ switch to `keyimg`.
 - `Frontmost() (Window, error)` — app, title, window id;
 - `SelectedText() (string, error)` — the Accessibility path of task
   0053;
-- `Pasteboard` — `Save() Saved`, `Restore(Saved)`, `ChangeCount()`;
 - `Permissions() PermissionState` — Accessibility and Screen Recording
   granted or not, from `AXIsProcessTrusted` and
   `CGPreflightScreenCaptureAccess`.
@@ -343,7 +349,9 @@ grant calls `h.Require(macos.Accessibility)` in `Start`, which returns
 an error that disables only that instance.
 
 Window capture stays in `driver/preview` for now. It moves into
-`macos` when task 0054 merges.
+`macos` when task 0054 merges. Saving and restoring the pasteboard
+(task 0053's Cmd+C fallback) joins `macos` with that task's plugin,
+which is its only caller.
 
 ### Bus topics
 

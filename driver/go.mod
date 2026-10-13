@@ -7,6 +7,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/sstallion/go-hid v0.15.0
 	go.bug.st/serial v1.6.4
+	golang.org/x/image v0.18.0
 )
 
 require (

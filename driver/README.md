@@ -373,8 +373,8 @@ install it onto `PATH` first: `go install
 
 **Claude Code hook example.** Add these to `.claude/settings.json` so a
 `Notification` or `Stop` hook event runs `macrodriver signal`, and run
-[`driver/examples/claude-status`](../examples/claude-status) — the
-reference plugin below — to see the result on a key:
+the plugin host with the `claude-status` plugin (see "Plugin host,"
+below) to see the result on a key:
 
 ```json
 {
@@ -463,20 +463,157 @@ installation
 docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation)
 for the platform-specific step.
 
-### Reference plugin: `driver/examples/claude-status`
+### Plugin host
 
-[`driver/examples/claude-status`](../examples/claude-status) stays
-connected to `macropadd` and reacts to `processWaiting` and `processDone`
-signals named for one key by calling `SetState`: the key blinks amber
-while the session waits on input, and turns solid green once it's done.
+`driver/cmd/macropad-plugins` runs every Go plugin in one process, over
+one connection to `macropadd`. One config file says which plugin runs on
+which keys, and on which page. The host routes each press, click, and
+signal to the plugin that owns the key, drops writes to keys a plugin
+does not own, and reconnects and repaints when `macropadd` restarts. See
+task 0055.
 
 ```bash
-go run ./driver/examples/claude-status --key 0
+go install ./driver/cmd/macropad-plugins
+macropad-plugins --list                     # plugins this binary carries
+macropad-plugins --check                    # validate the config and exit
+macropad-plugins                            # run; reads ~/.config/macropad/plugins.json
+macropad-plugins --config plugins.json --addr 127.0.0.1:8765
 ```
 
-Run it alongside `macropadd` and the hook example above; a real Claude
-Code session's `Notification` and `Stop` hooks then drive the key's
-color with no other process in between.
+Plugins in other languages keep talking to `macropadd` directly over the
+protocol above. Leave their keys out of the host's config: the host
+cannot stop them writing a key, and clears a key nobody in the host owns
+when the page changes.
+
+**Config.** [`cmd/macropad-plugins/example.json`](cmd/macropad-plugins/example.json):
+
+```json
+{
+  "startPage": "work",
+  "plugins": [
+    {"id": "claude",   "use": "claude-status", "page": "work",   "keys": [0]},
+    {"id": "claude-2", "use": "claude-status", "page": "agents", "keys": [0, 1, 2, 3, 4]},
+    {"id": "pager",    "use": "pager",         "page": "*",      "keys": [5]}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `addr` | `host:port` of `macropadd`. `--addr` overrides it. Default `127.0.0.1:8765`. |
+| `startPage` | The page that shows first. Default: the first page named. |
+| `plugins[].id` | Unique name for this instance, used in logs. |
+| `plugins[].use` | The plugin, as `--list` names it. One plugin can run as many instances. |
+| `plugins[].page` | The page its keys show on. Default `main`. `*` shows them on every page. |
+| `plugins[].keys` | The physical keys, 0–5, it owns on its page. |
+| `plugins[].config` | The plugin's own settings. |
+
+The host checks the whole file before it connects: every `use` is known,
+every `id` is unique, every key is 0–5, no two instances own one key on
+one page, a key on `*` is owned nowhere else, and `startPage` exists. It
+prints every problem and exits with code 2.
+
+**Pages.** The `pager` plugin moves to the next page when its key is
+clicked, and shows the page's name and number on the key. Its config
+takes `pages` (the cycle, default every page) and `click` (`single`,
+`double`, or `long`; default `single`). On a page switch, the host sends
+each key's last state for the new page and clears a key nobody owns
+there. Then it broadcasts a `pageChanged` signal whose `keyIndex` is the
+new page's index. A plugin on a hidden page keeps running. It still gets
+the signals for its keys, so `claude-status` stays current while hidden,
+but no presses or clicks. Its key writes are kept and shown when its page
+shows. A switch sends up to six key states, and more for keys with
+images, so on the board it can take about a second (see "One writer per
+key," above).
+
+**Writing a plugin.** A plugin is a Go package with a `host.Factory`. Add
+it to [`cmd/macropad-plugins/plugins.go`](cmd/macropad-plugins/plugins.go)
+and rebuild.
+
+```go
+package hello
+
+import (
+	"context"
+
+	"github.com/kgheacock/macro-pad/driver/host"
+	"github.com/kgheacock/macro-pad/driver/host/keyimg"
+)
+
+var Factory = host.Factory{
+	Name:        "hello",
+	Description: "a press turns a key green; a long press turns it off",
+	New:         func() host.Plugin { return &Plugin{} },
+}
+
+type Plugin struct{}
+
+func (p *Plugin) Start(ctx context.Context, h host.Host) error {
+	h.OnPress(func(key int) { h.Key(key).SetColor(keyimg.MustHex("#12D84A")) })
+	h.OnClick(host.Long, func(key int) { h.Key(key).Clear() })
+	return nil
+}
+```
+
+`host.Host` gives each instance:
+
+| Helper | What it does |
+|---|---|
+| `Keys`, `Config`, `Log` | Its keys, its decoded `config`, and a log line prefixed with its id. |
+| `Key(k).SetColor`, `SetState`, `SetBlink`, `SetImage`, `SetPNG`, `Clear` | Output to an owned key. A key it does not own returns `host.ErrNotOwner`. Calls never block on the network. |
+| `OnPress`, `OnRelease`, `OnClick` | Input on its keys while its page shows. |
+| `OnSignal` | A signal on its keys, shown or hidden. A signal on a key nobody owns goes to every instance listening for that name. |
+| `Visible`, `OnVisible`, `Page`, `Pages`, `ShowPage`, `OnPageChange` | Pages. |
+| `Publish`, `Subscribe` | An in-process bus between plugins. Topics with a set payload are in [`host/topics.go`](host/topics.go). |
+| `Go`, `Every` | A goroutine that recovers a panic, and a timer whose function runs like a handler. |
+| `Require` | An error when the host binary lacks a macOS permission. |
+
+Handlers, bus deliveries, and `Every` functions run one at a time on the
+instance's own goroutine, so a plugin needs no lock for its own state.
+Each instance has its own queue of 64 calls, so a slow handler delays
+only its own instance. A full queue drops the call and logs it. The host
+catches and logs a panic in anything it calls. A plugin that starts a
+bare `go` statement and panics takes the whole host down, so use
+`h.Go`. A `Start` that returns an error turns off only that instance.
+
+Shared helpers:
+
+- [`host/keyimg`](host/keyimg): `Hex("#RRGGBB")`, `Color.RGB565`,
+  `Color.Dim`, `Palette` (six default key colors), `Thumbnail` (scale and
+  letterbox to 128x128), `Stale` (dimmed, with an amber strip), `Text`
+  (a short label), and `PNG`.
+- [`host/macos`](host/macos): `AppleScript`, and a `Desktop` with
+  `SwitchDesktop`, `ActivateApp`, `RaiseWindow`, `Frontmost`, and
+  `SelectedText`; also `Permissions`. A plugin keeps a `macos.Desktop`
+  field set to `macos.System`, so its tests use a fake.
+- [`host/hosttest`](host/hosttest): a fake `Host` for plugin tests.
+  `hosttest.New(t, keys...)`, then `Press`, `Click`, `Signal`, `Deliver`,
+  `Tick`, and `KeyState(k)` to read the result. Handlers run
+  synchronously.
+
+**macOS permissions.** macOS grants Accessibility and Screen Recording
+to each binary. With the host, one binary needs them, not one per
+plugin. At start, the host logs one line for each grant it lacks,
+naming its own path. Add that path in System Settings > Privacy &
+Security, then restart the host. A plugin that needs a grant calls
+`h.Require(macos.Accessibility)` in `Start`; without the grant, only
+that plugin stays off. An unsigned rebuild can lose the grant. To keep
+it across rebuilds, sign the binary with a stable identity:
+`codesign -s "<your identity>" -f $(go env GOPATH)/bin/macropad-plugins`.
+
+**Two writers.** The state database poller (see "State database,"
+above) also writes keys 0–5. Don't run it and the host on the same keys.
+
+### Reference plugin: `claude-status`
+
+[`plugins/claudestatus`](plugins/claudestatus) reacts to the
+`processWaiting` and `processDone` signals on its keys. A key blinks
+amber while the session waits on input, and turns solid green when it's
+done. Run it with the host and the hook example above:
+
+```bash
+macropad-plugins --config driver/cmd/macropad-plugins/example.json
+```
 
 ### Virtual pad, with no board attached
 

@@ -103,7 +103,7 @@ The pad must keep its state with no plugin running, and an idle poll must cost a
 
 `driver/statedb` exposes `Run(ctx, path, interval, dev transport.Transport, logf)`.
 
-- Open with `?_pragma=foreign_keys(1)&mode=ro`. Create the schema in a test helper only; the poller never writes.
+- Open with `file:PATH?mode=ro&_foreign_keys=1`, the go-sqlite3 spelling (`_pragma=` is another driver's). Create the schema in a test helper only; the poller never writes.
 - Each tick, read `PRAGMA data_version`. If it equals the last value, stop.
 - Otherwise run the poller query. If the pair equals the last pair, stop.
 - Otherwise read `WHERE parent_id = ? ORDER BY position`. Send one `KeyState` for each of keys 0–5. A key with no child gets color 0, emoji 0, no blink.
@@ -121,18 +121,18 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — After a write that changes a child's `status`, the poller sends that key's new `KeyState` to a fake `Transport` within 1 s. **Proof:** `cd driver && go test ./statedb -run TestStatusChangeSent`
-- [ ] **DoD-2** — `UPDATE nodes SET message = message` sends no message. **Proof:** `go test ./statedb -run TestNoopWriteSendsNothing`
-- [ ] **DoD-3** — Setting `state.active_node_id` to another node sends six `KeyState` messages for that node's children. **Proof:** `go test ./statedb -run TestPageSwitch`
-- [ ] **DoD-4** — With no change, the poller runs the children query 0 times in 20 ticks. **Proof:** `go test ./statedb -run TestIdleDoesNotQueryChildren`
-- [ ] **DoD-5** — A key with no child at its position gets color 0 and emoji 0. A NULL `status` gets color `0xFFFF`. An unknown `status` logs one line and gets color 0. **Proof:** `go test ./statedb -run 'TestMissingChild|TestNullStatus|TestUnknownStatus'`
-- [ ] **DoD-6** — Deleting the active node's parent with `foreign_keys` on removes its children. **Proof:** `go test ./statedb -run TestCascadeDelete`
-- [ ] **DoD-7** — `macropadd --emulate --state-db FILE` shows the child's color on the emulator within 1 s. **Proof:** `go test ./cmd/macropadd -run TestStateDBFlag`
-- [ ] **DoD-8** — `driver/README.md` records the schema, `--state-db`, and `--state-db-poll`. **Proof:** `driver/README.md`, section "State database"
-- [ ] **DoD-9** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
+- [x] **DoD-1** — After a write that changes a child's `status`, the poller sends that key's new `KeyState` to a fake `Transport` within 1 s. **Proof:** `cd driver && go test ./statedb -run TestStatusChangeSent`
+- [x] **DoD-2** — `UPDATE nodes SET message = message` sends no message. **Proof:** `go test ./statedb -run TestNoopWriteSendsNothing`
+- [x] **DoD-3** — Setting `state.active_node_id` to another node sends six `KeyState` messages for that node's children. **Proof:** `go test ./statedb -run TestPageSwitch`
+- [x] **DoD-4** — With no change, the poller runs the children query 0 times in 20 ticks. **Proof:** `go test ./statedb -run TestIdleDoesNotQueryChildren`
+- [x] **DoD-5** — A key with no child at its position gets color 0 and emoji 0. A NULL `status` gets color `0xFFFF`. An unknown `status` logs one line and gets color 0. **Proof:** `go test ./statedb -run 'TestMissingChild|TestNullStatus|TestUnknownStatus'`
+- [x] **DoD-6** — Deleting the active node's parent with `foreign_keys` on removes its children. **Proof:** `go test ./statedb -run TestCascadeDelete`
+- [x] **DoD-7** — `macropadd --emulate --state-db FILE` shows the child's color on the emulator within 1 s. **Proof:** `go test ./cmd/macropadd -run TestStateDBFlag`
+- [x] **DoD-8** — `driver/README.md` records the schema, `--state-db`, and `--state-db-poll`. **Proof:** `driver/README.md`, section "State database"
+- [x] **DoD-9** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
 - [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
-- [ ] **DoD-11** — RUNNING, DONE, ERROR, WARN, and NULL send `0x3AFF`, `0x16C9`, `0xF800`, `0xFFE0`, and `0xFFFF`, with no blink. **Proof:** `go test ./statedb -run TestStatusColors`
-- [ ] **DoD-12** — Each of the six `assets/*.png` files is 128×128 and decodes with `transport.DecodePNGToRGB565`. **Proof:** `go test ./statedb -run TestChannelAssets`
+- [x] **DoD-11** — RUNNING, DONE, ERROR, WARN, and NULL send `0x3AFF`, `0x16C9`, `0xF800`, `0xFFE0`, and `0xFFFF`, with no blink. **Proof:** `go test ./statedb -run TestStatusColors`
+- [x] **DoD-12** — Each of the six `assets/*.png` files is 128×128 and decodes with `transport.DecodePNGToRGB565`. **Proof:** `go test ./statedb -run TestChannelAssets`
 
 ## Risks
 
@@ -145,3 +145,8 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [ ] Should version 1 draw the `channel` icon with `SendCustomGlyph`? The default is no; the icons stay ready in `assets/`. — kgheacock
 - [ ] Should any status blink, for example ERROR as `Alert` does today? The default is no. — kgheacock
 - [x] Which process creates the database and writes `state`? Answer: the `statelog` library from task 0052 reduces events into `nodes` and `state`. Until 0052 lands, tests write the rows directly. — kgheacock
+
+## Notes
+
+- Not measured on the board: no board was attached. The real time of a page switch (about 1 s expected, from task 0050) is still unrecorded.
+- A key whose child has `NULL` `status` shows white. A key with no child shows color 0.

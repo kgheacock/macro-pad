@@ -608,6 +608,51 @@ buffers every line in memory until the daemon stops, per task 0025's
 design, so leaving it on for a long session is a deliberate choice, not
 a default.
 
+### Window previews: `driver/cmd/windowpreview`
+
+`windowpreview` shows a live thumbnail of a window on each mapped key. It
+captures each window with ScreenCaptureKit every `--interval` (default
+5 s), fits it into 128×128 with black bars, and sends it with
+`setCustomGlyph`. A key is sent only when at least 0.5% of its pixels
+change, so a blinking cursor costs nothing. See task 0054.
+
+```bash
+go run ./driver/cmd/windowpreview --list            # window IDs, apps, titles
+go run ./driver/cmd/windowpreview --map 0=Safari --map 1=iTerm2:build --map 2=#4512
+```
+
+`--map KEY=SELECTOR` is repeatable. `App` picks that app's frontmost
+window, `App:Title` the first whose title contains `Title`, and `#ID` one
+window by its `--list` ID. Matching ignores case. Once a key finds a
+window, it keeps it while it matches, so it does not jump between two
+windows of one app.
+
+**Hidden windows.** ScreenCaptureKit returns nothing useful for a
+minimized window, a window on another desktop, or a hidden app's windows.
+Those keys show the last snapshot taken while the window was on screen,
+at half brightness with an amber strip along the bottom. To keep that
+snapshot fresh, `windowpreview` checks the frontmost window every
+`--focus-poll` (default 500 ms) and captures the window that just lost
+focus at once. A window that was never on screen since `windowpreview`
+started leaves its key alone. A switcher in the same process can call
+`preview.Previewer.SnapshotWindow` just before it switches away.
+
+**Permission.** It needs macOS 14 and the Screen Recording permission. On
+the first run macOS asks; allow the program, or the terminal running
+`go run`, in System Settings > Privacy & Security > Screen & System Audio
+Recording, then start it again. Without the permission, window titles
+read as empty. Some macOS 15 releases also ask again from time to time whether the
+program may keep recording.
+
+**Cost.** Each changed key is one 32 KB push, which waits behind other
+sends to the board. Six windows that all change every tick keep the link
+busy, so raise `--interval` if key-state changes start to lag. The daemon
+also rewrites `glyph-N.bin` in its state directory on each push.
+
+The package [`driver/preview`](preview) takes the key-to-window mapping as
+a `[]preview.Target`, so a switcher that owns the mapping can drive it
+directly instead of through flags.
+
 ## End-to-end scenarios
 
 [`driver/e2e`](e2e/) is a `Pad` facade over `transport.Transport`: a

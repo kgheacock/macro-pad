@@ -95,13 +95,13 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — After a `node_set` event, `nodes` holds the new row and the parent's `children_rev` is one higher. **Proof:** `cd driver && go test ./statelog -run TestNodeSetBumpsParent`
-- [ ] **DoD-2** — A `node_set` that repeats the stored values leaves `children_rev` unchanged. **Proof:** `go test ./statelog -run TestNoopEventNoBump`
-- [ ] **DoD-3** — `Rebuild` after a mixed history gives `nodes` and `state` rows equal to the live rows, including `children_rev`. **Proof:** `go test ./statelog -run TestRebuildEqualsLive`
-- [ ] **DoD-4** — An event with an unknown `type` returns an error and adds no row to `events`. **Proof:** `go test ./statelog -run TestUnknownTypeRollsBack`
-- [ ] **DoD-5** — With the 0051 poller on the same file, `Append` of a `status` change reaches a fake `Transport` within 1 s. **Proof:** `go test ./statelog -run TestPollerSeesAppend`
-- [ ] **DoD-6** — `driver/README.md` records the event types and the rule that writers use `statelog`. **Proof:** `driver/README.md`, section "Event log"
-- [ ] **DoD-7** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
+- [x] **DoD-1** — After a `node_set` event, `nodes` holds the new row and the parent's `children_rev` is one higher. **Proof:** `cd driver && go test ./statelog -run TestNodeSetBumpsParent`
+- [x] **DoD-2** — A `node_set` that repeats the stored values leaves `children_rev` unchanged. **Proof:** `go test ./statelog -run TestNoopEventNoBump`
+- [x] **DoD-3** — `Rebuild` after a mixed history gives `nodes` and `state` rows equal to the live rows, including `children_rev`. **Proof:** `go test ./statelog -run TestRebuildEqualsLive`
+- [x] **DoD-4** — An event with an unknown `type` returns an error and adds no row to `events`. **Proof:** `go test ./statelog -run TestUnknownTypeRollsBack`
+- [x] **DoD-5** — With the 0051 poller on the same file, `Append` of a `status` change reaches a fake `Transport` within 1 s. **Proof:** `go test ./statelog -run TestPollerSeesAppend`
+- [x] **DoD-6** — `driver/README.md` records the event types and the rule that writers use `statelog`. **Proof:** `driver/README.md`, section "Event log"
+- [x] **DoD-7** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
 - [ ] **DoD-8** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks

@@ -1,14 +1,14 @@
 ---
 id: "0054"
 title: "Keys show a live thumbnail of their window, and the last snapshot when it is hidden"
-status: "ongoing"
+status: "backlog"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/62"
-branch: "claude/project-thread-p5qq77"
+pr: null
+branch: null
 related: ["0030", "0042", "0053"]
 tags: ["driver", "plugin", "macos", "screencapturekit"]
 ---

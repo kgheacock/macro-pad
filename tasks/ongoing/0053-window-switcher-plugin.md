@@ -7,7 +7,7 @@ updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/60"
 branch: "claude/project-thread-8hsd26"
 related: ["0011", "0012", "0013", "0015", "0017", "0028"]
 tags: ["driver", "plugin", "macos", "windows"]

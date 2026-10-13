@@ -1,14 +1,14 @@
 ---
 id: "0051"
 title: "macropadd polls a SQLite page tree and shows the active page on the keys"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-13"
 updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0051-driver-reads-key-state-from-sqlite"
 related: ["0013", "0028", "0038", "0050", "0052"]
 tags: ["driver", "daemon", "sqlite", "state"]
 ---

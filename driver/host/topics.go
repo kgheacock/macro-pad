@@ -8,14 +8,7 @@ const (
 	// macos.Window being hidden. A previewer snapshots it, so its key
 	// keeps a picture from just before the window was hidden.
 	TopicWindowWillHide = "window.willHide"
-	// TopicSelectionCaptured is published by a selection capture (task
-	// 0053). Payload: SelectionCaptured.
+	// TopicSelectionCaptured is published by the host's selection
+	// capture (task 0053), which defines its payload.
 	TopicSelectionCaptured = "selection.captured"
 )
-
-// SelectionCaptured is TopicSelectionCaptured's payload.
-type SelectionCaptured struct {
-	Key    int
-	Text   string
-	Source string // "ax" or "clipboard"
-}

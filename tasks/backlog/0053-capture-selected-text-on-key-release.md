@@ -129,7 +129,7 @@ The host config gains a top-level `selection` block:
 On a release of a capture key, the router hands the capture to the service on its own goroutine, not on any instance queue. When the capture returns non-empty text, the host:
 
 1. calls every instance's `OnSelection` handlers;
-2. publishes `selection.Captured{Key, Text, Source}` on the bus topic `selection.captured`, which task 0055 already names;
+2. publishes `selection.Captured{Key, Text, Source}` on `host.TopicSelectionCaptured` (`"selection.captured"`). Task 0055 names the topic only; this task defines the payload type in `driver/host/selection`;
 3. sends one `signal` named `selectionCaptured` for that key to the daemon, carrying `text` and `source`, so non-Go WebSocket plugins see it.
 
 A release that arrives while a capture-on-release is running is dropped and logged.
@@ -138,20 +138,25 @@ A release that arrives while a capture-on-release is running is dropped and logg
 
 `plugin.SignalPayload` gains two optional fields, `Text string` (`json:"text,omitempty"`) and `Source string` (`json:"source,omitempty"`), and a `SignalSelectionCaptured` constant. Existing signals leave them empty, so their JSON does not change. The daemon already rebroadcasts a client's `signal` verbatim, so it needs no other change.
 
-The host gains an internal way to send a `signal`. Task 0055's `Host` gives plugins none, and this task does not add one for plugins.
+The host gains `Runner.Signal(key int, p plugin.SignalPayload) error`, an internal way to send a `signal` over its WebSocket connection, built on the runner's existing locked send. Task 0055's `Host` gives plugins no way to send a signal, and this task does not add one for plugins.
 
 ### macOS helpers
 
-`macos.Copy() error` posts Cmd+C with `CGEventPost`. Task 0055 lists `SelectedText` and `Pasteboard` but no key-post helper. This task adds it beside them, with a stub for other OSes. `selection.Service` takes the helpers through a small interface, so tests pass fakes.
+Task 0055 as built has `macos.SelectedText` but no pasteboard or key-post helpers. This task adds both beside it, each with a stub for other OSes:
+
+- `macos.Copy() error` posts Cmd+C with `CGEventPost`.
+- `macos.Pasteboard` with `Save() Saved`, `Restore(Saved)`, and `ChangeCount() int`. `Save` copies every item and type on the general pasteboard; `Restore` writes them back.
+
+`selection.Service` takes the helpers through a small interface, so tests pass fakes.
 
 Files to change:
 
-- `driver/host/selection/selection.go` — `Service`, `Capture`, the AX-then-clipboard logic
+- `driver/host/selection/selection.go` — `Service`, `Capture`, the AX-then-clipboard logic, the `Captured` payload
 - `driver/host/selection/selection_test.go` — tests with fake `macos` helpers
 - `driver/host/macos/copy_darwin.go`, `copy_other.go` — `Copy`
-- `driver/host/*.go` — `SelectedText`, `OnSelection`, the `selection` config block, capture on release, the internal signal send
+- `driver/host/macos/pasteboard_darwin.go`, `pasteboard_other.go` — `Pasteboard`
+- `driver/host/*.go` — `SelectedText` and `OnSelection` on `Host`, the `selection` block in `host.Config`, capture on release, `Runner.Signal`
 - `driver/host/hosttest/*.go` — `SetSelection`, `Capture`
-- `driver/host/topics.go` — the `selection.Captured` payload
 - `driver/plugin/protocol.go` — `Text` and `Source` on `SignalPayload`, `SignalSelectionCaptured`
 - `driver/README.md` — the selection API, the config block, the bus topic, the signal, and the permission step
 

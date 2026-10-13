@@ -116,7 +116,7 @@ child is color 0 with emoji 0 and no blink. See task 0051.
 | `--state-db-poll D` | `250ms` | How often to poll. |
 
 The schema is `driver/statedb/schema.sql`. `nodes` and `state` are a
-projection; task 0052 reduces an event log into them.
+projection; see "Event log" for how they are written.
 
 - `nodes(id, parent_id, position, channel, message, status, children_rev)`.
   `UNIQUE(parent_id, position)`. `ON DELETE CASCADE` removes a node's
@@ -155,6 +155,54 @@ so a switch may take about 1 s.
 
 **Errors.** A read error is logged and retried on the next tick. The board
 keeps its last state. This covers a database on a stale or network mount.
+
+## Event log
+
+`nodes` and `state` are derived. The source of truth is the append-only
+`events` table. Package `driver/statelog` writes both. See task 0052.
+
+**Writers must use `statelog`.** Do not edit `nodes` or `state` directly. The
+next `Rebuild` replays `events` into empty tables and erases the edit.
+
+```go
+l, err := statelog.Open("state.db") // creates the tables in a new file
+l.Append(statelog.Event{Type: statelog.TypeNodeSet, Payload: statelog.NodeSet{
+    ID: 2, ParentID: &root, Position: &pos, Status: &status,
+}})
+l.Rebuild() // replay every event into empty nodes and state
+```
+
+`Open` uses WAL, so the read-only poller can read while a writer works. The
+poller needs access to the `-shm` file beside the database.
+
+`Append` adds the event row and reduces it into the tables in one
+transaction. The poller sees all of an event or none of it. If the event
+fails, nothing is written, not even the event row.
+
+`events(id, at, type, payload)`. `payload` is JSON with the full new values,
+not deltas. An unknown field in a payload is an error. Triggers refuse
+`UPDATE` and `DELETE` on `events`.
+
+| type | payload | effect |
+|---|---|---|
+| `node_set` | `id`, `parent_id`, `position`, `channel`, `message`, `status` | Insert or replace the node's fields. A field left out is `NULL`. |
+| `node_delete` | `id` | Remove the node. Foreign keys remove its children. It is an error if the node does not exist. |
+| `activate` | `node_id` | Set `state.active_node_id`. `null` clears it. |
+
+`children_rev` rules:
+
+- A `node_set` that changes `parent_id`, `position`, `channel`, `message` or
+  `status` adds one to `children_rev` of the parent. A move adds one to the
+  old parent too. A new node counts as a change.
+- A `node_set` that repeats the stored values changes nothing. The event is
+  still logged.
+- `node_delete` adds one to the parent.
+- `activate` never changes `children_rev`.
+
+An event that breaks a table rule fails. Examples are a position that is
+already taken, a parent that does not exist, and a delete of the active node
+or of a page that holds it. `Rebuild` replays in `id` order, because
+`children_rev` is a counter and the order matters.
 
 ## Connectivity check
 

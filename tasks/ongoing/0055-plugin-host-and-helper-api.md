@@ -7,7 +7,7 @@ updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/65"
 branch: "claude/project-thread-trlli9"
 related: ["0013", "0028", "0030", "0051", "0053", "0054"]
 tags: ["driver", "plugin", "api", "macos"]

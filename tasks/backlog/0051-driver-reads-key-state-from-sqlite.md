@@ -72,7 +72,7 @@ The pad must keep its state with no plugin running, and an idle poll must cost a
 
 `nodes` and `state` are a projection. Task 0052 derives them from an append-only event log. The poller reads them and never writes them.
 
-- `nodes(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE, position INTEGER, channel TEXT CHECK (channel IN ('LIVE','DEV','MESSAGES','GITHUB','JIRA','CREATE')), message TEXT, status TEXT CHECK (status IN ('RUNNING','DONE','ERROR','WARN')), children_rev INTEGER NOT NULL DEFAULT 0, UNIQUE(parent_id, position))`
+- `nodes(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE, position INTEGER, channel TEXT CHECK (channel IN ('LIVE','DEV','MESSAGES','GITHUB','AI','CREATE')), message TEXT, status TEXT CHECK (status IN ('RUNNING','DONE','ERROR','WARN')), children_rev INTEGER NOT NULL DEFAULT 0, UNIQUE(parent_id, position))`
 - `state(id INTEGER PRIMARY KEY CHECK (id = 1), active_node_id INTEGER REFERENCES nodes(id))`
 - `children_rev` counts changes to the visible fields of a node's children. The writer bumps it. If a write changes no visible field, it does not bump it.
 - `status` is SQL NULL for the white state. The four names are the only other values.
@@ -94,7 +94,7 @@ The pad must keep its state with no plugin running, and an idle poll must cost a
   | DEV | 🧪 `assets/dev.png` |
   | MESSAGES | `assets/gmail.png` |
   | GITHUB | `assets/github.png` |
-  | JIRA | `assets/jira.png` |
+  | AI | `assets/ai.png` |
   | CREATE | ⊕ `assets/create.png` (black) |
 
 - The poller query is `SELECT s.active_node_id, n.children_rev FROM state s JOIN nodes n ON n.id = s.active_node_id`.

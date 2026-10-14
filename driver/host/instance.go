@@ -26,7 +26,10 @@ type instance struct {
 	queue    chan func()
 	disabled atomic.Bool
 	handlers handlers
-	ctx      context.Context
+	// ctx ends when the host stops or the instance is disabled, which
+	// stops its Go and Every goroutines.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// state is the last state set per owned key. Guarded by r.mu.
 	state map[int]KeyState
@@ -48,20 +51,27 @@ func newInstance(r *Runner, ic InstanceConfig, p Plugin) *instance {
 // start calls the plugin's Start. An error or a panic disables the
 // instance.
 func (in *instance) start(ctx context.Context) {
-	in.ctx = ctx
+	in.ctx, in.cancel = context.WithCancel(ctx)
 	var err error
 	ok := false
 	in.r.safeCall(in.id, func() {
-		err = in.plugin.Start(ctx, in)
+		err = in.plugin.Start(in.ctx, in)
 		ok = true
 	})
 	if !ok {
 		err = fmt.Errorf("start panicked")
 	}
 	if err != nil {
-		in.disabled.Store(true)
-		in.r.opt.Logf("[%s] disabled: %v", in.id, err)
+		in.disable(err)
 	}
+}
+
+// disable turns the instance off: it gets no more handler calls, its Go
+// and Every goroutines see their context end, and its Key calls fail.
+func (in *instance) disable(err error) {
+	in.disabled.Store(true)
+	in.cancel()
+	in.r.opt.Logf("[%s] disabled: %v", in.id, err)
 }
 
 // loop runs the instance's handler calls one at a time until ctx is done.
@@ -134,6 +144,9 @@ func (in *instance) Key(i int) Key {
 		return NotOwnedKey
 	}
 	return NewKey(func(change func(*KeyState) error) error {
+		if in.disabled.Load() {
+			return ErrDisabled
+		}
 		in.r.mu.Lock()
 		defer in.r.mu.Unlock()
 		st := in.state[i]

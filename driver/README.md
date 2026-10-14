@@ -481,9 +481,9 @@ macropad-plugins --config plugins.json --addr 127.0.0.1:8765
 ```
 
 Plugins in other languages keep talking to `macropadd` directly over the
-protocol above. Leave their keys out of the host's config: the host
-cannot stop them writing a key, and clears a key nobody in the host owns
-when the page changes.
+protocol above. Don't run them on the same keys as the host: the host
+cannot stop them writing a key, and clears every key nobody in the host
+owns when it connects and when the page changes.
 
 **Config.** [`cmd/macropad-plugins/example.json`](cmd/macropad-plugins/example.json):
 

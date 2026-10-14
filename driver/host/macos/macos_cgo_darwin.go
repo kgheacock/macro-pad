@@ -53,6 +53,35 @@ static char *macos_selected_text(int *err) {
 	*err = 0;
 	return buf;
 }
+// macos_front_window_id returns the window number of the frontmost
+// normal (layer 0) on-screen window, or 0. CGWindowList orders windows
+// front to back, and reading a window's number and layer needs no
+// permission.
+static unsigned int macos_front_window_id(void) {
+	CFArrayRef list = CGWindowListCopyWindowInfo(
+		kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+	if (list == NULL) {
+		return 0;
+	}
+	unsigned int id = 0;
+	CFIndex n = CFArrayGetCount(list);
+	for (CFIndex i = 0; i < n; i++) {
+		CFDictionaryRef w = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+		CFNumberRef layer = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowLayer);
+		int l = -1;
+		if (layer == NULL || !CFNumberGetValue(layer, kCFNumberIntType, &l) || l != 0) {
+			continue;
+		}
+		CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowNumber);
+		int v = 0;
+		if (num != NULL && CFNumberGetValue(num, kCFNumberIntType, &v)) {
+			id = (unsigned int)v;
+			break;
+		}
+	}
+	CFRelease(list);
+	return id;
+}
 */
 import "C"
 
@@ -67,6 +96,10 @@ func permissions() PermissionState {
 		Accessibility:   C.macos_ax_trusted() == 1,
 		ScreenRecording: C.macos_screen_capture_allowed() == 1,
 	}
+}
+
+func frontWindowID() WindowID {
+	return WindowID(C.macos_front_window_id())
 }
 
 // AXError values that mean "nothing selected" rather than a failure.

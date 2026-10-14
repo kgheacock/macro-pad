@@ -74,8 +74,14 @@ func Executable() string {
 	return p
 }
 
+// WindowID is a window's CoreGraphics window number
+// (kCGWindowNumber), the id ScreenCaptureKit and CGWindowList use.
+type WindowID uint32
+
 // Window is one app window.
 type Window struct {
+	// ID is 0 when it is not known: off macOS, or on a build without cgo.
+	ID    WindowID
 	App   string
 	Title string
 }
@@ -93,8 +99,9 @@ type Desktop interface {
 	// RaiseWindow activates app and raises the first of its windows
 	// whose title contains titleSubstr. Needs Accessibility.
 	RaiseWindow(app, titleSubstr string) error
-	// Frontmost returns the frontmost app and its front window's title.
-	// Title is empty when the app has no window. Needs Accessibility.
+	// Frontmost returns the frontmost app, its front window's title, and
+	// that window's ID. Title is empty when the app has no window. Needs
+	// Accessibility.
 	Frontmost() (Window, error)
 	// SelectedText returns the text selected in the focused element of
 	// the frontmost app, or "" when nothing is selected or the app does
@@ -147,7 +154,11 @@ func (system) Frontmost() (Window, error) {
 		return Window{}, err
 	}
 	app, title, _ := strings.Cut(strings.TrimRight(out, "\n"), "\n")
-	return Window{App: app, Title: title}, nil
+	w := Window{App: app, Title: title}
+	if title != "" {
+		w.ID = frontWindowID()
+	}
+	return w, nil
 }
 
 func (system) SelectedText() (string, error) {

@@ -29,10 +29,10 @@ func (s KeyState) Messages(key int) []plugin.Message {
 		Kind:           plugin.KindSetCustomGlyph,
 		SetCustomGlyph: &plugin.SetCustomGlyphPayload{KeyIndex: k, Image: s.PNG},
 	}}
-	if s.Color != 0 || s.Blink {
-		msgs = append(msgs, setKeyState(k, s.Color, transport.CustomGlyphSentinelEmojiID, s.Blink))
-	}
-	return msgs
+	// The board keeps a key's color and blink across a glyph push, so
+	// always follow it with the cached ones, or a blink set before (or on
+	// another page) would carry on behind this image.
+	return append(msgs, setKeyState(k, s.Color, transport.CustomGlyphSentinelEmojiID, s.Blink))
 }
 
 func setKeyState(k byte, color uint16, emoji byte, blink bool) plugin.Message {

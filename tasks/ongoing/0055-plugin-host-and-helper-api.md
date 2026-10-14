@@ -298,8 +298,11 @@ page changes, the host:
    `OnVisible(true)` on instances coming into view;
 2. sends the cached state of each key of the new page; a key no
    instance owns on that page is cleared to color 0;
-3. broadcasts a `signal` named `pageChanged` on key 0, so the virtual
-   pad and other clients can see it.
+3. broadcasts a `signal` named `pageChanged` whose `keyIndex` is the
+   new page's index in the page list, so the virtual pad and other
+   clients can see it. The daemon echoes it back, and it reaches any
+   host instance that owns that key index and registered for
+   `pageChanged`, like any other signal.
 
 The built-in `pager` plugin moves to the next page on a single press
 of its key and shows the page's index as a glyph. `h.ShowPage` lets
@@ -328,7 +331,7 @@ cached state of every visible key.
 - `Text(s string, fg, bg Color) image.Image` — one or two short lines
   drawn with a built-in font, for labels such as a page name.
 
-These move from `window-switcher` and `driver/preview`; those callers
+These replace the copies in `window-switcher` (PR #60) and the 0054 preview code; those callers
 switch to `keyimg`.
 
 `macos` (each behind an interface so tests use fakes):
@@ -336,7 +339,7 @@ switch to `keyimg`.
 - `AppleScript(lines ...string) error` — the `osascript` runner;
 - `SwitchDesktop(n int) error`, `ActivateApp(name string) error`,
   `RaiseWindow(app, titleSubstr string) error`;
-- `Frontmost() (Window, error)` — app, title, window id;
+- `Frontmost() (Window, error)` — app, title, and window id (`WindowID`, the CoreGraphics window number);
 - `SelectedText() (string, error)` — the Accessibility path of task
   0053;
 - `Permissions() PermissionState` — Accessibility and Screen Recording
@@ -348,17 +351,16 @@ missing grant, naming the host binary's path. A plugin that needs a
 grant calls `h.Require(macos.Accessibility)` in `Start`, which returns
 an error that disables only that instance.
 
-Window capture stays in `driver/preview` for now. It moves into
-`macos` when task 0054 merges. Saving and restoring the pasteboard
-(task 0053's Cmd+C fallback) joins `macos` with that task's plugin,
-which is its only caller.
+Window capture is not in `macos` yet. Task 0054 adds it there, keyed by
+`WindowID`. Saving and restoring the pasteboard (task 0053's Cmd+C
+fallback) joins `macos` with task 0053, which is its only caller.
 
 ### Bus topics
 
 Topics are strings. The host documents the ones its plugins use, in
 `driver/host/topics.go`:
 
-- `window.willHide` — payload a window id. A switcher publishes it just
+- `window.willHide` — payload the `macos.Window` being hidden, with its `ID`. A switcher publishes it just
   before it raises another window; `windowpreview` snapshots it.
 - `selection.captured` — payload text and source, from task 0053.
 

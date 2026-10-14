@@ -5,6 +5,7 @@
 package hosttest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -166,7 +167,10 @@ func (h *Host) Config(v any) error {
 	if len(h.raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(h.raw, v)
+	// Decode exactly as the host does, so a config typo fails here too.
+	dec := json.NewDecoder(bytes.NewReader(h.raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 func (h *Host) Log(format string, args ...any) {

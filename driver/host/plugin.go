@@ -143,3 +143,7 @@ type Key interface {
 // ErrNotOwner is returned by every Key call on a key the instance does
 // not own.
 var ErrNotOwner = errors.New("host: key not owned by this instance")
+
+// ErrDisabled is returned by every Key call of an instance whose Start
+// failed, for example from a goroutine Start began before it errored.
+var ErrDisabled = errors.New("host: instance is disabled")

@@ -282,11 +282,10 @@ func TestKey_RejectsNonOwner(t *testing.T) {
 	if err := h.Key(0).SetColor(keyimg.MustHex("#FF0000")); err != nil {
 		t.Fatalf("SetColor on an owned key: %v", err)
 	}
-	waitFor(t, "key 0 write", func() bool { return len(keyStates(conn, 0)) == 1 })
-	for _, m := range conn.sent() {
-		if m.SetKeyState != nil && m.SetKeyState.KeyIndex == 3 {
-			t.Errorf("sent %+v for unowned key 3", *m.SetKeyState)
-		}
+	waitFor(t, "key 0 write", func() bool { return len(keyStates(conn, 0)) == 2 }) // the connect clear, then red
+	// Key 3 gets only the clear every unowned key gets at connect.
+	if ks := keyStates(conn, 3); len(ks) != 1 || ks[0] != (plugin.SetKeyStatePayload{KeyIndex: 3}) {
+		t.Errorf("unowned key 3 got %+v, want only the connect clear", ks)
 	}
 }
 
@@ -317,10 +316,11 @@ func TestPages(t *testing.T) {
 	if err := hs.host("b").Key(0).SetColor(blue); err != nil { // hidden: cached only
 		t.Fatal(err)
 	}
-	waitFor(t, "a's write", func() bool { return len(keyStates(conn, 0)) == 1 })
+	// attach clears every key once at connect; then a's red follows.
+	waitFor(t, "a's write", func() bool { return len(keyStates(conn, 0)) == 2 })
 	time.Sleep(20 * time.Millisecond)
-	if ks := keyStates(conn, 0); len(ks) != 1 || ks[0].Color != red.RGB565() {
-		t.Fatalf("before the switch, key 0 got %+v, want only a's red", ks)
+	if ks := keyStates(conn, 0); len(ks) != 2 || ks[1].Color != red.RGB565() {
+		t.Fatalf("before the switch, key 0 got %+v, want a clear then only a's red", ks)
 	}
 	if hs.host("b").Visible() || !hs.host("a").Visible() || !hs.host("pager").Visible() {
 		t.Fatal("Visible wrong before the switch")
@@ -329,14 +329,14 @@ func TestPages(t *testing.T) {
 	if err := hs.host("pager").ShowPage("two"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "repaint", func() bool { return len(keyStates(conn, 0)) == 2 && len(keyStates(conn, 1)) == 1 })
-	if ks := keyStates(conn, 0); ks[1].Color != blue.RGB565() {
-		t.Errorf("after the switch, key 0 = %+v, want b's blue", ks[1])
+	waitFor(t, "repaint", func() bool { return len(keyStates(conn, 0)) == 3 && len(keyStates(conn, 1)) == 2 })
+	if ks := keyStates(conn, 0); ks[2].Color != blue.RGB565() {
+		t.Errorf("after the switch, key 0 = %+v, want b's blue", ks[2])
 	}
-	if ks := keyStates(conn, 1); ks[0] != (plugin.SetKeyStatePayload{KeyIndex: 1}) {
-		t.Errorf("after the switch, key 1 (c, no state yet) = %+v, want cleared", ks[0])
+	if ks := keyStates(conn, 1); ks[1] != (plugin.SetKeyStatePayload{KeyIndex: 1}) {
+		t.Errorf("after the switch, key 1 (c, no state yet) = %+v, want cleared", ks[1])
 	}
-	if ks := keyStates(conn, 5); len(ks) != 0 {
+	if ks := keyStates(conn, 5); len(ks) != 1 {
 		t.Errorf("pager's key 5 shows on every page and should not be resent; got %+v", ks)
 	}
 	var sawSignal bool
@@ -361,6 +361,47 @@ func TestPages(t *testing.T) {
 	if err := hs.host("a").ShowPage("nope"); err == nil {
 		t.Error("ShowPage of an unknown page = nil, want an error")
 	}
+}
+
+func TestPages_ConcurrentSwitchesEndConsistent(t *testing.T) {
+	var last struct {
+		sync.Mutex
+		v map[string]bool
+	}
+	last.v = map[string]bool{}
+	cfg := Config{Plugins: []InstanceConfig{
+		{ID: "a", Page: "one", Keys: []int{0}},
+		{ID: "b", Page: "two", Keys: []int{0}},
+	}}
+	starts := map[string]func(Host) error{}
+	for _, id := range []string{"a", "b"} {
+		id := id
+		starts[id] = func(h Host) error {
+			h.OnVisible(func(v bool) { last.Lock(); last.v[id] = v; last.Unlock() })
+			return nil
+		}
+	}
+	hs, _ := run(t, cfg, starts)
+
+	var wg sync.WaitGroup
+	for _, pg := range []string{"one", "two"} {
+		pg := pg
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				hs.host("a").ShowPage(pg)
+				hs.host("a").ShowPage(map[string]string{"one": "two", "two": "one"}[pg])
+			}
+		}()
+	}
+	wg.Wait()
+	final := hs.host("a").Page()
+	waitFor(t, "OnVisible to match the final page", func() bool {
+		last.Lock()
+		defer last.Unlock()
+		return last.v["a"] == (final == "one") && last.v["b"] == (final == "two")
+	})
 }
 
 func TestRouter_RecoversPanic(t *testing.T) {
@@ -416,7 +457,7 @@ func TestReconnect_Repaints(t *testing.T) {
 	if err := hs.host("hidden").Key(1).SetState("Waiting"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "first write", func() bool { return len(keyStates(first, 0)) == 1 })
+	waitFor(t, "first write", func() bool { ks := keyStates(first, 0); return len(ks) == 2 && ks[1].Color == green.RGB565() })
 
 	second := newFakeConn()
 	hs.conns <- second
@@ -425,9 +466,11 @@ func TestReconnect_Repaints(t *testing.T) {
 	if ks := keyStates(second, 0)[0]; ks.Color != green.RGB565() {
 		t.Errorf("repainted key 0 = %+v, want green", ks)
 	}
-	time.Sleep(20 * time.Millisecond)
-	if ks := keyStates(second, 1); len(ks) != 0 {
-		t.Errorf("hidden key 1 repainted: %+v", ks)
+	// Key 1's owner is on a hidden page, so key 1 is cleared, not shown
+	// as that owner's Waiting.
+	waitFor(t, "key 1 on the new connection", func() bool { return len(keyStates(second, 1)) == 1 })
+	if ks := keyStates(second, 1)[0]; ks != (plugin.SetKeyStatePayload{KeyIndex: 1}) {
+		t.Errorf("hidden key 1 = %+v, want cleared", ks)
 	}
 }
 
@@ -461,6 +504,30 @@ func TestStartError_DisablesOnlyThatInstance(t *testing.T) {
 	}
 	if !hs.logged("[a] disabled: no grant") {
 		t.Error("disable not logged")
+	}
+}
+
+func TestStartError_StopsGoroutinesAndKeys(t *testing.T) {
+	ended := make(chan struct{})
+	var keyErr recorder[error]
+	cfg := Config{Plugins: []InstanceConfig{{ID: "a", Keys: []int{0}}}}
+	run(t, cfg, map[string]func(Host) error{
+		"a": func(h Host) error {
+			h.Go(func(ctx context.Context) {
+				<-ctx.Done()
+				keyErr.add(h.Key(0).SetColor(keyimg.MustHex("#FF0000")))
+				close(ended)
+			})
+			return errors.New("no grant")
+		},
+	})
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a goroutine started before Start failed kept running")
+	}
+	if err := keyErr.get()[0]; !errors.Is(err, ErrDisabled) {
+		t.Errorf("Key call from a disabled instance = %v, want ErrDisabled", err)
 	}
 }
 

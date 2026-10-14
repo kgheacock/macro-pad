@@ -168,8 +168,11 @@ func (r *Runner) logPermissions() {
 	}
 }
 
-// attach makes conn current and repaints every key whose owner has
-// state, so a daemon restart loses nothing a plugin set.
+// attach makes conn current and repaints every key from the cache, so a
+// daemon restart loses nothing a plugin set. A key with no owner on the
+// active page, or whose owner has set nothing yet, is cleared, as a page
+// switch clears it: the daemon may still show what an earlier page put
+// there.
 func (r *Runner) attach(conn Conn) {
 	r.connMu.Lock()
 	r.conn = conn
@@ -179,11 +182,11 @@ func (r *Runner) attach(conn Conn) {
 	defer r.mu.Unlock()
 	r.connected = true
 	for k := 0; k < NumKeys; k++ {
+		st := KeyState{}
 		if in := r.ownerLocked(k); in != nil {
-			if st, ok := in.state[k]; ok {
-				r.sendLocked(st.Messages(k)...)
-			}
+			st = in.state[k]
 		}
+		r.sendLocked(st.Messages(k)...)
 	}
 }
 
@@ -362,8 +365,11 @@ func (r *Runner) showPage(name string) error {
 		Kind:   plugin.KindSignal,
 		Signal: &plugin.SignalPayload{KeyIndex: byte(idx), Name: SignalPageChanged},
 	})
-	r.mu.Unlock()
+	defer r.mu.Unlock()
 
+	// Queue the handlers while still holding r.mu, so two ShowPage calls
+	// from different instances cannot interleave their OnVisible calls.
+	// enqueue never blocks and takes no lock on r.
 	for _, in := range r.instances {
 		switch in.page {
 		case old:

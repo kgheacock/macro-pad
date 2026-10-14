@@ -1,0 +1,8 @@
+{
+  "startPage": "work",
+  "plugins": [
+    {"id": "claude", "use": "claude-status", "page": "work", "keys": [0]},
+    {"id": "claude-2", "use": "claude-status", "page": "agents", "keys": [0, 1, 2, 3, 4]},
+    {"id": "pager", "use": "pager", "page": "*", "keys": [5]}
+  ]
+}

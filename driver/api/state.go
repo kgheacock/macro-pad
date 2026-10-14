@@ -52,7 +52,7 @@ func (c *Conn) Close() error {
 
 // ReadMessage reads and decodes one message from the connection — an
 // event or a signal broadcast, most often. A worked example reacting to
-// signal messages lives in driver/examples/claude-status.
+// signal messages lives in driver/plugins/claudestatus.
 func (c *Conn) ReadMessage() (plugin.Message, error) {
 	var msg plugin.Message
 	if err := c.ws.ReadJSON(&msg); err != nil {
@@ -106,7 +106,7 @@ type namedState struct {
 }
 
 // namedStates is SetState's closed vocabulary. Alert is red and blinking.
-// Waiting and Done are the pair driver/examples/claude-status uses to
+// Waiting and Done are the pair driver/plugins/claudestatus uses to
 // turn a key amber while a Claude Code session waits on input and green
 // once it's done, matching the task spec's worked example.
 var namedStates = map[string]namedState{
@@ -197,6 +197,14 @@ func (c *Conn) colorFor(key int) uint16 {
 	return c.colors[key]
 }
 
+// NamedState reports the color and blink flag SetState uses for state,
+// and whether state is in its closed set. The plugin host (driver/host)
+// uses it to apply the same vocabulary to the keys it caches.
+func NamedState(state string) (color uint16, blink bool, ok bool) {
+	ns, ok := namedStates[state]
+	return ns.color, ns.blink, ok
+}
+
 // Signal broadcasts a plugin.KindSignal message naming name for key. A
 // one-shot caller such as `macrodriver signal` uses this to trigger every
 // other connected plugin's reaction, with no direct call into any of
@@ -206,6 +214,12 @@ func (c *Conn) Signal(key int, name string) error {
 		Kind:   plugin.KindSignal,
 		Signal: &plugin.SignalPayload{KeyIndex: byte(key), Name: name},
 	})
+}
+
+// Send writes msg as is. The plugin host (driver/host) uses it to send
+// messages it has already built from its own key cache.
+func (c *Conn) Send(msg plugin.Message) error {
+	return c.send(msg)
 }
 
 func (c *Conn) send(msg plugin.Message) error {

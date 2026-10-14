@@ -7,7 +7,7 @@ updated: "2026-10-13"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/66"
 branch: "claude/project-thread-53z4fi"
 related: ["0013", "0015", "0028", "0054", "0055", "0056"]
 tags: ["driver", "plugin", "macos", "claude-code"]

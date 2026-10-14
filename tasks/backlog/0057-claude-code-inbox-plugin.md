@@ -38,9 +38,11 @@ This task builds on task 0055, the plugin host. It starts only after
 0055's implementation is on `main`. The inbox is a host plugin: it uses
 the host's key ownership, input routing, pages, bus, `keyimg` helpers,
 and `macos` helpers. It switches windows the way task 0056's
-`window-switcher` does, through `macos.ActivateApp`,
-`macos.RaiseWindow`, and `macos.AppleScript`, and it publishes
-`window.willHide` before a jump, as 0056 does.
+`window-switcher` does, through the methods of `macos.Desktop`
+(`ActivateApp`, `RaiseWindow`, `Frontmost`) and the package function
+`macos.AppleScript`, as PR #65 defines them. It publishes
+`window.willHide` before a jump, as 0056 does, with the payload PR #65
+documents in `driver/host/topics.go`: the `macos.Window` being hidden.
 
 ## Goals
 
@@ -50,14 +52,15 @@ and `macos` helpers. It switches windows the way task 0056's
   or finished its turn. A session that needs an answer blinks.
 - A press on a key brings that session's terminal window, tab, or pane
   to the front, on whatever desktop it is on.
-- A long press marks the session seen: the key stops blinking until
-  the session changes state again.
+- A long press marks the session seen without jumping: the key stops
+  blinking until the session changes state again.
 - A session keeps its key while it runs, so the person learns where
   each one is.
 - More sessions than keys still work: the last key shows how many
   sessions are off the pad, and a press on it jumps to the
   longest-waiting one.
-- A session that ends, or whose process dies, frees its key.
+- A session that ends, or whose process dies, frees its key. A session
+  that sits idle stays tracked, and shows again on its next event.
 - A hook never slows Claude Code down or makes it fail, even when the
   plugin host is not running.
 
@@ -161,11 +164,13 @@ input:
   "updated": "2026-10-13T23:40:12Z",
   "since": "2026-10-13T23:40:12Z",
   "pid": 41873,
+  "pidStart": "2026-10-13T22:02:51Z",
   "terminal": {
     "program": "iTerm.app",
-    "itermSession": "w0t2p0:6A1F...",
+    "itermSession": "6A1F...",
     "tty": "/dev/ttys004",
-    "tmuxPane": ""
+    "tmuxPane": "",
+    "tmuxClientTty": ""
   }
 }
 ```
@@ -173,11 +178,24 @@ input:
 - `state` is one of `working`, `waiting`, or `done`.
 - `since` changes only when `state` changes. `updated` changes on every
   write.
-- `pid` is the Claude Code process: the nearest ancestor of the hook
-  process whose command name contains `claude`, else the hook's parent.
-- `terminal` comes from the hook's environment: `TERM_PROGRAM`,
-  `ITERM_SESSION_ID`, `TERM_SESSION_ID`, `TMUX_PANE`, and the tty of
-  `pid`. Fields it cannot find stay empty.
+- `pid` and `pidStart` name the Claude Code process. Claude Code runs a
+  hook through `sh -c`, and an npm install runs as `node`, so the hook
+  walks up its ancestors, skips shells (`sh`, `bash`, `zsh`, `dash`,
+  `fish`), and takes the first process whose full argv names `claude`
+  (the `claude` binary, or `node …/@anthropic-ai/claude-code/cli.js`).
+  `pidStart` is that process's start time, so a reused pid is not taken
+  for the session. When no ancestor matches, both are empty and the
+  plugin relies on `staleAfter` alone.
+- `terminal` comes from the hook's environment and the process table:
+  - `program` from `TERM_PROGRAM`;
+  - `itermSession` from `ITERM_SESSION_ID`, with its `w0t2p0:` prefix
+    stripped, leaving the UUID that iTerm2's AppleScript calls
+    `unique id`;
+  - `tty`, the controlling tty of `pid`;
+  - `tmuxPane` from `TMUX_PANE`, and `tmuxClientTty` from
+    `tmux display -p '#{client_tty}'`, the tty of the terminal tab that
+    shows the tmux session. Both are empty outside tmux.
+  Fields it cannot find stay empty.
 - `version` lets a later task change the format. The plugin skips a
   file with a version it does not know, and logs it once.
 
@@ -186,14 +204,17 @@ never sees half a file.
 
 ### `macrodriver claude-hook`
 
-Reads one hook input from stdin and updates that session's file:
+Reads one hook input from stdin and upserts that session's file. Every
+event below creates the file when it is missing, so a session started
+before the hooks were installed, or one whose file was removed, comes
+back on its next event.
 
 | Hook event | New `state` | Notes |
 |---|---|---|
-| `SessionStart` | `working` | Creates the file. |
+| `SessionStart` | `working` | |
 | `UserPromptSubmit` | `working` | The person answered. |
 | `PostToolUse` | `working` | A permission was granted and the tool ran. |
-| `Notification` | `waiting` | `reason` and `message` from the input, when present. |
+| `Notification` | `waiting` | Only for `notification_type` `permission_prompt`, `idle_prompt`, or `elicitation_dialog`, or when the field is missing. Other types, such as `auth_success`, change nothing. `reason` takes `notification_type`, and `message` takes `message`. |
 | `Stop` | `done` | Claude finished its turn. |
 | `SessionEnd` | — | Deletes the file. |
 
@@ -208,12 +229,18 @@ each running `macrodriver claude-hook`. It goes in the user's
 
 ### Host config entry
 
+The inbox gets its own page, `inbox`. Task 0056's example puts the
+window switcher on page `work`, keys 0–3, and the host rejects a key
+claimed twice on one page. The host's `pager` on key 5 flips between
+them.
+
 ```json
-{"id": "inbox", "use": "claude-inbox", "page": "work", "keys": [0, 1, 2, 3, 4],
+{"id": "inbox", "use": "claude-inbox", "page": "inbox", "keys": [0, 1, 2, 3, 4],
  "config": {
    "dir": "~/.local/state/macropad/claude",
    "show": "all",
    "staleAfter": "12h",
+   "purgeAfter": "168h",
    "showPageOnWait": false
  }}
 ```
@@ -221,11 +248,12 @@ each running `macrodriver claude-hook`. It goes in the user's
 - `dir` defaults to `~/.local/state/macropad/claude`.
 - `show` is `all` (every live session) or `waiting` (only `waiting`
   and `done`). Default `all`.
-- `staleAfter` drops a session whose file has not changed for that
-  long, even if its process looks alive. Default `12h`.
-- `showPageOnWait` calls `h.ShowPage` with the inbox's page when a
-  session moves to `waiting` while that page is hidden. Default
-  `false`.
+- `staleAfter` hides a session whose file has not changed for that
+  long. Default `12h`. See Tracking.
+- `purgeAfter` deletes the file of a hidden session whose process
+  cannot be checked. Default `168h` (7 days).
+- `showPageOnWait` calls `h.ShowPage("inbox")` when a session moves to
+  `waiting` while the inbox page is hidden. Default `false`.
 - `Start` returns an error for a bad `show`, a bad duration, or a `dir`
   it cannot create. The host disables only this instance.
 
@@ -235,11 +263,20 @@ each running `macrodriver claude-hook`. It goes in the user's
 read again only when its modification time or size changed. On each
 tick, the plugin:
 
-1. drops any session whose `pid` no longer runs, or whose `updated` is
-   older than `staleAfter`, and deletes its file;
-2. keeps each known session on the key it already has;
-3. gives each new session the lowest free key, in order of `since`;
-4. repaints only keys whose session or state changed.
+1. deletes the file of any session whose process is gone: no process
+   has `pid`, or the one that does started at a different time than
+   `pidStart`;
+2. hides any session whose `updated` is older than `staleAfter`, which
+   frees its key but keeps its file; its next hook event updates the
+   file and shows it again;
+3. deletes the file of a hidden session with no `pid` once `updated`
+   is older than `purgeAfter`;
+4. keeps each shown session on the key it already has;
+5. gives a new session the key of a session that ended in the last 5 s
+   with the same `pid`, so `/clear`, which starts a new session id in
+   the same process, keeps its key; otherwise the lowest free key, in
+   order of `since`;
+6. repaints only keys whose session or state changed.
 
 With more sessions than owned keys, the last owned key becomes the
 overflow key. It shows `+N`, where N counts the sessions not on a key,
@@ -264,35 +301,61 @@ session id, such as `macro-pad·8f`.
 
 ### Press, long press
 
-A trigger is `h.OnPress` for a jump and `h.OnClick(Long)` for seen,
-matching task 0056's trigger names. On a press on a session's key, the
-plugin:
+A key-down cannot tell a tap from a hold, so the plugin decides on
+release. `h.OnPress` records the time; `h.OnRelease` measures the hold:
 
-1. reads `macos.Frontmost()` and publishes `window.willHide` with its
-   window id, as task 0056 does; an error here logs and does not stop
-   the jump;
-2. raises the session's terminal, by the first rule that applies:
-   - `itermSession` set → AppleScript selects the iTerm2 session with
-     that unique id, its tab, and its window, then activates iTerm2;
-   - `program` is `Apple_Terminal` and `tty` set → AppleScript selects
-     the Terminal tab with that tty and brings its window to the front;
-   - `tmuxPane` set → after raising the terminal by the rules above,
-     runs `tmux select-window` and `select-pane` for that pane;
-   - else → `macos.ActivateApp` for the app named by `program`, then
-     `macos.RaiseWindow(app, base(cwd))`, which matches editors such as
-     VS Code whose window titles hold the folder name;
+- under 500 ms, the same threshold as the daemon's `longPress`, is a
+  tap, and jumps;
+- 500 ms or more is a hold, and marks the session seen without
+  jumping.
+
+This needs no click resolution and adds no double-click wait. A tap on
+a session's key:
+
+1. reads `Desktop.Frontmost()` and publishes `window.willHide` with that
+   `macos.Window`, as task 0056 does; an error here logs and does not
+   stop the jump;
+2. raises the session's terminal through the plugin's `Raiser`, by the
+   first rule that applies:
+   - `tmuxClientTty` set → select the iTerm2 session, or else the
+     Terminal tab, whose tty is `tmuxClientTty`, then run
+     `tmux select-window -t <pane>` and `tmux select-pane -t <pane>`;
+     `TERM_PROGRAM` reads `tmux` inside tmux, so it is not used;
+   - `itermSession` set → select the iTerm2 session whose `unique id`
+     is `itermSession`, its tab, and its window, then activate iTerm2;
+   - `program` is `Apple_Terminal` and `tty` set → select the Terminal
+     tab whose tty is `tty` and bring its window to the front;
+   - `program` in the app table below → `Desktop.ActivateApp(app)`,
+     then `Desktop.RaiseWindow(app, base(cwd))`, which matches editors
+     whose window titles hold the folder name;
+   - else → fail with "unknown terminal" and the `program` value;
 3. marks the session seen.
 
-A press on the overflow key jumps to the longest-waiting overflow
-session, or the oldest one when none waits. A failed jump logs one line
-with the session id and the rule tried. The key does not change.
+| `TERM_PROGRAM` | App name |
+|---|---|
+| `iTerm.app` | `iTerm2` |
+| `Apple_Terminal` | `Terminal` |
+| `vscode` | `Visual Studio Code` (Cursor also sets `vscode`; see Risks) |
+| `WarpTerminal` | `Warp` |
+| `ghostty` | `Ghostty` |
+| `WezTerm` | `WezTerm` |
+
+`Raiser` is an interface in the plugin package. The real one builds the
+AppleScript and calls `macos.AppleScript` and `exec` for `tmux`, and
+uses the host's `macos.Desktop` for the app table rule. Tests replace
+it, since `macos.Desktop` has no AppleScript method to fake.
+
+A tap on the overflow key jumps to the longest-waiting overflow
+session, or the oldest one when none waits. A failed jump writes one
+line, with the session id and the rule tried, through the plugin's
+`logf` field, which defaults to `h.Log` and which tests replace. The
+key does not change.
 
 macOS moves to the desktop of the raised window when "When switching
 to an application, switch to a Space with open windows for the
 application" is on, which is the default. The README says so.
 
-Long press marks the session seen without jumping. Seen clears when the
-session's `state` or `since` changes.
+Seen clears when the session's `state` or `since` changes.
 
 ### Relation to `claude-status`
 
@@ -306,8 +369,8 @@ Files to change:
 - `driver/claudesession/*.go` — record type, folder path, atomic write, read, liveness check
 - `driver/cmd/macrodriver/claude_hook.go` — the hook subcommand and its tests
 - `driver/plugins/claudeinbox/plugin.go` — config, tracking, slots, key look
-- `driver/plugins/claudeinbox/jump.go` — the raise rules over `macos` helpers
-- `driver/plugins/claudeinbox/*_test.go` — tests on `hosttest` with a fake `macos` and a temp folder
+- `driver/plugins/claudeinbox/jump.go` — the `Raiser` interface and the real raise rules
+- `driver/plugins/claudeinbox/*_test.go` — tests on `hosttest` with a fake `Raiser`, a fake `macos.Desktop`, and a temp folder
 - `driver/cmd/macropad-plugins/plugins.go` — one registry line
 - `driver/README.md` — the hook setup, the plugin config, and Mac test steps, in the "Plugin host" section
 
@@ -318,60 +381,75 @@ implementer. Each item names its proof. The task moves to `complete/`
 only when every box is ticked.
 
 - [ ] **DoD-1** — `macrodriver claude-hook` fed each hook event from the
-  table writes the matching `state`, keeps `since` when the state does
-  not change, and deletes the file on `SessionEnd`. **Proof:**
+  table writes the matching `state`, creates the file from any event
+  when it is missing, keeps `since` when the state does not change,
+  ignores a `Notification` of type `auth_success`, and deletes the file
+  on `SessionEnd`. **Proof:**
   `cd driver && go test ./cmd/macrodriver -run TestClaudeHook_States`
-- [ ] **DoD-2** — `claude-hook` with bad JSON on stdin, an unwritable
+- [ ] **DoD-2** — Given a fake process table of `claude` → `sh -c` →
+  `macrodriver`, and one of `node …/claude-code/cli.js` → `zsh -c` →
+  `macrodriver`, the hook records the `claude` or `node` process and its
+  start time, not the shell. With no match, `pid` is empty. An
+  `ITERM_SESSION_ID` of `w0t2p0:<uuid>` is stored as `<uuid>`.
+  **Proof:** `go test ./cmd/macrodriver -run TestClaudeHook_Process`
+- [ ] **DoD-3** — `claude-hook` with bad JSON on stdin, an unwritable
   folder, or an unknown event exits 0 and writes nothing to stdout.
   **Proof:** `go test ./cmd/macrodriver -run TestClaudeHook_NeverFails`
-- [ ] **DoD-3** — A reader that runs during 1,000 concurrent writes
+- [ ] **DoD-4** — A reader that runs during 1,000 concurrent writes
   never decodes a partial file. **Proof:**
   `go test ./claudesession -run TestAtomicWrite -race`
-- [ ] **DoD-4** — Three session files in the folder light three owned
+- [ ] **DoD-5** — Three session files in the folder light three owned
   keys in order of `since`, and a fourth session added later takes the
   next free key while the first three keep theirs. **Proof:**
   `go test ./plugins/claudeinbox -run TestSlots_Sticky`
-- [ ] **DoD-5** — A session whose `pid` is dead, or whose `updated` is
-  older than `staleAfter`, frees its key and its file is removed.
+- [ ] **DoD-6** — A session whose `pid` is dead, or now belongs to a
+  process with another start time, frees its key and its file is
+  removed. A live session whose `updated` is older than `staleAfter`
+  frees its key, keeps its file, and takes a key again on its next
+  write. A hidden session with no `pid` is removed after `purgeAfter`.
+  A new session id with the `pid` of one that just ended takes its key.
   **Proof:** `go test ./plugins/claudeinbox -run TestStaleSessions`
-- [ ] **DoD-6** — With seven sessions on five keys, the fifth key shows
+- [ ] **DoD-7** — With seven sessions on five keys, the fifth key shows
   `+3`, turns amber when one of the three waits, and a press on it
   jumps to the one waiting longest. **Proof:**
   `go test ./plugins/claudeinbox -run TestOverflow`
-- [ ] **DoD-7** — Each state draws the color and blink in the Key look
-  table, and a long press stops a `waiting` key blinking until its
-  state changes. **Proof:** `go test ./plugins/claudeinbox -run TestKeyLook`
-- [ ] **DoD-8** — A press picks the raise rule from the record (iTerm2,
-  Terminal, tmux, fallback) and calls the matching fake `macos` call
-  with the right id, tty, or title. `window.willHide` is published
-  first. **Proof:** `go test ./plugins/claudeinbox -run TestJump`
-- [ ] **DoD-9** — A failed jump logs one line naming the session and
-  leaves every key unchanged. **Proof:**
+- [ ] **DoD-8** — Each state draws the color and blink in the Key look
+  table. A press held 500 ms or more stops a `waiting` key blinking
+  until its state changes, and does not jump; a press under 500 ms
+  jumps. **Proof:** `go test ./plugins/claudeinbox -run TestKeyLook`
+- [ ] **DoD-9** — A tap picks the raise rule from the record (tmux,
+  iTerm2, Terminal, app table, unknown) and calls the fake `Raiser` or
+  fake `macos.Desktop` with the right UUID, tty, pane, or app and
+  title. `window.willHide` is published first with the frontmost
+  `macos.Window`. **Proof:** `go test ./plugins/claudeinbox -run TestJump`
+- [ ] **DoD-10** — A failed jump calls the plugin's `logf` once with the
+  session id and leaves every key unchanged. **Proof:**
   `go test ./plugins/claudeinbox -run TestJumpFailure`
-- [ ] **DoD-10** — With `showPageOnWait: true` and the inbox page
+- [ ] **DoD-11** — With `showPageOnWait: true` and the inbox page
   hidden, a session moving to `waiting` calls `h.ShowPage` once.
   **Proof:** `go test ./plugins/claudeinbox -run TestShowPageOnWait`
-- [ ] **DoD-11** — On a Mac with the README's hook setup, three Claude
-  Code sessions in iTerm2 on two desktops each get a key named for
-  their folder. A permission prompt in one turns its key amber and
+- [ ] **DoD-12** — On a Mac with the README's hook setup and config,
+  three Claude Code sessions in iTerm2 on two desktops each get a key
+  named for their folder on page `inbox`, next to the window switcher
+  on page `work`. A permission prompt in one turns its key amber and
   blinking within 1 s, and a press brings that tab to the front on its
   desktop. **Proof:** manual run on the board or `macropadd --emulate`,
   logged in the PR description
-- [ ] **DoD-12** — The same run in Apple Terminal, and in VS Code's
-  terminal, raises the right window. **Proof:** manual run, logged in
+- [ ] **DoD-13** — The same run in Apple Terminal, in tmux inside
+  iTerm2, and in VS Code's terminal, raises the right window. **Proof:** manual run, logged in
   the PR description, with any app where the raise fails noted
-- [ ] **DoD-13** — Quitting a session with `/exit` frees its key, and
+- [ ] **DoD-14** — Quitting a session with `/exit` frees its key, and
   killing one with `kill -9` frees its key within 1 s. **Proof:**
   manual run, logged in the PR description
-- [ ] **DoD-14** — Starting the host after three sessions are already
+- [ ] **DoD-15** — Starting the host after three sessions are already
   running lights all three keys on its first tick. **Proof:** manual
   run, logged in the PR description
-- [ ] **DoD-15** — `driver/README.md` has the `settings.json` hook
+- [ ] **DoD-16** — `driver/README.md` has the `settings.json` hook
   block, the plugin config, the Space-switching note, and the Mac test
   steps. **Proof:** `driver/README.md`
-- [ ] **DoD-16** — `cd driver && go build ./... && go vet ./...` exits 0
+- [ ] **DoD-17** — `cd driver && go build ./... && go vet ./...` exits 0
   on Linux and on macOS. **Proof:** the command's exit code on each OS
-- [ ] **DoD-17** — The PR in the `pr` field links to this spec.
+- [ ] **DoD-18** — The PR in the `pr` field links to this spec.
   **Proof:** PR body
 
 ## Risks
@@ -381,18 +459,27 @@ only when every box is ticked.
   implementing PR.
 - Claude Code renames hook events or input fields → `claude-hook`
   ignores what it does not know, so the inbox goes quiet instead of
-  breaking Claude Code. DoD-11 confirms the field names on the
+  breaking Claude Code. DoD-12 confirms the field names on the
   installed version.
-- The `pid` walk finds the wrong process → a live session could be
-  dropped, or a dead one kept until `staleAfter`. DoD-13 checks both
-  on a Mac; `staleAfter` bounds the second case.
-- `Notification` also fires after 60 s idle at the prompt, not only on
-  a permission prompt → a `done` session turns `waiting`. Both mean the
-  person owes an answer, so the key lights either way; `reason` keeps
-  them apart for a later task.
+- The ancestor walk finds no `claude` process, for example under a
+  wrapper script with another name → `pid` is empty, a dead session is
+  hidden after `staleAfter` and deleted after `purgeAfter`. DoD-14
+  checks the walk on a Mac with the npm install.
+- `Notification` with `idle_prompt` fires after 60 s idle at the
+  prompt → a `done` session turns `waiting`. Both mean the person owes
+  an answer, so the key lights either way; `reason` keeps them apart
+  for a later task.
+- A granted permission for a long Bash command leaves the key amber
+  until the command ends, since no hook fires between the grant and
+  `PostToolUse` → accepted; the key is late, not wrong for long.
+- Esc to interrupt fires no `Stop` → the key stays `working` until the
+  next prompt or `staleAfter`. Accepted.
+- Cursor and other VS Code forks also set `TERM_PROGRAM=vscode` → the
+  app table raises VS Code. The hook can tell them apart by
+  `__CFBundleIdentifier`, a later change if DoD-13 shows it matters.
 - A terminal the raise rules do not know (Ghostty, WezTerm, Warp) →
   the fallback activates the app and matches a window by folder name,
-  which may pick the wrong window. DoD-12 records what happens, and a
+  which may pick the wrong window. DoD-13 records what happens, and a
   new rule can be added per app.
 - Two sessions in one terminal window, in split panes, without tmux →
   the raise selects the window or tab, not the pane.
@@ -407,9 +494,9 @@ only when every box is ticked.
   green, no blink. — kgheacock
 - [ ] Should a press also mark the session seen, or only a long press?
   The default is both. — kgheacock
-- [ ] Should the inbox own a page of its own, with the window switcher
-  on another page, or share a page with it? The default config shares
-  page `work`, with five inbox keys and the pager on key 5. — kgheacock
+- [ ] Should a session that needs an answer flip to the inbox page on
+  its own? The default is no (`showPageOnWait: false`), so a key press
+  on another page never lands on an inbox key by surprise. — kgheacock
 - [ ] Should `claude-hook` replace `macrodriver signal` in the README's
   hook example, so `claude-status` reads the session files too? The
   default is no; both stay. — kgheacock

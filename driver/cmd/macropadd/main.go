@@ -11,11 +11,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"time"
 
+	"github.com/kgheacock/macro-pad/driver/layers"
 	"github.com/kgheacock/macro-pad/driver/plugin"
 	"github.com/kgheacock/macro-pad/driver/recorder"
-	"github.com/kgheacock/macro-pad/driver/statedb"
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
 
@@ -51,11 +50,10 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly (e.g. /dev/cu.usbmodem2103), bypassing discovery; needed when the board exposes more than one CDC port, such as a debug console alongside the data channel")
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
-	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key is saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
+	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key and the layer tree (layers.json) are saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
+	assetsDir := fs.String("assets-dir", "assets", "directory the iconRef of a layer key resolves under, and where a child layer finds shift.png (see task 0057)")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
 	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
-	stateDB := fs.String("state-db", "", "SQLite file holding the page tree to show on the keys; the daemon polls it and shows the children of the active node (see task 0051); empty disables")
-	stateDBPoll := fs.Duration("state-db-poll", 250*time.Millisecond, "how often to poll --state-db")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -119,42 +117,35 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 		fmt.Fprintf(stdout, "macropadd: recording to %s\n", *traceFile)
 	}
 
-	// pollCtx ends the state-db poller when the server stops, whether
-	// ctx ended or the server failed to start. pollDone signals it has
-	// stopped, so dev.Close below cannot race a send.
-	pollCtx, stopPoll := context.WithCancel(ctx)
-	defer stopPoll()
-	var pollDone chan struct{}
-	if *stateDB != "" {
-		logf := func(format string, args ...any) {
-			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
-		}
-		poller, err := statedb.New(*stateDB, dev, logf)
-		if err != nil {
-			dev.Close()
-			fmt.Fprintln(stderr, "macropadd: state-db:", err)
-			return 1
-		}
-		pollDone = make(chan struct{})
-		go func() {
-			defer close(pollDone)
-			defer poller.Close()
-			poller.Run(pollCtx, *stateDBPoll)
-		}()
-		fmt.Fprintf(stdout, "macropadd: polling %s every %s\n", *stateDB, *stateDBPoll)
-	}
-
 	fmt.Fprintf(stdout, "macropadd: listening on 127.0.0.1:%d\n", *port)
 
 	srv := plugin.NewServer(fan.Subscribe(), injector)
 	srv.SetLogf(func(format string, args ...any) {
 		fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
 	})
+
+	// The layer tree draws through srv, so a plugin sees every key it
+	// sets, and srv hands it each single press and setLayerKey message.
+	ctl, err := layers.Open(layers.Options{
+		Dir:       *stateDir,
+		AssetsDir: *assetsDir,
+		Out:       srv,
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
+		},
+	})
+	if err != nil {
+		dev.Close()
+		fmt.Fprintln(stderr, "macropadd: layers:", err)
+		return 1
+	}
+	srv.SetLayers(ctl)
+
 	runErr := srv.Run(ctx, *port)
 
-	stopPoll()
-	if pollDone != nil {
-		<-pollDone
+	// Close saves the layer tree one last time, before the device closes.
+	if err := ctl.Close(); err != nil {
+		fmt.Fprintln(stderr, "macropadd: layers:", err)
 	}
 	dev.Close()
 	if recDone != nil {

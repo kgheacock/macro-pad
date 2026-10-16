@@ -29,11 +29,12 @@ Tasks 0051 and 0052 store key state in SQLite, behind an event log. That is too 
 - In a child layer, key 4 shows a shift icon. A single press on it returns to the parent layer.
 - The daemon saves the object to disk at intervals, and on exit. A restart shows the same layer.
 - `CHANNEL=github macro_streamer` reads JSON lines on stdin and updates the key for that channel.
+- A client can learn the active layer, and can reserve a key slot, so task 0055's plugin host can share the keys.
+- `driver/statedb` and the `--state-db` flags are removed. The layer tree replaces them.
 
 ## Non-goals
 
 - Layers deeper than two. A child has no children.
-- Removing `driver/statedb` or the `--state-db` flags. A later task does that.
 - Actions on a press other than layer changes.
 - A new firmware or wire-protocol change. The pad receives ordinary key states and glyphs.
 
@@ -92,10 +93,15 @@ Several streamers must share six keys, and navigation must work with none runnin
 - `status` is `RUNNING`, `DONE`, `ERROR`, `WARN`, or empty. Colors follow `driver/statedb`.
 - If `iconRef` is empty, `icon` is a built-in Emoji ID.
 - In a child layer, child N shows on keys 0, 1, 2, 3, 5. Key 4 shows `assets/shift.png`.
+- `iconRef` is a path under `assets/`. A path that leaves `assets/` is rejected.
 - The count is drawn as a badge on the image.
 - Only changed keys are sent when the object changes.
 - A dirty object is saved every 5 s and on `Close`. A save writes a temporary file, then renames it.
 - A file that does not parse moves to `layers.json.bad`. The daemon starts empty.
+
+`setLayerKey` upserts one key or child with its full values. It may carry `slot` (0 to 5). With `slot`, the key goes in that slot. If another `id` holds the slot, the daemon logs it and drops the message. Without `slot`, the key takes the first free slot. A message with only `id` and `slot` reserves the slot.
+
+The daemon sends `layerChanged` with `active` to every client when the layer changes, and to a client when it connects.
 
 `macro_streamer` reads `CHANNEL` and `STATE` from the environment. It sends one `setLayerKey` per JSON line.
 
@@ -103,10 +109,11 @@ Files to change:
 
 - `driver/layers/` — the object, validation, rendering, navigation, saving
 - `driver/plugin/protocol.go`, `driver/plugin/server.go` — the `setLayerKey` message
-- `driver/cmd/macropadd/main.go` — start the controller
+- `driver/cmd/macropadd/main.go` — start the controller, drop `--state-db` and `--state-db-poll`
+- `driver/statedb/` — delete
 - `driver/cmd/macro_streamer/` — the stdin client
 - `assets/shift.png` — the 128x128 shift icon
-- `driver/README.md` — a "Layers" section
+- `driver/README.md` — a "Layers" section, and delete "State database"
 
 ## Definition of done
 
@@ -119,9 +126,11 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [ ] **DoD-5** — A single press on a key with no children sends nothing and keeps `active`. **Proof:** `go test ./layers -run TestPressWithoutChildren`
 - [ ] **DoD-6** — A dirty object is saved within 5 s. A restart shows the saved active layer. A corrupt file moves to `layers.json.bad`. **Proof:** `go test ./layers -run 'TestPersistAndRestore|TestCorruptFileMovedAside'`
 - [ ] **DoD-7** — `printf '{"level":"error","msg":"x"}\n' | CHANNEL=github macro_streamer` sets key `github` to `ERROR`. A bad line is logged and skipped. An empty `CHANNEL` exits non-zero. **Proof:** `go test ./e2e -run TestStreamer`
-- [ ] **DoD-8** — `driver/README.md` records the file format, the key layout, and the save interval. **Proof:** `driver/README.md`, section "Layers"
-- [ ] **DoD-9** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [ ] **DoD-8** — A client gets `layerChanged` on connect and after each layer change. A `setLayerKey` with `slot` reserves the slot, and a second `id` on that slot is refused. **Proof:** `go test ./plugin -run 'TestLayerChanged|TestSlotReserved'`
+- [ ] **DoD-9** — `driver/statedb` is gone, and `macropadd --state-db x` exits with a flag error. **Proof:** `test ! -d driver/statedb` and `go test ./cmd/macropadd -run TestStateDBFlagRemoved`
+- [ ] **DoD-10** — `driver/README.md` records the file format, the key layout, and the save interval. **Proof:** `driver/README.md`, section "Layers"
+- [ ] **DoD-11** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
+- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 
@@ -129,11 +138,15 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - Each glyph takes time to cross to the board → a layer change with six images may take about 1 s (0051 measured 155 ms per write in a burst). DoD-2 and DoD-3 send only changed keys.
 - The crash window loses up to 5 s of changes → accepted, because the host disk does not wear.
 - A font package may need a newer Go than 1.22.0 → check its `GoVersion` before `go get`, and pin an older release if needed.
-- Task 0055 also plans key pages → it must not own keys that the layers use. The two tasks need one owner map.
+- Task 0055's host also writes keys → it uses `setLayerKey` with `slot`, and reserves its slots at start. A streamer without `slot` then skips them.
+- A deleted poller leaves a database file on disk → harmless. Nothing reads it, and the README says to delete it.
 
 ## Open questions
 
 - [ ] Does "Key 4" mean index 4 (the fifth key), as `KeyIndex` counts, or the fourth key? The spec assumes index 4. — kgheacock
 - [ ] Which JSON fields give the key `status` and the child `id` in a log line? The default is `level` for status and `child` for the id. — kgheacock
 - [ ] Should a child layer return on its own after a timeout? The default is no. — kgheacock
-- [ ] Should task 0052 move to `complete/` as superseded, or be deleted? — kgheacock
+
+## Notes
+
+This task replaces tasks 0051 (the SQLite poller) and 0052 (the event log). Task 0052's PR was closed unmerged. Task 0055 builds on this one for state and layers.

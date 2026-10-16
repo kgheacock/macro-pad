@@ -1,13 +1,13 @@
 ---
 id: "0057"
 title: "One JSON object holds the keys and their child layers, and persists the active layer"
-status: "backlog"
+status: "complete"
 created: "2026-10-15"
 updated: "2026-10-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/68"
 branch: "0057-json-layer-state-with-child-layers"
 related: ["0051", "0052", "0055", "0028", "0013"]
 tags: ["driver", "layers", "state", "json", "streamer"]
@@ -119,18 +119,18 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — A file with seven keys, six children, or an unknown status is rejected. A valid file loads. **Proof:** `cd driver && go test ./layers -run TestDocValidation`
-- [ ] **DoD-2** — The top layer sends six key states: status color, image from `iconRef`, and count badge. **Proof:** `go test ./layers -run TestRenderTopLayer`
-- [ ] **DoD-3** — A single press on a key with children shows its children on keys 0, 1, 2, 4, 5 and the shift icon on key 3. **Proof:** `go test ./layers -run TestEnterChildLayer`
-- [ ] **DoD-4** — A single press on key 3 in a child layer shows the top layer. **Proof:** `go test ./layers -run TestUpReturnsToParent`
-- [ ] **DoD-5** — A single press on a key with no children sends nothing and keeps `active`. **Proof:** `go test ./layers -run TestPressWithoutChildren`
-- [ ] **DoD-6** — A dirty object is saved within 5 s. A restart shows the saved active layer. A corrupt file moves to `layers.json.bad`. **Proof:** `go test ./layers -run 'TestPersistAndRestore|TestCorruptFileMovedAside'`
-- [ ] **DoD-7** — `printf '{"level":"error","msg":"x"}\n' | CHANNEL=github macro_streamer` sets key `github` to `ERROR`. A bad line is logged and skipped. An empty `CHANNEL` exits non-zero. **Proof:** `go test ./e2e -run TestStreamer`
-- [ ] **DoD-8** — A client gets `layerChanged` on connect and after each layer change. A `setLayerKey` with `slot` reserves the slot, and a second `id` on that slot is refused. **Proof:** `go test ./plugin -run 'TestLayerChanged|TestSlotReserved'`
-- [ ] **DoD-9** — `driver/statedb` is gone, and `macropadd --state-db x` exits with a flag error. **Proof:** `test ! -d driver/statedb` and `go test ./cmd/macropadd -run TestStateDBFlagRemoved`
-- [ ] **DoD-10** — `driver/README.md` records the file format, the key layout, and the save interval. **Proof:** `driver/README.md`, section "Layers"
-- [ ] **DoD-11** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-1** — A file with seven keys, six children, or an unknown status is rejected. A valid file loads. **Proof:** `cd driver && go test ./layers -run TestDocValidation`
+- [x] **DoD-2** — The top layer sends six key states: status color, image from `iconRef`, and count badge. **Proof:** `go test ./layers -run TestRenderTopLayer`
+- [x] **DoD-3** — A single press on a key with children shows its children on keys 0, 1, 2, 4, 5 and the shift icon on key 3. **Proof:** `go test ./layers -run TestEnterChildLayer`
+- [x] **DoD-4** — A single press on key 3 in a child layer shows the top layer. **Proof:** `go test ./layers -run TestUpReturnsToParent`
+- [x] **DoD-5** — A single press on a key with no children sends nothing and keeps `active`. **Proof:** `go test ./layers -run TestPressWithoutChildren`
+- [x] **DoD-6** — A dirty object is saved within 5 s. A restart shows the saved active layer. A corrupt file moves to `layers.json.bad`. **Proof:** `go test ./layers -run 'TestPersistAndRestore|TestCorruptFileMovedAside'`
+- [x] **DoD-7** — `printf '{"level":"error","msg":"x"}\n' | CHANNEL=github macro_streamer` sets key `github` to `ERROR`. A bad line is logged and skipped. An empty `CHANNEL` exits non-zero. **Proof:** `go test ./e2e -run TestStreamer`
+- [x] **DoD-8** — A client gets `layerChanged` on connect and after each layer change. A `setLayerKey` with `slot` reserves the slot, and a second `id` on that slot is refused. **Proof:** `go test ./plugin -run 'TestLayerChanged|TestSlotReserved'`
+- [x] **DoD-9** — `driver/statedb` is gone, and `macropadd --state-db x` exits with a flag error. **Proof:** `test ! -d driver/statedb` and `go test ./cmd/macropadd -run TestStateDBFlagRemoved`
+- [x] **DoD-10** — `driver/README.md` records the file format, the key layout, and the save interval. **Proof:** `driver/README.md`, section "Layers"
+- [x] **DoD-11** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 
@@ -149,3 +149,12 @@ An outside reviewer verifies each item without help from the implementer. Each i
 ## Notes
 
 This task replaces tasks 0051 (the SQLite poller) and 0052 (the event log). Task 0052's PR was closed unmerged. Task 0055 builds on this one for state and layers.
+
+Choices made while implementing, where the spec was silent:
+
+- `STATE` is the optional status the streamer's key shows before the first line. The spec names the variable and gives no meaning.
+- `level` maps to a status as `driver/README.md`, "Layers", lists. An unknown `level` is a bad line.
+- A line with `child` updates that child only. The key's own status does not follow its children.
+- `assets/<CHANNEL>.png` is the streamer key's image. The daemon takes the assets directory from `--assets-dir`, default `assets`.
+- A key with no status, icon, count, `iconRef`, or children is a reserved slot, and the daemon does not draw it. This keeps a slot the plugin host reserved free for its own drawing.
+- The count badge uses a 3x5 bitmap font in `driver/layers/render.go`. No font package is needed, so go.mod gains nothing.

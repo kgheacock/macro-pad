@@ -18,6 +18,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/kgheacock/macro-pad/driver/layers"
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
 
@@ -86,6 +87,17 @@ type Injector interface {
 	InjectEvent(transport.Event) error
 }
 
+// LayerController is the daemon's layer tree as the server uses it.
+// *layers.Controller implements it. See task 0057.
+type LayerController interface {
+	// SetKey applies one setLayerKey message.
+	SetKey(layers.Update) error
+	// Press handles a single press on a key.
+	Press(keyIndex byte)
+	// Active is the id of the open key, or nil for the top layer.
+	Active() *string
+}
+
 // client is one connected plugin.
 type client struct {
 	conn      wsConn
@@ -133,6 +145,11 @@ type Server struct {
 	// broadcast to arrive. See task 0036.
 	stateCache map[byte]Message
 
+	// layersMu guards layers, which SetLayers sets after NewServer
+	// because the controller needs the server as its output.
+	layersMu sync.RWMutex
+	layers   LayerController
+
 	// logf reports each setKeyState the server reads, applies, or cannot
 	// apply. It is never nil: NewServer sets a no-op, and SetLogf replaces
 	// it before Run. See task 0050.
@@ -163,6 +180,11 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 	}
 	s.resolver = newClickResolver(func(keyIndex byte, name string) {
 		s.Broadcast(signalMessage(keyIndex, name))
+		if name == SignalSinglePress {
+			if l := s.layerController(); l != nil {
+				l.Press(keyIndex)
+			}
+		}
 	})
 	go s.dispatchLoop()
 	return s
@@ -176,6 +198,46 @@ func (s *Server) SetLogf(logf func(format string, args ...any)) {
 		logf = func(string, ...any) {}
 	}
 	s.logf = logf
+}
+
+// SetLayers makes a single press open or close a child layer, and lets a
+// client's setLayerKey message change the layer tree. Call it before Run.
+// *Server is the layers.Out the controller draws through.
+func (s *Server) SetLayers(l LayerController) {
+	s.layersMu.Lock()
+	s.layers = l
+	s.layersMu.Unlock()
+}
+
+func (s *Server) layerController() LayerController {
+	s.layersMu.RLock()
+	defer s.layersMu.RUnlock()
+	return s.layers
+}
+
+// SetKeyState sends ks to the device and rebroadcasts it, exactly like a
+// client's setKeyState message. The layer controller draws through it.
+func (s *Server) SetKeyState(ks transport.KeyState) error {
+	return s.applyKeyState(Message{
+		Kind: KindSetKeyState,
+		SetKeyState: &SetKeyStatePayload{
+			KeyIndex: ks.KeyIndex, Color: ks.Color, EmojiID: ks.EmojiID, Blink: ks.Blink,
+		},
+	})
+}
+
+// SetCustomGlyph sends the PNG to the device and rebroadcasts it, exactly
+// like a client's setCustomGlyph message.
+func (s *Server) SetCustomGlyph(keyIndex byte, png []byte) error {
+	return s.applyCustomGlyph(Message{
+		Kind:           KindSetCustomGlyph,
+		SetCustomGlyph: &SetCustomGlyphPayload{KeyIndex: keyIndex, Image: png},
+	})
+}
+
+// LayerChanged tells every client which layer is active.
+func (s *Server) LayerChanged(active *string) {
+	s.broadcast(layerChangedMessage(active))
 }
 
 // Run opens a WebSocket server bound to 127.0.0.1:port and serves it
@@ -234,6 +296,12 @@ func (s *Server) addClient(conn wsConn) *client {
 	s.mu.Unlock()
 
 	s.snapshotTo(c)
+	if l := s.layerController(); l != nil {
+		select {
+		case c.send <- layerChangedMessage(l.Active()):
+		default:
+		}
+	}
 
 	go s.writePump(c)
 	go s.readPump(c)
@@ -276,28 +344,23 @@ func (s *Server) readPump(c *client) {
 		}
 		switch msg.Kind {
 		case KindSetKeyState:
-			ks, err := msg.SetKeyState.toKeyState()
-			if err != nil {
-				s.logf("setKeyState dropped: %v", err)
-				continue
-			}
-			s.logf("setKeyState read key=%d", ks.KeyIndex)
-			start := time.Now()
-			if err := s.dev.SendKeyState(ks); err != nil {
-				s.logf("setKeyState key=%d failed after %s: %v", ks.KeyIndex, time.Since(start).Round(time.Millisecond), err)
-			} else {
-				s.logf("setKeyState key=%d applied in %s", ks.KeyIndex, time.Since(start).Round(time.Millisecond))
-			}
-			s.rememberState(msg.SetKeyState.KeyIndex, msg)
-			s.broadcast(msg)
+			s.applyKeyState(msg)
 		case KindSetCustomGlyph:
-			keyIndex, pixels, err := msg.SetCustomGlyph.toPixels()
-			if err != nil {
+			s.applyCustomGlyph(msg)
+		case KindSetLayerKey:
+			l := s.layerController()
+			if l == nil || msg.SetLayerKey == nil {
+				s.logf("setLayerKey dropped: no layer tree or no payload")
 				continue
 			}
-			s.dev.SendCustomGlyph(keyIndex, pixels)
-			s.rememberState(keyIndex, msg)
-			s.broadcast(msg)
+			p := msg.SetLayerKey
+			err := l.SetKey(layers.Update{
+				ID: p.ID, Parent: p.Parent, Slot: p.Slot,
+				Icon: p.Icon, Status: p.Status, Count: p.Count, IconRef: p.IconRef,
+			})
+			if err != nil {
+				s.logf("setLayerKey id=%q dropped: %v", p.ID, err)
+			}
 		case KindInjectEvent:
 			if s.injector == nil {
 				continue
@@ -321,6 +384,41 @@ func (s *Server) readPump(c *client) {
 			s.logf("message dropped: unknown kind %q", msg.Kind)
 		}
 	}
+}
+
+// applyKeyState sends msg's key state to the device, remembers it for a
+// client that connects later, and rebroadcasts it. It returns the error
+// the device send returned, which it also logs.
+func (s *Server) applyKeyState(msg Message) error {
+	ks, err := msg.SetKeyState.toKeyState()
+	if err != nil {
+		s.logf("setKeyState dropped: %v", err)
+		return err
+	}
+	s.logf("setKeyState read key=%d", ks.KeyIndex)
+	start := time.Now()
+	err = s.dev.SendKeyState(ks)
+	if err != nil {
+		s.logf("setKeyState key=%d failed after %s: %v", ks.KeyIndex, time.Since(start).Round(time.Millisecond), err)
+	} else {
+		s.logf("setKeyState key=%d applied in %s", ks.KeyIndex, time.Since(start).Round(time.Millisecond))
+	}
+	s.rememberState(msg.SetKeyState.KeyIndex, msg)
+	s.broadcast(msg)
+	return err
+}
+
+// applyCustomGlyph sends msg's image to the device, remembers it, and
+// rebroadcasts it. An image the server cannot decode is dropped.
+func (s *Server) applyCustomGlyph(msg Message) error {
+	keyIndex, pixels, err := msg.SetCustomGlyph.toPixels()
+	if err != nil {
+		return err
+	}
+	err = s.dev.SendCustomGlyph(keyIndex, pixels)
+	s.rememberState(keyIndex, msg)
+	s.broadcast(msg)
+	return err
 }
 
 // writePump delivers c's queued messages and audio frames to its

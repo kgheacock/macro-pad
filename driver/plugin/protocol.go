@@ -47,6 +47,15 @@ const (
 	// that stops the audio delivery a prior KindSubscribeAudio started.
 	// See task 0031.
 	KindUnsubscribeAudio MessageKind = "unsubscribeAudio"
+	// KindSetLayerKey is a client→server message that upserts one key or
+	// child in the daemon's layer tree (driver/layers) with its full
+	// values, or reserves a key slot. A message the tree rejects is
+	// logged and dropped. See task 0057.
+	KindSetLayerKey MessageKind = "setLayerKey"
+	// KindLayerChanged is a server→client message that names the active
+	// layer. The server sends it to every client when the layer changes,
+	// and to one client when it connects. See task 0057.
+	KindLayerChanged MessageKind = "layerChanged"
 )
 
 // Signal names the server itself broadcasts once it resolves a raw
@@ -71,6 +80,8 @@ type Message struct {
 	InjectEvent    *InjectEventPayload    `json:"injectEvent,omitempty"`
 	SetCustomGlyph *SetCustomGlyphPayload `json:"setCustomGlyph,omitempty"`
 	Signal         *SignalPayload         `json:"signal,omitempty"`
+	SetLayerKey    *SetLayerKeyPayload    `json:"setLayerKey,omitempty"`
+	LayerChanged   *LayerChangedPayload   `json:"layerChanged,omitempty"`
 }
 
 // EventPayload is transport.Event as JSON. Type is "press" or "release",
@@ -121,6 +132,32 @@ type SetCustomGlyphPayload struct {
 type SignalPayload struct {
 	KeyIndex byte   `json:"keyIndex"`
 	Name     string `json:"name"`
+}
+
+// SetLayerKeyPayload is layers.Update as JSON: the full values of one key
+// or child. Parent names the key a child belongs to; it is empty for a
+// top-level key. Slot (0 to 5) puts a top-level key in that slot: another
+// id on the slot drops the message. A message with only ID and Slot
+// reserves the slot. See task 0057.
+type SetLayerKeyPayload struct {
+	ID      string `json:"id"`
+	Parent  string `json:"parent,omitempty"`
+	Slot    *int   `json:"slot,omitempty"`
+	Icon    byte   `json:"icon"`
+	Status  string `json:"status"`
+	Count   int    `json:"count"`
+	IconRef string `json:"iconRef"`
+}
+
+// LayerChangedPayload names the active layer: the id of the key whose
+// children the pad shows, or null for the top layer.
+type LayerChangedPayload struct {
+	Active *string `json:"active"`
+}
+
+// layerChangedMessage builds the Message that announces active.
+func layerChangedMessage(active *string) Message {
+	return Message{Kind: KindLayerChanged, LayerChanged: &LayerChangedPayload{Active: active}}
 }
 
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a

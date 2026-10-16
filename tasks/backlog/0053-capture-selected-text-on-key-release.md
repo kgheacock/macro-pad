@@ -3,13 +3,13 @@ id: "0053"
 title: "Capture the frontmost app's selected text when a key is released"
 status: "backlog"
 created: "2026-10-13"
-updated: "2026-10-13"
+updated: "2026-10-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
 branch: null
-related: ["0013", "0028", "0055"]
+related: ["0013", "0028", "0055", "0057"]
 tags: ["driver", "host", "macos", "accessibility"]
 ---
 
@@ -17,7 +17,7 @@ tags: ["driver", "host", "macos", "accessibility"]
 
 ## Prerequisite
 
-Task 0055 (the plugin host and helper API) must be implemented on `main` before work on this task starts. This spec adds a service to that host.
+Task 0055 (the plugin host and helper API) and task 0057 (the layer tree) must be implemented on `main` before work on this task starts. This spec adds a service to that host. A capture key is a top-level key of the layer tree.
 
 ## Problem
 
@@ -29,7 +29,7 @@ Selection is not one plugin's job. A switcher, a Claude prompt sender, or a Pyth
 
 - Selection capture is a platform feature of the plugin host, not a plugin.
 - Any Go plugin can read the current selection on demand, with one call.
-- A release of a key listed in the host config captures the selection and delivers it to every plugin, Go or not.
+- A release of a top-level key listed in the host config captures the selection and delivers it to every plugin, Go or not.
 - The capture works in native apps and in apps with weak accessibility support, such as Chrome, Electron apps, and VS Code.
 - The clipboard holds the same contents after a capture as before it.
 - Only one capture runs at a time, host-wide.
@@ -39,6 +39,7 @@ Selection is not one plugin's job. A switcher, a Claude prompt sender, or a Pyth
 - Acting on the text. A later task decides where it goes, for example a Claude Code prompt or a file.
 - Images, files, or rich text. Plain text only.
 - Linux and Windows. The capture is macOS only; other OSes return an "unsupported" error.
+- Capture keys in a child layer. Only top-level keys capture.
 - Changes to the click resolver. A capture key still emits its `singlePress`, `doublePress`, or `longPress` signal as before.
 - Capture inside `macropadd`. The daemon stays free of cgo and macOS frameworks, per task 0055's Approach A.
 
@@ -106,11 +107,11 @@ Two additions to task 0055's `Host` interface:
 SelectedText(ctx context.Context) (selection.Selection, error)
 
 // OnSelection runs fn for every capture the host makes on a
-// configured key release, on this instance's own queue.
-OnSelection(fn func(key int, s selection.Selection))
+// configured slot release, on this instance's own queue.
+OnSelection(fn func(slot int, s selection.Selection))
 ```
 
-`hosttest` gains `SetSelection(s)` so plugin tests choose what `SelectedText` returns, and `Capture(key, s)` to fire `OnSelection` handlers.
+`hosttest` gains `SetSelection(s)` so plugin tests choose what `SelectedText` returns, and `Capture(slot, s)` to fire `OnSelection` handlers.
 
 ### Capture on release
 
@@ -119,26 +120,26 @@ The host config gains a top-level `selection` block:
 ```json
 {
   "addr": "127.0.0.1:8765",
-  "selection": {"captureKeys": [5]},
+  "selection": {"captureSlots": [5]},
   "plugins": [ ... ]
 }
 ```
 
-`captureKeys` are physical keys, on every page. A key here may also be owned by a plugin instance; that instance still gets its own press, release, and click events as before. Validation (task 0055) adds: every capture key is in 0..5.
+`captureSlots` are top-level keys of the layer tree (task 0057). A capture works only while the top layer is on screen. In a child layer, the same physical key is a child or the up arrow, and does not capture. A slot here may also be owned by a plugin instance; that instance still gets its own press, release, and click events as before. If the slot has children, a single press still opens them, and the capture runs on the release before the layer changes. Validation (task 0055) adds: every capture slot is in 0..5.
 
-On a release of a capture key, the router hands the capture to the service on its own goroutine, not on any instance queue. When the capture returns non-empty text, the host:
+On a release of a capture slot, the router hands the capture to the service on its own goroutine, not on any instance queue. When the capture returns non-empty text, the host:
 
 1. calls every instance's `OnSelection` handlers;
-2. publishes `selection.Captured{Key, Text, Source}` on `host.TopicSelectionCaptured` (`"selection.captured"`). Task 0055 names the topic only; this task defines the payload type in `driver/host/selection`;
-3. sends one `signal` named `selectionCaptured` for that key to the daemon, carrying `text` and `source`, so non-Go WebSocket plugins see it.
+2. publishes `selection.Captured{Slot, Text, Source}` on `host.TopicSelectionCaptured` (`"selection.captured"`). Task 0055 names the topic only; this task defines the payload type in `driver/host/selection`;
+3. sends one `signal` named `selectionCaptured` for that slot to the daemon, carrying `text` and `source`, so non-Go WebSocket plugins see it.
 
-A release that arrives while a capture-on-release is running is dropped and logged.
+A release that arrives while a capture-on-release is running is dropped and logged. The host learns which layer is on screen from task 0057's `layerChanged` message.
 
 ### Protocol
 
 `plugin.SignalPayload` gains two optional fields, `Text string` (`json:"text,omitempty"`) and `Source string` (`json:"source,omitempty"`), and a `SignalSelectionCaptured` constant. Existing signals leave them empty, so their JSON does not change. The daemon already rebroadcasts a client's `signal` verbatim, so it needs no other change.
 
-The host gains `Runner.Signal(key int, p plugin.SignalPayload) error`, an internal way to send a `signal` over its WebSocket connection, built on the runner's existing locked send. Task 0055's `Host` gives plugins no way to send a signal, and this task does not add one for plugins.
+The host gains `Runner.Signal(slot int, p plugin.SignalPayload) error`, an internal way to send a `signal` over its WebSocket connection, built on the runner's existing locked send. Task 0055's `Host` gives plugins no way to send a signal, and this task does not add one for plugins.
 
 ### macOS helpers
 
@@ -168,11 +169,11 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [ ] **DoD-2** — With `SelectedText` empty and a fake pasteboard that changes to `"world"` after `Copy`, `Capture` returns `Source: "clipboard"` and `Restore` is called with the saved contents. **Proof:** `go test ./host/selection -run TestCapture_ClipboardFallback`
 - [ ] **DoD-3** — With both paths empty, `Capture` returns an empty `Selection`, and `Restore` is still called. **Proof:** `go test ./host/selection -run TestCapture_NothingSelected`
 - [ ] **DoD-4** — Two `Capture` calls from two goroutines never overlap. **Proof:** `go test ./host/selection -race -run TestCapture_Serialized`
-- [ ] **DoD-5** — A release of a capture key calls `OnSelection` in two instances, publishes on `selection.captured`, and sends one `selectionCaptured` signal with `text` and `source` to the fake daemon. A press, and a release of a key not in `captureKeys`, do none of these. **Proof:** `go test ./host -run TestSelection_CaptureOnRelease`
+- [ ] **DoD-5** — A release of a capture slot calls `OnSelection` in two instances, publishes on `selection.captured`, and sends one `selectionCaptured` signal with `text` and `source` to the fake daemon. A press, a release of a key not in `captureSlots`, and a release while a child layer is on screen do none of these. **Proof:** `go test ./host -run TestSelection_CaptureOnRelease`
 - [ ] **DoD-6** — A `signal` with no `text` marshals to the same JSON as before this task. **Proof:** `go test ./plugin -run TestSignalPayload_OmitsEmptyText`
-- [ ] **DoD-7** — A config with a capture key of 7 fails validation and names it. **Proof:** `go test ./cmd/macropad-plugins -run TestConfig_ReportsEveryProblem`
-- [ ] **DoD-8** — On a Mac with Accessibility granted to the host, a release of a capture key with text selected in TextEdit, Safari, and VS Code reaches a Go test subscriber and a WebSocket client such as the virtual pad, and the clipboard holds its prior contents afterwards. **Proof:** manual run, logged in the PR description
-- [ ] **DoD-9** — `driver/README.md` documents `SelectedText`, `OnSelection`, the `selection` config block, the `selection.captured` topic, the `selectionCaptured` signal, and the permission step. **Proof:** `driver/README.md`
+- [ ] **DoD-7** — A config with a capture slot of 7 fails validation and names it. **Proof:** `go test ./cmd/macropad-plugins -run TestConfig_ReportsEveryProblem`
+- [ ] **DoD-8** — On a Mac with Accessibility granted to the host, a release of a capture slot with text selected in TextEdit, Safari, and VS Code reaches a Go test subscriber and a WebSocket client such as the virtual pad, and the clipboard holds its prior contents afterwards. **Proof:** manual run, logged in the PR description
+- [ ] **DoD-9** — `driver/README.md` documents `SelectedText`, `OnSelection`, the `selection` config block (`captureSlots`), the `selection.captured` topic, the `selectionCaptured` signal, and the permission step. **Proof:** `driver/README.md`
 - [ ] **DoD-10** — `cd driver && go build ./... && go vet ./...` exits 0 on Linux and on macOS. **Proof:** the command's exit code on each OS
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
@@ -182,10 +183,11 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - A clipboard manager records the captured text → documented in the README. Setting the `org.nspasteboard.TransientType` marker on the restored write may help; DoD-8 checks one manager if one is installed.
 - A plugin calls `SelectedText` often, for example on a timer → each call may post Cmd+C and touch the clipboard. The README says to call it only on a person's action.
 - The text can hold passwords or other secrets, and the signal reaches every WebSocket client → the server binds to `127.0.0.1` only (task 0028). The README warns against pressing a capture key in password fields.
-- Task 0055 changes its names while it is implemented → this spec is updated to match before work starts.
+- Tasks 0055 and 0057 change names while they are implemented → this spec is updated to match before work starts.
 
 ## Open questions
 
-- [ ] Should a capture key also suppress its click-pattern signals? The default is no. — kgheacock
+- [ ] Should a capture slot also suppress its click-pattern signals? The default is no. — kgheacock
+- [ ] Should a child key be able to capture? The default is no; only top-level keys. — kgheacock
 - [ ] Should the host cap the text length? The default is no cap. — kgheacock
 - [ ] Should non-Go plugins be able to request a capture on demand, for example with a `captureSelection` message? The default is no; they get captures on configured keys only. — kgheacock

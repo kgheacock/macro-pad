@@ -26,7 +26,7 @@ Tasks 0051 and 0052 store key state in SQLite, behind an event log. That is too 
 - `iconRef` names a PNG in `./assets`. The pad shows it as the key image.
 - The daemon tracks the active layer. The active layer is what the pad shows.
 - A single press on a key with children opens its child layer.
-- In a child layer, key 4 shows a shift icon. A single press on it returns to the parent layer.
+- In a child layer, key 3 shows a shift icon. A single press on it returns to the parent layer.
 - The daemon saves the object to disk at intervals, and on exit. A restart shows the same layer.
 - `CHANNEL=github macro_streamer` reads JSON lines on stdin and updates the key for that channel.
 - A client can learn the active layer, and can reserve a key slot, so task 0055's plugin host can share the keys.
@@ -92,7 +92,7 @@ Several streamers must share six keys, and navigation must work with none runnin
 - `active` is `null` for the top layer. Otherwise it is the `id` of the parent key.
 - `status` is `RUNNING`, `DONE`, `ERROR`, `WARN`, or empty. Colors follow `driver/statedb`.
 - If `iconRef` is empty, `icon` is a built-in Emoji ID.
-- In a child layer, child N shows on keys 0, 1, 2, 3, 5. Key 4 shows `assets/shift.png`.
+- In a child layer, child N shows on keys 0, 1, 2, 4, 5. Key 3 shows `assets/shift.png`.
 - `iconRef` is a path under `assets/`. A path that leaves `assets/` is rejected.
 - The count is drawn as a badge on the image.
 - Only changed keys are sent when the object changes.
@@ -121,8 +121,8 @@ An outside reviewer verifies each item without help from the implementer. Each i
 
 - [ ] **DoD-1** — A file with seven keys, six children, or an unknown status is rejected. A valid file loads. **Proof:** `cd driver && go test ./layers -run TestDocValidation`
 - [ ] **DoD-2** — The top layer sends six key states: status color, image from `iconRef`, and count badge. **Proof:** `go test ./layers -run TestRenderTopLayer`
-- [ ] **DoD-3** — A single press on a key with children shows its children on keys 0, 1, 2, 3, 5 and the shift icon on key 4. **Proof:** `go test ./layers -run TestEnterChildLayer`
-- [ ] **DoD-4** — A single press on key 4 in a child layer shows the top layer. **Proof:** `go test ./layers -run TestUpReturnsToParent`
+- [ ] **DoD-3** — A single press on a key with children shows its children on keys 0, 1, 2, 4, 5 and the shift icon on key 3. **Proof:** `go test ./layers -run TestEnterChildLayer`
+- [ ] **DoD-4** — A single press on key 3 in a child layer shows the top layer. **Proof:** `go test ./layers -run TestUpReturnsToParent`
 - [ ] **DoD-5** — A single press on a key with no children sends nothing and keeps `active`. **Proof:** `go test ./layers -run TestPressWithoutChildren`
 - [ ] **DoD-6** — A dirty object is saved within 5 s. A restart shows the saved active layer. A corrupt file moves to `layers.json.bad`. **Proof:** `go test ./layers -run 'TestPersistAndRestore|TestCorruptFileMovedAside'`
 - [ ] **DoD-7** — `printf '{"level":"error","msg":"x"}\n' | CHANNEL=github macro_streamer` sets key `github` to `ERROR`. A bad line is logged and skipped. An empty `CHANNEL` exits non-zero. **Proof:** `go test ./e2e -run TestStreamer`
@@ -143,7 +143,6 @@ An outside reviewer verifies each item without help from the implementer. Each i
 
 ## Open questions
 
-- [ ] Does "Key 4" mean index 4 (the fifth key), as `KeyIndex` counts, or the fourth key? The spec assumes index 4. — kgheacock
 - [ ] Which JSON fields give the key `status` and the child `id` in a log line? The default is `level` for status and `child` for the id. — kgheacock
 - [ ] Should a child layer return on its own after a timeout? The default is no. — kgheacock
 

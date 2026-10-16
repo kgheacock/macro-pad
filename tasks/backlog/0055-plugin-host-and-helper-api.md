@@ -3,13 +3,13 @@ id: "0055"
 title: "Run every Go plugin in one plugin host with a shared helper API"
 status: "backlog"
 created: "2026-10-13"
-updated: "2026-10-13"
+updated: "2026-10-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/63"
 branch: "claude/project-thread-trlli9"
-related: ["0013", "0028", "0030", "0051", "0053", "0054"]
+related: ["0013", "0028", "0030", "0053", "0054", "0057"]
 tags: ["driver", "plugin", "api", "macos"]
 ---
 
@@ -37,7 +37,9 @@ its own terminal.
 
 Nothing decides which plugin owns which key. The pad has six keys. Two
 plugins that write the same key fight, and the last write wins. With
-more plugins than keys, there is no way to switch between sets of keys.
+more plugins than keys, there is no way to open a second set of keys.
+Task 0057 now gives the daemon a layer tree for this. The host must use
+it and must not add a second one.
 
 Plugins cannot call each other. `windowpreview` exposes
 `SnapshotWindow` for a switcher to call just before it hides a window,
@@ -50,17 +52,19 @@ drop it.
 ## Goals
 
 - One command starts every configured plugin.
-- One config file says which plugin runs on which keys, and on which
-  page.
+- One config file says which plugin runs on which top-level keys of
+  the layer tree (task 0057).
 - A plugin is a Go type with a small interface. It writes no `main`,
   no flag parsing, no dial, and no read loop.
 - The host gives plugins helpers for the work they repeat today: key
   output, input routing, colors, images, and macOS calls.
 - A plugin can only write to its own keys, and only gets input from
   its own keys.
-- More plugins than keys fit, through named pages of keys.
+- More plugins than keys fit, through the child layers of task 0057.
+  A key opens up to five children. The daemon changes layers.
 - One plugin's panic, error, or slow handler does not stop the others.
-- A daemon restart does not stop the host. It reconnects and repaints.
+- A daemon restart does not stop the host. It reconnects, and the
+  daemon still holds the state it saved (task 0057).
 - Plugins can publish to and subscribe to each other in process.
 - A plugin's logic is testable with a fake host, with no WebSocket.
 
@@ -74,8 +78,9 @@ drop it.
 - Loading plugins at run time (Go `plugin` package, WASM, scripts).
   Plugins are compiled into the host binary.
 - Starting the host at login (launchd). A later task can add a plist.
-- Merging the state database page tree (task 0051) with host pages.
-  See Risks.
+- Pages, a page switcher, or a second copy of key state. Task 0057
+  owns the layer tree, the active layer, navigation, and saving. The
+  host is a client of it.
 - Porting plugins still in open PRs. Each one adopts the host in its
   own PR, or in a follow-up once merged.
 
@@ -117,6 +122,7 @@ holds one WebSocket connection to `macropadd`, reads one config file,
 and starts one instance per entry. Each instance gets a `Host` handle:
 its keys, its config, and the helpers. The host routes input to the
 owner of each key, and drops writes to keys a plugin does not own.
+State lives in the daemon's layer tree (task 0057), not in the host.
 
 - Good, because the daemon stays unchanged and isolated from plugin
   crashes.
@@ -125,14 +131,14 @@ owner of each key, and drops writes to keys a plugin does not own.
 - Good, because plugins call each other through an in-process bus, with
   no wire hop.
 - Good, because the host sees every write, so it can enforce key
-  ownership and pages.
+  ownership.
 - Bad, because all Go plugins share one process. A panic in a goroutine
   the plugin starts itself cannot be recovered by the host, and kills
   every plugin.
 - Bad, because adding a plugin means one import line and a rebuild of
   the host.
-- Bad, because the host repeats some work the daemon does, such as
-  caching the last state per key.
+- Bad, because the host repeats some routing work the daemon does,
+  such as finding which node a press hit.
 
 ## Decision
 
@@ -152,7 +158,7 @@ the README says so.
 ### Layout
 
 - `driver/host` — the `Plugin` interface, the registry, the router,
-  pages, the bus, and the `Host` handle.
+  the layer client, the bus, and the `Host` handle.
 - `driver/host/hosttest` — a fake `Host` for plugin tests.
 - `driver/host/keyimg` — color and image helpers (pure Go, any OS).
 - `driver/host/macos` — macOS helpers behind interfaces, with a
@@ -189,24 +195,24 @@ the field.
 ```go
 type Host interface {
 	ID() string     // instance id from the config
-	Keys() []int    // physical key indexes this instance owns
+	Slots() []int   // top-level keys (0..5) this instance owns
 	Config(v any) error
 	Log(format string, args ...any) // prefixed with the instance id
 
-	// Output, to one owned key. A key the instance does not own
-	// returns ErrNotOwner and sends nothing.
+	// Output, to one owned top-level key. A slot the instance does not
+	// own returns ErrNotOwner and sends nothing.
 	Key(i int) Key
 
-	// Input, for owned keys on the active page only.
-	OnPress(fn func(key int))
-	OnRelease(fn func(key int))
-	OnClick(kind ClickKind, fn func(key int)) // Single, Double, Long
-	OnSignal(name string, fn func(key int, s plugin.SignalPayload))
+	// Input, for the nodes this instance owns. A node is one owned
+	// top-level key, or one child of it.
+	OnPress(fn func(n Node))
+	OnRelease(fn func(n Node))
+	OnClick(kind ClickKind, fn func(n Node)) // Single, Double, Long
+	OnSignal(name string, fn func(n Node, s plugin.SignalPayload))
 
-	// Pages.
+	// Layers (task 0057). Visible is true while an owned node is on screen.
 	Visible() bool
 	OnVisible(fn func(visible bool))
-	ShowPage(name string) error
 
 	// Cross-plugin bus, in process only.
 	Publish(topic string, v any)
@@ -220,25 +226,58 @@ type Host interface {
 	Require(p macos.Permission) error
 }
 
+// Node names one owned key. Child is -1 for the top-level key itself,
+// and 0..4 for one of its children.
+type Node struct{ Slot, Child int }
+
 type Key interface {
-	SetColor(c keyimg.Color)            // solid color, no glyph
-	SetState(name string)               // Alert, Waiting, Done (api.SetState)
-	SetBlink(on bool)
-	SetImage(img image.Image) error     // scaled and encoded to 128x128 PNG
+	Child(n int) Key                    // n in 0..4, on a top-level Key only
+	SetStatus(s Status)                 // RUNNING, DONE, ERROR, WARN, or none
+	SetCount(n int)
+	SetIcon(id byte)                    // built-in Emoji ID
+	SetState(name string)               // Alert, Waiting, Done map to ERROR, WARN, DONE
+	SetColor(c keyimg.Color)            // solid tile, rendered to a PNG
+	SetImage(img image.Image) error     // scaled to 128x128, rendered to a PNG
 	SetPNG(png []byte) error
 	Clear()
 }
 ```
 
-`Key` calls never block on the network. The host keeps the last state
-per key per instance. A call on a visible key also queues a send; a
-call on a hidden key only updates the cache.
+### State
+
+The host keeps no key state of its own. The daemon owns the layer tree,
+the active layer, and the saving (task 0057). Each `Key` call becomes
+one `setLayerKey` message that upserts a node. Each node `id` is the
+instance id, a dot, and the slot, such as `desks.0`. A child adds a dot
+and its number, such as `desks.0.2`.
+
+`SetColor`, `SetImage`, and `SetPNG` write a PNG to
+`assets/.generated/<node id>.png` and set `iconRef` to it, because a
+node holds a file reference and not pixels. `SetIcon` sets `icon`.
+`SetStatus` and `SetState` set `status`. The model has no blink, so
+`SetState` drops blink (see Open questions).
+
+At start, an instance sends one empty `setLayerKey` with its slot for
+each slot it owns. This reserves the slot. A streamer that picks the
+first free key then skips it.
+
+`Key` calls never block on the network. The host queues them and keeps
+only the newest values for each node, so a burst sends once. The daemon
+draws only what is on screen.
 
 ### Routing and threading
 
 The host reads every message from the daemon once. For a press,
-release, or signal, it finds the instance that owns that key on the
-active page and queues the handler call on that instance's own queue.
+release, or signal, it finds the node on that key in the active layer
+and queues the handler call on the owner's own queue. In the top layer,
+key N is slot N. In a child layer, keys 0, 1, 2, 3, and 5 are children
+0 to 4 of the open slot, and key 4 is the daemon's up arrow, which has
+no owner. The host learns the active layer from the `layerChanged`
+message that task 0057 adds.
+
+A single press on a node that has children opens its child layer. The
+daemon handles it, and the plugin gets `OnVisible`, not the click.
+Double and long presses go to the plugin.
 Each instance has one goroutine that runs its handlers in order, so a
 plugin needs no locks for its own state. A queue holds 64 calls; a full
 queue drops the next call and logs it, matching the server's
@@ -256,58 +295,47 @@ plugin, go to every instance that subscribed to that name with
 ```json
 {
   "addr": "127.0.0.1:8765",
-  "startPage": "work",
   "plugins": [
-    {"id": "desks",   "use": "window-switcher", "page": "work", "keys": [0, 1, 2, 3],
+    {"id": "desks",  "use": "window-switcher", "slots": [0, 1, 2, 3],
      "config": {"trigger": "press"}},
-    {"id": "claude",  "use": "claude-status",   "page": "work", "keys": [4]},
-    {"id": "pager",   "use": "pager",           "page": "*",    "keys": [5],
-     "config": {"pages": ["work", "previews"]}},
-    {"id": "thumbs",  "use": "windowpreview",   "page": "previews", "keys": [0, 1, 2, 3, 4]}
+    {"id": "claude", "use": "claude-status",   "slots": [4]},
+    {"id": "thumbs", "use": "windowpreview",   "slots": [5]}
   ]
 }
 ```
+
+Here `thumbs` shows up to five window previews as the children of key 5.
 
 Validation at start, before any connection:
 
 - every `use` names a registered plugin;
 - every `id` is unique;
-- every key is in 0..5;
-- no two instances on one page claim the same key, and a key on page
-  `"*"` (every page) is not claimed by any other page;
-- `startPage` names a page that exists.
+- every slot is in 0..5;
+- no two instances claim the same slot.
 
 A failure prints every problem found and exits with code 2.
 
 `--list` prints every registered plugin with a one-line description.
 `--check` validates the config and exits.
 
-### Pages
+### Layers
 
-A page is a name. An instance lives on one page, or on `"*"`. When the
-page changes, the host:
+The daemon changes layers, on a single press of a key with children or
+of the up arrow (task 0057). It sends `layerChanged` with the new
+active layer. The host then calls `OnVisible(true)` on instances whose
+nodes came on screen, and `OnVisible(false)` on instances whose nodes
+left. The daemon redraws the keys. The host sends nothing.
 
-1. calls `OnVisible(false)` on instances leaving view and
-   `OnVisible(true)` on instances coming into view;
-2. sends the cached state of each key of the new page; a key no
-   instance owns on that page is cleared to color 0;
-3. broadcasts a `signal` named `pageChanged` on key 0, so the virtual
-   pad and other clients can see it.
-
-The built-in `pager` plugin moves to the next page on a single press
-of its key and shows the page's index as a glyph. `h.ShowPage` lets
-any plugin switch page, for example a switcher that jumps to its
-previews.
-
-A hidden instance keeps running. `windowpreview` should stop
-capturing while hidden; `Visible` and `OnVisible` let it.
+A hidden instance keeps running. `windowpreview` should stop capturing
+while hidden; `Visible` and `OnVisible` let it.
 
 ### Reconnect
 
 When the connection drops, the host redials with backoff from 250 ms
 to 5 s, and logs once per state change, not once per try. While down,
-`Key` calls only update the cache. After reconnect, it sends the
-cached state of every visible key.
+the host keeps the newest values for each node. After reconnect, it
+reserves its slots again, sends those values, and asks for the active
+layer. It does not repaint other nodes. The daemon holds them.
 
 ### Helpers
 
@@ -319,7 +347,7 @@ cached state of every visible key.
 - `Thumbnail(img) *image.RGBA` — scale and letterbox to 128x128;
 - `Stale(img)` — the dimmed, amber-strip look from task 0054;
 - `Text(s string, fg, bg Color) image.Image` — one or two short lines
-  drawn with a built-in font, for labels such as a page name.
+  drawn with a built-in font, for labels.
 
 These move from `window-switcher` and `driver/preview`; those callers
 switch to `keyimg`.
@@ -358,29 +386,27 @@ Delivery is on the subscriber's own queue, like any other handler.
 
 ### Testing
 
-`hosttest.New(t, keys...)` returns a fake `Host`. A test sends input
-with `h.Press(k)`, `h.Click(k, Double)`, `h.Signal(k, name)`, and reads
-output with `h.KeyState(k)`. Plugins drop their own fake connection
+`hosttest.New(t, slots...)` returns a fake `Host`. A test sends input
+with `h.Press(n)`, `h.Click(n, Double)`, and `h.Signal(n, name)`, moves
+the active layer with `h.Layer(open)`, and reads output with `h.Node(n)`. Plugins drop their own fake connection
 interfaces.
 
 ### Port
 
-This task ports `claude-status` to `driver/plugins/claudestatus` and
-adds `pager`. Any of `window-switcher`, `selection-capture`, and
+This task ports `claude-status` to `driver/plugins/claudestatus`. Any of `window-switcher`, `selection-capture`, and
 `windowpreview` already on `main` when this task starts is ported too.
 The old `driver/examples/claude-status` binary is removed, and the
 README points to the host.
 
 Files to change:
 
-- `driver/host/*.go` — interface, registry, router, pages, bus, reconnect
+- `driver/host/*.go` — interface, registry, router, layer client, bus, reconnect
 - `driver/host/hosttest/*.go` — the fake host
 - `driver/host/keyimg/*.go` — color and image helpers
 - `driver/host/macos/*_darwin.go`, `*_other.go` — macOS helpers and stubs
 - `driver/plugins/claudestatus/*.go` — the ported plugin
-- `driver/plugins/pager/*.go` — the page switcher
 - `driver/cmd/macropad-plugins/main.go`, `plugins.go` — the binary and the plugin list
-- `driver/README.md` — "Plugin host" section: writing a plugin, config, pages, permissions
+- `driver/README.md` — "Plugin host" section: writing a plugin, config, layers, permissions
 
 ## Definition of done
 
@@ -388,20 +414,21 @@ An outside reviewer verifies each item without help from the
 implementer. Each item names its proof. The task moves to `complete/`
 only when every box is ticked.
 
-- [ ] **DoD-1** — A press on a key reaches only the instance that owns
-  it on the active page, and a press on an unowned key reaches no one.
-  **Proof:** `cd driver && go test ./host -run TestRouter_RoutesToOwner`
-- [ ] **DoD-2** — `h.Key(k)` on a key the instance does not own returns
-  `ErrNotOwner` and sends nothing to the daemon. **Proof:**
+- [ ] **DoD-1** — A press reaches only the instance that owns the node
+  on that key in the active layer. A press on an unowned key, or on the
+  up arrow of a child layer, reaches no one. **Proof:** `cd driver && go test ./host -run TestRouter_RoutesToOwner`
+- [ ] **DoD-2** — `h.Key(i)` on a slot the instance does not own returns
+  `ErrNotOwner` and sends no `setLayerKey` to the daemon. **Proof:**
   `go test ./host -run TestKey_RejectsNonOwner`
-- [ ] **DoD-3** — A config with two instances on one key and page, an
-  unknown `use`, a duplicate `id`, and a key of 7 exits with code 2 and
+- [ ] **DoD-3** — A config with two instances on one slot, an unknown
+  `use`, a duplicate `id`, and a slot of 7 exits with code 2 and
   names all four problems. **Proof:**
   `go test ./cmd/macropad-plugins -run TestConfig_ReportsEveryProblem`
-- [ ] **DoD-4** — A page switch sends the cached state of every key on
-  the new page, clears unowned keys, and calls `OnVisible` on both
-  sides. A `Key` call on a hidden instance sends nothing until its page
-  shows. **Proof:** `go test ./host -run TestPages`
+- [ ] **DoD-4** — A `layerChanged` message calls `OnVisible(true)` on
+  instances whose nodes come on screen, and `OnVisible(false)` on those
+  that leave. Ten `Key` calls in one burst on one node send one
+  `setLayerKey` with the newest values. **Proof:**
+  `go test ./host -run 'TestLayerVisibility|TestKey_CoalescesBurst'`
 - [ ] **DoD-5** — A handler that panics is logged with its instance id;
   the other instances keep receiving input, and the panicking instance
   receives its next event. **Proof:**
@@ -410,8 +437,9 @@ only when every box is ticked.
   instance's handler by more than 50 ms. **Proof:**
   `go test ./host -run TestRouter_SlowPluginIsolated`
 - [ ] **DoD-7** — After the fake daemon drops and accepts the
-  connection again, the host resends the cached state of every visible
-  key. **Proof:** `go test ./host -run TestReconnect_Repaints`
+  connection again, the host reserves its slots again and sends the
+  newest values of every node written while it was down. **Proof:**
+  `go test ./host -run TestReconnect_Resends`
 - [ ] **DoD-8** — A `Publish` reaches every subscriber in other
   instances, on each subscriber's own queue. **Proof:**
   `go test ./host -run TestBus`
@@ -427,16 +455,16 @@ only when every box is ticked.
   plugin, and `--check` validates the README's example config.
   **Proof:** the commands' output, pasted in the PR description
 - [ ] **DoD-12** — On a Mac with a board or `macropadd --emulate` and
-  the virtual pad, `claude-status` and `pager` run from one config: the
-  pager key flips pages, and `macrodriver signal processWaiting` turns
-  the Claude key amber only while its page shows. **Proof:** manual
-  run, logged in the PR description
+  the virtual pad, `claude-status` runs from one config: `macrodriver
+  signal processWaiting` sets its node to `WARN` (yellow), and
+  `processDone` sets it to `DONE`. **Proof:** manual run, logged in the
+  PR description
 - [ ] **DoD-13** — With Accessibility not granted, the host logs one
   line naming its binary path, and an instance that calls
   `h.Require(macos.Accessibility)` is disabled while the others run.
   **Proof:** manual run on macOS, logged in the PR description
 - [ ] **DoD-14** — `driver/README.md` has a "Plugin host" section: a
-  plugin in under 30 lines, the config format, pages, the bus, and the
+  plugin in under 30 lines, the config format, layers, the bus, and the
   permission step. **Proof:** `driver/README.md`
 - [ ] **DoD-15** — `cd driver && go build ./... && go vet ./...` exits 0
   on Linux and on macOS. **Proof:** the command's exit code on each OS
@@ -448,30 +476,27 @@ only when every box is ticked.
 - A plugin's own goroutine panics → the whole host exits. `h.Go` and
   `h.Every` recover; the README tells plugin authors to use them. A
   launchd `KeepAlive` in a later task restarts the host.
-- The state database poller (task 0051) also writes keys 0–5 → the
-  host and the poller fight, last write wins. The README says to run
-  one or the other on a given key. A later task can make the poller a
-  host plugin.
-- Non-Go plugins write any key directly → the host cannot stop them.
-  On its next page switch or reconnect, the host repaints only its own
-  keys; the README says to leave keys free for them in the config.
+- A client other than the host writes a key with `setKeyState`, which
+  bypasses the layer tree → the daemon redraws only changed nodes, so
+  that key stays until its node changes. The README tells such clients
+  to use `setLayerKey` and a slot that the config leaves free.
+- The host writes a PNG for each `SetColor` or image change → a flood
+  of changes fills `assets/.generated`. The host names each file by
+  node id, so one node keeps one file, and it clears the folder at start.
 - A rebuilt host binary may lose its macOS grants → one grant to redo
   instead of one per plugin. The README shows how to sign the binary
   with a stable identity so the grant survives rebuilds.
-- A page switch sends up to six key states, plus glyphs, in a burst →
-  task 0051 measured about 155 ms per write on the board, so a switch
-  with glyphs may take over 1 s. The host sends color first, then
-  glyphs, so the page reads as switched early.
+- A layer change sends up to six key states, plus glyphs, in a burst →
+  task 0057 covers this cost. The host sends nothing on a layer change.
 - Per-instance queues of 64 drop input under a flood → a person cannot
   press keys that fast; a drop logs, so it is visible.
 
 ## Open questions
 
-- [ ] Should a plugin see physical key indexes, or slots 0..n-1 that
-  the config maps to physical keys? The default is physical indexes,
-  to match today's plugins and `--map` flags. — kgheacock
-- [ ] Should `pager` use single press, or long press so its key can
-  also do something else? The default is single press on a dedicated
-  key. — kgheacock
+- [ ] The layer model has no blink, so `SetState(Alert)` loses its
+  blink. Should task 0057 add a `blink` field? The default is no. —
+  kgheacock
+- [ ] Should a plugin open a layer itself, as `ShowPage` did? The
+  default is no; only a press does. — kgheacock
 - [ ] Should the host watch its config file and reload on change? The
   default is no; restart the host. — kgheacock

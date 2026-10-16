@@ -354,6 +354,13 @@ func nodeView(n *Node) view {
 // drawn stays untouched when it should be blank, so a reserved slot, or a
 // key another process draws, keeps what it shows. The caller holds sendMu.
 func (c *Controller) flush(want [KeyCount]view) {
+	start := time.Now()
+	sent := 0
+	defer func() {
+		if sent > 0 {
+			c.logf("layers: drew %d keys in %s", sent, time.Since(start).Round(time.Millisecond))
+		}
+	}()
 	for i, w := range want {
 		have := c.shown[i]
 		if w == have || (w.kind == kindBlank && have.kind == kindUnknown) {
@@ -365,6 +372,7 @@ func (c *Controller) flush(want [KeyCount]view) {
 			continue
 		}
 		c.shown[i] = w
+		sent++
 	}
 }
 
@@ -380,9 +388,11 @@ func (c *Controller) send(key byte, w view) error {
 			// Show the color alone rather than nothing.
 			c.logf("layers: key %d: draw %q: %v", key, w.iconRef, err)
 		} else {
+			glyphStart := time.Now()
 			if err := c.out.SetCustomGlyph(key, png); err != nil {
 				return err
 			}
+			c.logf("layers: key %d: glyph sent in %s", key, time.Since(glyphStart).Round(time.Millisecond))
 			ks.EmojiID = transport.CustomGlyphSentinelEmojiID
 		}
 	}

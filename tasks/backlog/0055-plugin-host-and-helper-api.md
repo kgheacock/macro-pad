@@ -270,8 +270,8 @@ draws only what is on screen.
 The host reads every message from the daemon once. For a press,
 release, or signal, it finds the node on that key in the active layer
 and queues the handler call on the owner's own queue. In the top layer,
-key N is slot N. In a child layer, keys 0, 1, 2, 3, and 5 are children
-0 to 4 of the open slot, and key 4 is the daemon's up arrow, which has
+key N is slot N. In a child layer, keys 0, 1, 2, 4, and 5 are children
+0 to 4 of the open slot, and key 3 is the daemon's up arrow, which has
 no owner. The host learns the active layer from the `layerChanged`
 message that task 0057 adds.
 

@@ -1,13 +1,13 @@
 ---
 id: "0057"
 title: "One JSON object holds the keys and their child layers, and persists the active layer"
-status: "ongoing"
+status: "complete"
 created: "2026-10-15"
 updated: "2026-10-15"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/68"
 branch: "0057-json-layer-state-with-child-layers"
 related: ["0051", "0052", "0055", "0028", "0013"]
 tags: ["driver", "layers", "state", "json", "streamer"]
@@ -130,7 +130,7 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [x] **DoD-9** — `driver/statedb` is gone, and `macropadd --state-db x` exits with a flag error. **Proof:** `test ! -d driver/statedb` and `go test ./cmd/macropadd -run TestStateDBFlagRemoved`
 - [x] **DoD-10** — `driver/README.md` records the file format, the key layout, and the save interval. **Proof:** `driver/README.md`, section "Layers"
 - [x] **DoD-11** — `cd driver && go build ./... && go vet ./...` exits 0 on go 1.22.0. **Proof:** the command's exit code
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

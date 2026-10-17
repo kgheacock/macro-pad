@@ -1,13 +1,13 @@
 ---
 id: "0060"
 title: "Draw a layer update all at once: the board holds new frames until the batch is complete"
-status: "ongoing"
+status: "complete"
 created: "2026-10-17"
 updated: "2026-10-17"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/70"
 branch: "0060-draw-a-layer-update-all-at-once"
 related: ["0057", "0058", "0048", "0045", "0044"]
 tags: ["firmware", "driver", "wire-protocol", "layers", "display"]

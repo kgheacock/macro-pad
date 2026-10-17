@@ -305,7 +305,26 @@ func TestDevice_CloseTwiceClosesTheHandlesOnce(t *testing.T) {
 	}
 }
 
+// A glyph that does not compress goes out as the raw type 5 frame.
 func TestDevice_SendCustomGlyph(t *testing.T) {
+	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(nopWriteCloser{}, serialConn)
+	defer d.Close()
+
+	pixels := noisePixels()
+	if err := d.SendCustomGlyph(3, pixels); err != nil {
+		t.Fatalf("SendCustomGlyph: %v", err)
+	}
+
+	want := append([]byte{byte(MessageTypeSetCustomGlyph), 0x01, 0x80, 3}, pixels...)
+	if !bytes.Equal(serialConn.written, want) {
+		t.Fatalf("CDC write header+key = % x, want % x", serialConn.written[:4], want[:4])
+	}
+}
+
+// A flat glyph goes out as a type 6 frame, a few hundred bytes long, whose
+// stream inflates to the original pixels.
+func TestDevice_SendCustomGlyphCompressesAFlatGlyph(t *testing.T) {
 	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
 	d := newDevice(nopWriteCloser{}, serialConn)
 	defer d.Close()
@@ -315,9 +334,22 @@ func TestDevice_SendCustomGlyph(t *testing.T) {
 		t.Fatalf("SendCustomGlyph: %v", err)
 	}
 
-	want := append([]byte{byte(MessageTypeSetCustomGlyph), 0x01, 0x80, 3}, pixels...)
-	if !bytes.Equal(serialConn.written, want) {
-		t.Fatalf("CDC write header+key = % x, want % x", serialConn.written[:4], want[:4])
+	frameType, payload, err := readFrame(bytes.NewReader(serialConn.written))
+	if err != nil {
+		t.Fatalf("readFrame: %v", err)
+	}
+	if frameType != MessageTypeSetCustomGlyphCompressed {
+		t.Fatalf("frame type = %v, want MessageTypeSetCustomGlyphCompressed", frameType)
+	}
+	got, err := decodeCompressedCustomGlyph(payload)
+	if err != nil {
+		t.Fatalf("decodeCompressedCustomGlyph: %v", err)
+	}
+	if got.KeyIndex != 3 || !bytes.Equal(got.Pixels, pixels) {
+		t.Fatalf("decoded key %d, want key 3 and matching pixels", got.KeyIndex)
+	}
+	if len(serialConn.written) > 200 {
+		t.Fatalf("wrote %d bytes for a flat glyph, want at most 200", len(serialConn.written))
 	}
 }
 

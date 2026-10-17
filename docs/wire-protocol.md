@@ -14,6 +14,7 @@ little-endian, matching the RP2350's native byte order.
 |---|---|---|---|
 | Key state | Host → Device | HID | 6 bytes |
 | Set custom glyph | Host → Device | CDC serial | 1 + 32,768 bytes |
+| Set custom glyph (compressed) | Host → Device | CDC serial | 1 + up to 32,767 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
@@ -52,6 +53,7 @@ bytes arrive is a truncated message, not a partial value.
 | 3 | Pong | Device → Host |
 | 4 | Trace record | Device → Host |
 | 5 | Set custom glyph | Host → Device |
+| 6 | Set custom glyph (compressed) | Host → Device |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -133,6 +135,33 @@ message naming a built-in Emoji ID switches the key back to the glyph
 table, replacing the custom image. A later Key state message that names
 `0xFE` itself instead keeps the custom image in place, and applies only
 that message's Color and Blink fields — see [Emoji IDs](#emoji-ids).
+
+### Set custom glyph (compressed) (CDC, host → device)
+
+Carries the same image as Set custom glyph, as a zlib stream. Framed per
+[Framing](#framing) as type `6`. The effect on the key is the same as for
+type `5`, in every detail above.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Key index | 0-based index of the target key |
+| 1 | 1 to 32,767 | Stream | A zlib stream (RFC 1950) that inflates to exactly 32,768 bytes, the Pixels field of Set custom glyph |
+
+The driver sends type `6` when its stream is smaller than the raw payload,
+and type `5` otherwise. A flat icon deflates to about 1 KB, so a frame is
+about 3% of a type `5` frame. A noisy picture does not shrink, and goes
+out as type `5`. The `Length` of a type `6` frame is at least 2 and less
+than the `Length` of a type `5` frame, 32,769.
+
+The firmware drops a type `6` frame that does not inflate, or that does
+not inflate to exactly 32,768 bytes. The key keeps the image it had. The
+frame is consumed by its `Length`, so the next frame starts clean.
+
+Firmware that does not know type `6` skips the frame by its `Length`, as
+Framing says, and the key does not change. Update the firmware before the
+driver. See [task 0058](../tasks/complete/0058-compress-and-drain-custom-glyph-transfer.md)
+for the design decision, and for why inflating on the board costs 32 to
+65 ms, which limits what compression saves.
 
 ## Emoji IDs
 

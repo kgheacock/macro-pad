@@ -72,10 +72,15 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 		if err != nil {
 			return
 		}
-		if t != MessageTypeSetCustomGlyph {
+		var cg CustomGlyph
+		switch t {
+		case MessageTypeSetCustomGlyph:
+			cg, err = decodeCustomGlyph(payload)
+		case MessageTypeSetCustomGlyphCompressed:
+			cg, err = decodeCompressedCustomGlyph(payload)
+		default:
 			continue
 		}
-		cg, err := decodeCustomGlyph(payload)
 		if err != nil {
 			continue
 		}
@@ -108,11 +113,11 @@ func (e *Emulator) SendKeyState(ks KeyState) error {
 // message per docs/wire-protocol.md and delivers it to the emulator's
 // device side.
 func (e *Emulator) SendCustomGlyph(keyIndex byte, pixels []byte) error {
-	payload, err := encodeCustomGlyph(keyIndex, pixels)
+	t, payload, err := encodeCustomGlyphFrame(keyIndex, pixels)
 	if err != nil {
 		return err
 	}
-	return writeFrame(e.customGlyphW, MessageTypeSetCustomGlyph, payload)
+	return writeFrame(e.customGlyphW, t, payload)
 }
 
 // LastCustomGlyph returns the most recent Set custom glyph message the

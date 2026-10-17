@@ -316,11 +316,11 @@ func (d *Device) SendKeyState(ks KeyState) error {
 // reads from — the two directions are independent byte streams on one
 // full-duplex serial port, so a concurrent ReadMessage is unaffected.
 func (d *Device) SendCustomGlyph(keyIndex byte, pixels []byte) error {
-	payload, err := encodeCustomGlyph(keyIndex, pixels)
+	t, payload, err := encodeCustomGlyphFrame(keyIndex, pixels)
 	if err != nil {
 		return err
 	}
-	return writeFrame(d.serial, MessageTypeSetCustomGlyph, payload)
+	return writeFrame(d.serial, t, payload)
 }
 
 // ReadMessage implements Transport. It decodes one frame from the CDC

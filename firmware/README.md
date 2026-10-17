@@ -384,7 +384,7 @@ driver restores them. `macropadd`'s `transport.Reconnecting` remembers each
 key's last key state and custom glyph, and sends them again each time the
 board connects, so a replug or a power cut on a running host brings the keys
 back within a second or so of the board's boot. The daemon also keeps its
-memory in files on the host (`keys.json` and `glyph-N.bin`, see
+memory in files on the host (`keys.json` and `glyph-<hash>.bin`, see
 [`driver/README.md`](../driver/README.md)), so a daemon restart or a host
 reboot restores the keys too. With no driver running, the keys stay at the
 default. A one-shot `macrodriver` call therefore lasts until the next power
@@ -655,6 +655,60 @@ Keys 0 to 2 start within 1 ms of each other, and keys 3 to 5 start 29 to 31 ms
 later, as the second group. The six-key time is the same as for `icons`: the
 HID gap (`minReportGap`, 150 ms) sets it, and Begin batch does not change when
 the data arrives.
+
+## Caching composed frames (task 0061)
+
+A layer switch used to send every image again: 140 ms for each key, so about
+0.8 s for six. The board now keeps composed frames in a fixed pool, and a
+switch sends slot numbers.
+
+- **The pool.** `frame_cache.FrameCache` allocates `SLOT_COUNT = 128` slots of
+  32 KB (128×128 pixels, 16 bits each), 4 MB, when `MacroPad` is built, before
+  the loop. It never frees a slot, and it does not grow or shrink, so the heap
+  does not fragment and the free heap is the same for the whole run. The
+  cache is RAM only: the firmware writes no file and no `nvm` byte for it.
+  `grep -nE "open\(|nvm|storage\." firmware/*.py` lists nothing.
+- **Store frame** (type 8). `MacroPad._store_frame` composes the glyph over the
+  color into the slot's own `Bitmap` (`display_render.compose_into`), with one
+  scratch `Bitmap` for the glyph. It allocates no `Bitmap`. It draws nothing.
+  A push that reads the slot, queued or on the wire, ends first, because the
+  compose changes the bytes the DMA reads (`SLOT_WAIT_NS` bounds the wait). The
+  host does not store into a slot that a key shows, so this wait is rare.
+- **Show frames** (type 9). `MacroPad._show_frames` hands the byte view of each
+  named slot to its key (`display_render.show_cached`) in one pass, so
+  `_start_group` starts the pushes together, two groups of three. It sets the
+  key's state to what a Set custom glyph and a Key state would have left, and
+  records `FRAMES_SHOWN` (code 11). It does no inflate and no compose.
+- **Show miss** (type 10). A key that names an empty slot, or one above 127,
+  keeps its image. The board draws the other keys, and writes a Show miss with
+  the mask of the missed keys.
+- **Blinking keys are not cached.** A Set custom glyph and a blinking Key state
+  take the paths of tasks 0044 and 0048, which compose a new `Bitmap` for each
+  frame and write no slot. A key that blinks after a Show blinks between its
+  cached frame and black.
+
+`make slot-probe` measures the pool (`tools/slot_probe.py`): the time to
+allocate 128 slots, the free heap after, and the time of a 32 KB copy. It calls
+`gc.mem_free()` once before and once after the allocation, never inside a timed
+section, because it walks the heap and costs about 20 ms. The task stops if
+fewer than 2 MB are free after the pool: the firmware does not shrink the pool
+by itself.
+
+Probe figures: not measured yet. A `macropadd` daemon of another session held
+the board, so DoD-1 of task 0061 is open. Run `make flash`, `make slot-probe`,
+and `make flash` again, then record the three figures here:
+
+| Figure | Value |
+|---|---|
+| Time to allocate 128 slots | not measured |
+| Free heap after 128 slots | not measured |
+| Time of a 32 KB copy | not measured |
+
+`go run ./cmd/blinksend --scenario=cached` stores two sets of six frames and
+shows them in turn. `tools/blink_trace.py report --scenario=cached` prints
+`six keys in N ms` (from the board's `FRAMES_SHOWN` to the last `REFRESH_DONE`,
+limit 150) and `push span N ms` (limit 40) for the worst Show. Cached-Show
+figures: not measured yet, for the same reason.
 
 ## Out of scope
 

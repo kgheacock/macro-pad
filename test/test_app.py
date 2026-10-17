@@ -1,3 +1,4 @@
+import zlib
 import board
 import bitmaptools
 import pytest
@@ -781,6 +782,43 @@ def test_custom_glyph_of_the_wrong_length_is_dropped():
     serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0xAB))
     pad.step(2000)
     assert pad.key_states[3].pixels == _custom_glyph_pixels(0xAB)
+
+
+def _compressed_glyph_frame(key_index, stream):
+    writer = FakeSerial()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
+        bytes((key_index,)) + stream,
+    )
+    return bytes(writer.written)
+
+
+def test_compressed_custom_glyph_applies_to_one_key():
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+
+    pixels = _rgb565_solid_pixels(0x1234)
+    serial.feed(_compressed_glyph_frame(2, zlib.compress(pixels, 9)))
+    pad.step(1000)
+
+    assert pad.key_states[2].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+    assert pad.key_states[2].pixels == pixels
+    assert len(panels.per_key[2].frames) == 2
+
+
+def test_compressed_custom_glyph_that_does_not_inflate_keeps_the_old_image():
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+    serial.feed(_custom_glyph_frame(key_index=3, fill_byte=0xAB))
+    pad.step(1000)
+    frames_before = len(panels.per_key[3].frames)
+
+    serial.feed(_compressed_glyph_frame(3, b"\x78\x9c\xff\xff\xff"))
+    pad.step(2000)
+
+    assert pad.key_states[3].pixels == _custom_glyph_pixels(0xAB)
+    assert len(panels.per_key[3].frames) == frames_before
 
 
 def test_custom_glyph_wakes_backlight():

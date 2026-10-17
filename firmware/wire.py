@@ -9,6 +9,7 @@ See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 """
 
 import time
+import zlib
 
 PROTOCOL_VERSION = 1
 
@@ -23,6 +24,8 @@ MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_PONG = 3  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_TRACE = 4  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_SET_CUSTOM_GLYPH = 5  # docs/wire-protocol.md's Framing type registry
+# Same image as type 5, as a zlib stream (task 0058).
+MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED = 6
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -163,6 +166,27 @@ def decode_custom_glyph(payload):
     return CustomGlyph(key_index=payload[0], pixels=bytes(payload[1:]))
 
 
+def _inflate_glyph(stream):
+    """Inflate a type 6 zlib stream to a glyph's pixel buffer.
+
+    Raises `ValueError` for a stream that does not inflate, or does not
+    inflate to exactly `CUSTOM_GLYPH_PIXELS_SIZE` bytes. CircuitPython's
+    `zlib` raises a different exception for each kind of bad stream, so any
+    failure of `decompress` counts as one.
+    """
+    try:
+        pixels = zlib.decompress(stream)
+    except Exception:
+        raise ValueError("compressed custom glyph does not inflate")
+    if len(pixels) != CUSTOM_GLYPH_PIXELS_SIZE:
+        raise ValueError(
+            "compressed custom glyph inflated to {} bytes, want {}".format(
+                len(pixels), CUSTOM_GLYPH_PIXELS_SIZE
+            )
+        )
+    return pixels
+
+
 class CustomGlyphReader:
     """Incrementally reads one framed CDC message from the host.
 
@@ -182,6 +206,9 @@ class CustomGlyphReader:
         self._frame = bytearray(FRAME_HEADER_SIZE + CUSTOM_GLYPH_PAYLOAD_SIZE)
         self._view = memoryview(self._frame)
         self._filled = 0
+        # Header and payload bytes of the glyph frame in progress, and its type.
+        self._total = 0
+        self._frame_type = 0
         # Payload bytes of a frame this reader drops, still to discard.
         self._skip = 0
         self._bad_length = False
@@ -225,30 +252,42 @@ class CustomGlyphReader:
             if self._filled < FRAME_HEADER_SIZE:
                 return False
             length = self._frame[1] | (self._frame[2] << 8)
+            frame_type = self._frame[0]
+            # A type 6 stream is at least a key index and one byte, and
+            # smaller than the raw payload, or the driver would send type 5.
             if (
-                self._frame[0] == MESSAGE_TYPE_SET_CUSTOM_GLYPH
+                frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH
                 and length == CUSTOM_GLYPH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED
+                and 2 <= length < CUSTOM_GLYPH_PAYLOAD_SIZE
             ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
                 return False
-            self._bad_length = self._frame[0] == MESSAGE_TYPE_SET_CUSTOM_GLYPH
+            self._bad_length = frame_type in (
+                MESSAGE_TYPE_SET_CUSTOM_GLYPH,
+                MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
+            )
             self._bad_length_size = length
             self._filled = 0
             self._skip = length
             return length == 0
 
-        total = FRAME_HEADER_SIZE + CUSTOM_GLYPH_PAYLOAD_SIZE
-        n = min(available, total - self._filled)
+        n = min(available, self._total - self._filled)
         got = reader.readinto(self._view[self._filled : self._filled + n])
         self._filled += got or 0
-        return self._filled == total
+        return self._filled == self._total
 
     def _finish(self):
         if self._filled:
+            total = self._filled
             self._filled = 0
-            return CustomGlyph(
-                key_index=self._frame[FRAME_HEADER_SIZE],
-                pixels=bytes(self._view[FRAME_HEADER_SIZE + 1 :]),
-            )
+            key_index = self._frame[FRAME_HEADER_SIZE]
+            stream = self._view[FRAME_HEADER_SIZE + 1 : total]
+            if self._frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH:
+                return CustomGlyph(key_index=key_index, pixels=bytes(stream))
+            return CustomGlyph(key_index=key_index, pixels=_inflate_glyph(stream))
         if self._bad_length:
             self._bad_length = False
             raise ValueError(

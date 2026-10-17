@@ -95,16 +95,16 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — On the board, the first `PUSH_STARTED` records of the six keys of a batch are at most 40 ms apart. **Proof:** the line `push span N ms` that the `batch` scenario report prints, in three runs, each with N at most 40.
-- [ ] **DoD-2** — The six-key batch takes at most 1.0 s. **Proof:** the line `six keys in N s` of `blinksend --scenario=batch`, in three runs, each with N at most 1.0.
-- [ ] **DoD-3** — The board draws no key of a batch before the last named glyph and key state have arrived. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test that feeds five of six and checks that no panel has a new frame.
-- [ ] **DoD-4** — After 2 s the board draws the keys it has, and records the time-out. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test that steps a fake clock past 2 s.
-- [ ] **DoD-5** — A key outside the masks draws at once, while a batch is open. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for that key.
-- [ ] **DoD-6** — A blinking key of a batch draws the frame of the blink slot at the release, in step with the other blinking keys. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test at two blink slots.
-- [ ] **DoD-7** — A layer change of one key sends no "Begin batch", and a change of two or more keys sends one first. **Proof:** `cd driver && go test ./layers -run Batch` passes.
-- [ ] **DoD-8** — `docs/wire-protocol.md` lists type `7` and its two masks. **Proof:** `docs/wire-protocol.md`, Type registry and the new section.
-- [ ] **DoD-9** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-1** — On the board, the first `PUSH_STARTED` records of the six keys of a batch are at most 40 ms apart. **Proof:** the line `push span N ms` that the `batch` scenario report prints, in three runs, each with N at most 40.
+- [x] **DoD-2** — The six-key batch takes at most 1.0 s. **Proof:** the line `six keys in N s` of `blinksend --scenario=batch`, in three runs, each with N at most 1.0.
+- [x] **DoD-3** — The board draws no key of a batch before the last named glyph and key state have arrived. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test that feeds five of six and checks that no panel has a new frame.
+- [x] **DoD-4** — After 2 s the board draws the keys it has, and records the time-out. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test that steps a fake clock past 2 s.
+- [x] **DoD-5** — A key outside the masks draws at once, while a batch is open. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for that key.
+- [x] **DoD-6** — A blinking key of a batch draws the frame of the blink slot at the release, in step with the other blinking keys. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test at two blink slots.
+- [x] **DoD-7** — A layer change of one key sends no "Begin batch", and a change of two or more keys sends one first. **Proof:** `cd driver && go test ./layers -run Batch` passes.
+- [x] **DoD-8** — `docs/wire-protocol.md` lists type `7` and its two masks. **Proof:** `docs/wire-protocol.md`, Type registry and the new section.
+- [x] **DoD-9** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
 

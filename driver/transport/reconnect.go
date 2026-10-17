@@ -21,6 +21,15 @@ const defaultSettleDelay = time.Second
 // for a reason other than the board being absent.
 const reconnectRetryDelay = time.Second
 
+// frameRec is one frame in the board's cache: a color, and a glyph when the
+// frame has one.
+type frameRec struct {
+	color    uint16
+	hasGlyph bool
+	glyph    glyphRec
+	gen      int
+}
+
 // Reconnecting is a Transport that keeps a device connected across power
 // cuts and replugs, and replays each key's last state to it every time it
 // connects.
@@ -35,6 +44,14 @@ const reconnectRetryDelay = time.Second
 // they remember the state and report success, and the next reconnect sends
 // it. ReadMessage returns messages from whichever device is connected, and
 // io.EOF only after Close.
+//
+// StoreFrame and ShowFrames (task 0061) work on the board's frame cache. The
+// cache lives in the board's RAM, so a board that resets has none. Reconnecting
+// keeps the frames it stored, and after a reconnect it clears its record of
+// what the board holds and stores every frame again, in the background. The
+// slot numbers do not change, so the caller's own table stays right. A Show
+// frames that names a slot the board does not hold yet stores it first, and a
+// Show miss from the board stores the frames it names again.
 type Reconnecting struct {
 	open   func(ctx context.Context) (Transport, error)
 	settle time.Duration
@@ -60,7 +77,16 @@ type Reconnecting struct {
 	// custom-glyph sentinel for a key that shows a glyph.
 	keys map[byte]KeyState
 	// glyphs is the custom glyph each key shows, when it shows one.
-	glyphs map[byte][]byte
+	glyphs map[byte]glyphRec
+	// frames is every frame stored in the board's cache, by slot, and gen says
+	// which connection of the board holds it.
+	frames map[byte]*frameRec
+	// shown is the slot each key last showed by a Show frames, until a key
+	// state or a glyph replaces it.
+	shown map[byte]byte
+	// gen counts the connections. A frame whose gen is not the current one is
+	// not on the board.
+	gen int
 	// store is the state directory, or nil when state is kept in memory only.
 	store *stateStore
 
@@ -101,7 +127,9 @@ func newReconnecting(open func(context.Context) (Transport, error), settle time.
 		done:   make(chan struct{}),
 		queue:  make(chan Message, deviceQueueSize),
 		keys:   make(map[byte]KeyState),
-		glyphs: make(map[byte][]byte),
+		glyphs: make(map[byte]glyphRec),
+		frames: make(map[byte]*frameRec),
+		shown:  make(map[byte]byte),
 	}
 	if stateDir != "" {
 		r.store = &stateStore{dir: stateDir}
@@ -129,6 +157,9 @@ func (r *Reconnecting) loadState() {
 		r.logf("state: %s", w)
 	}
 	r.keys, r.glyphs = keys, glyphs
+	if err := r.store.prune(glyphs); err != nil {
+		r.logf("state: %v", err)
+	}
 	if len(keys) > 0 {
 		r.logf("state: loaded %d keys from %s", len(keys), r.store.dir)
 	}
@@ -168,6 +199,10 @@ func (r *Reconnecting) run() {
 			return
 		}
 		r.logf("device connected")
+		r.mu.Lock()
+		gen := r.gen
+		r.mu.Unlock()
+		go r.restoreFrames(dev, gen)
 
 		r.forward(dev)
 
@@ -197,13 +232,13 @@ func (r *Reconnecting) connect(dev Transport) bool {
 	r.mu.Lock()
 	keys := make([]int, 0, len(r.keys))
 	states := make(map[byte]KeyState, len(r.keys))
-	glyphs := make(map[byte][]byte, len(r.glyphs))
+	glyphs := make(map[byte]glyphRec, len(r.glyphs))
 	for k, ks := range r.keys {
 		keys = append(keys, int(k))
 		states[k] = ks
 	}
-	for k, pixels := range r.glyphs {
-		glyphs[k] = pixels
+	for k, g := range r.glyphs {
+		glyphs[k] = g
 	}
 	r.mu.Unlock()
 
@@ -213,8 +248,8 @@ func (r *Reconnecting) connect(dev Transport) bool {
 		// A glyph goes first: the board sets a key to the custom-glyph
 		// sentinel when it receives one, and the key state that follows
 		// sets the color and blink on top of it.
-		if pixels, ok := glyphs[key]; ok {
-			dev.SendCustomGlyph(key, pixels)
+		if g, ok := glyphs[key]; ok {
+			dev.SendCustomGlyph(key, g.pixels)
 		}
 		dev.SendKeyState(states[key])
 	}
@@ -223,6 +258,7 @@ func (r *Reconnecting) connect(dev Transport) bool {
 	}
 
 	r.mu.Lock()
+	r.gen++
 	r.dev = dev
 	r.mu.Unlock()
 	return true
@@ -234,6 +270,10 @@ func (r *Reconnecting) forward(dev Transport) {
 		msg, err := dev.ReadMessage()
 		if err != nil {
 			return
+		}
+		if msg.Type == MessageTypeShowMiss {
+			// Sending waits for the board, so it must not hold up the reads.
+			go r.handleShowMiss(dev, msg.ShowMiss.Mask)
 		}
 		select {
 		case r.queue <- msg:
@@ -252,22 +292,16 @@ func (r *Reconnecting) SendKeyState(ks KeyState) error {
 	waited := time.Since(asked)
 
 	r.mu.Lock()
-	previous, hadKey := r.keys[ks.KeyIndex]
-	r.keys[ks.KeyIndex] = ks
 	// A built-in Emoji ID replaces a custom image on the board, so the
 	// image is no longer part of the state to replay.
-	_, hadGlyph := r.glyphs[ks.KeyIndex]
-	if ks.EmojiID != CustomGlyphSentinelEmojiID {
-		delete(r.glyphs, ks.KeyIndex)
-	}
-	if r.store != nil {
-		if hadGlyph && ks.EmojiID != CustomGlyphSentinelEmojiID {
-			r.saveState(r.store.removeGlyph(ks.KeyIndex))
-		}
-		if !hadKey || previous != ks {
-			r.saveState(r.store.saveKeys(r.keys))
+	var glyph *glyphRec
+	if ks.EmojiID == CustomGlyphSentinelEmojiID {
+		if g, ok := r.glyphs[ks.KeyIndex]; ok {
+			glyph = &g
 		}
 	}
+	r.saveKeysLocked(r.recordKeyLocked(ks, glyph))
+	delete(r.shown, ks.KeyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -281,14 +315,46 @@ func (r *Reconnecting) SendKeyState(ks KeyState) error {
 	return err
 }
 
+// recordKeyLocked remembers that key ks.KeyIndex shows ks, with glyph when it
+// shows one, and saves what changed. The state directory takes a write only for
+// a change: a glyph file when its hash has no file yet, and keys.json when the
+// key state differs from what the key showed before (task 0061). The caller
+// holds mu. It saves the glyph file at once, and leaves keys.json to the
+// caller, which writes it once for all the keys it changed (saveKeysLocked).
+// It reports whether the key state changed.
+func (r *Reconnecting) recordKeyLocked(ks KeyState, glyph *glyphRec) bool {
+	previous, hadKey := r.keys[ks.KeyIndex]
+	previousGlyph, hadGlyph := r.glyphs[ks.KeyIndex]
+	r.keys[ks.KeyIndex] = ks
+	if glyph != nil {
+		r.glyphs[ks.KeyIndex] = *glyph
+	} else if ks.EmojiID != CustomGlyphSentinelEmojiID {
+		delete(r.glyphs, ks.KeyIndex)
+	}
+	current, hasGlyph := r.glyphs[ks.KeyIndex]
+	changed := !hadKey || previous != ks || hadGlyph != hasGlyph || (hasGlyph && previousGlyph.hash != current.hash)
+	if r.store != nil && glyph != nil {
+		_, err := r.store.saveGlyph(*glyph)
+		r.saveState(err)
+	}
+	return changed
+}
+
+// saveKeysLocked writes keys.json when changed. The caller holds mu.
+func (r *Reconnecting) saveKeysLocked(changed bool) {
+	if r.store != nil && changed {
+		r.saveState(r.store.saveKeys(r.keys, r.glyphs))
+	}
+}
+
 // SendCustomGlyph implements Transport. It remembers the glyph, and sends
 // it when a device is connected.
 func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
 
+	g := newGlyphRec(append([]byte(nil), pixels...))
 	r.mu.Lock()
-	r.glyphs[keyIndex] = append([]byte(nil), pixels...)
 	// The board sets a key that receives a glyph to the sentinel Emoji ID
 	// and leaves its color and blink alone.
 	ks, ok := r.keys[keyIndex]
@@ -296,11 +362,8 @@ func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 		ks = KeyState{KeyIndex: keyIndex, Version: ProtocolVersion}
 	}
 	ks.EmojiID = CustomGlyphSentinelEmojiID
-	r.keys[keyIndex] = ks
-	if r.store != nil {
-		r.saveState(r.store.saveGlyph(keyIndex, pixels))
-		r.saveState(r.store.saveKeys(r.keys))
-	}
+	r.saveKeysLocked(r.recordKeyLocked(ks, &g))
+	delete(r.shown, keyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -308,6 +371,206 @@ func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 		return nil
 	}
 	return dev.SendCustomGlyph(keyIndex, pixels)
+}
+
+// StoreFrame implements Transport. It remembers the frame, and sends it when
+// a device is connected. It checks that the glyph fits one frame whether or not
+// a board is connected, so a caller learns of ErrFrameTooLarge at once.
+func (r *Reconnecting) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	if _, err := encodeStoreFrame(slot, color, pixels); err != nil {
+		return err
+	}
+	rec := &frameRec{color: color}
+	if pixels != nil {
+		rec.hasGlyph = true
+		rec.glyph = newGlyphRec(append([]byte(nil), pixels...))
+	}
+
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	r.frames[slot] = rec
+	dev, gen := r.dev, r.gen
+	r.mu.Unlock()
+	if dev == nil {
+		return nil
+	}
+	return r.storeLocked(dev, gen, slot)
+}
+
+// ShowFrames implements Transport. Every key that names a slot shows the frame
+// stored there, and Reconnecting remembers it as that key's state: a later
+// reconnect replays it, and the state directory takes a write only when a key
+// state changed. A slot the board does not hold yet, as after a reconnect, is
+// stored first.
+func (r *Reconnecting) ShowFrames(slots []byte) error {
+	if _, err := encodeShowFrames(slots); err != nil {
+		return err
+	}
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	changed := false
+	for key, slot := range slots {
+		if slot == SlotUnchanged {
+			continue
+		}
+		rec := r.frames[slot]
+		if rec == nil {
+			// Nothing was stored there. The board answers with a Show miss.
+			continue
+		}
+		ks := KeyState{KeyIndex: byte(key), Version: ProtocolVersion, Color: rec.color}
+		var glyph *glyphRec
+		if rec.hasGlyph {
+			ks.EmojiID = CustomGlyphSentinelEmojiID
+			g := rec.glyph
+			glyph = &g
+		}
+		if r.recordKeyLocked(ks, glyph) {
+			changed = true
+		}
+		r.shown[byte(key)] = slot
+	}
+	r.saveKeysLocked(changed)
+	dev, gen := r.dev, r.gen
+	var missing []byte
+	if dev != nil {
+		seen := make(map[byte]bool)
+		for _, slot := range slots {
+			if slot == SlotUnchanged || seen[slot] {
+				continue
+			}
+			seen[slot] = true
+			if rec := r.frames[slot]; rec != nil && rec.gen != gen {
+				missing = append(missing, slot)
+			}
+		}
+	}
+	r.mu.Unlock()
+	if dev == nil {
+		return nil
+	}
+
+	for _, slot := range missing {
+		if err := r.storeLocked(dev, gen, slot); err != nil {
+			return err
+		}
+	}
+	return dev.ShowFrames(slots)
+}
+
+// storeLocked sends the frame in slot to dev and notes that dev holds it. The
+// caller holds sendMu.
+func (r *Reconnecting) storeLocked(dev Transport, gen int, slot byte) error {
+	r.mu.Lock()
+	rec := r.frames[slot]
+	r.mu.Unlock()
+	if rec == nil {
+		return nil
+	}
+	var pixels []byte
+	if rec.hasGlyph {
+		pixels = rec.glyph.pixels
+	}
+	if err := dev.StoreFrame(slot, rec.color, pixels); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if r.frames[slot] == rec {
+		rec.gen = gen
+	}
+	r.mu.Unlock()
+	return nil
+}
+
+// restoreFrames stores every frame again on dev, a board that just connected
+// and holds none. It takes sendMu for one frame at a time, so a send that
+// arrives meanwhile waits for at most one frame, not for all of them. It
+// stops when dev goes away or a store fails.
+func (r *Reconnecting) restoreFrames(dev Transport, gen int) {
+	r.mu.Lock()
+	slots := make([]int, 0, len(r.frames))
+	for slot := range r.frames {
+		slots = append(slots, int(slot))
+	}
+	r.mu.Unlock()
+	sort.Ints(slots)
+
+	restored := 0
+	for _, s := range slots {
+		slot := byte(s)
+		r.sendMu.Lock()
+		r.mu.Lock()
+		rec := r.frames[slot]
+		current := r.dev == dev && r.gen == gen && r.ctx.Err() == nil
+		stale := rec != nil && rec.gen != gen
+		r.mu.Unlock()
+		if !current {
+			r.sendMu.Unlock()
+			return
+		}
+		if stale {
+			if err := r.storeLocked(dev, gen, slot); err != nil {
+				r.sendMu.Unlock()
+				r.logf("frames: store slot %d again: %v", slot, err)
+				return
+			}
+			restored++
+		}
+		r.sendMu.Unlock()
+	}
+	if restored > 0 {
+		r.logf("frames: stored %d frames again", restored)
+	}
+}
+
+// handleShowMiss answers a Show miss: the board named some keys whose slot it
+// holds nothing in, for example after a code reload that kept USB up. It stores
+// the frames of those keys again and shows them.
+func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	if r.dev != dev {
+		r.mu.Unlock()
+		return
+	}
+	gen := r.gen
+	slots := make([]byte, 8)
+	for i := range slots {
+		slots[i] = SlotUnchanged
+	}
+	var again []byte
+	for key := byte(0); key < 8; key++ {
+		if mask&(1<<key) == 0 {
+			continue
+		}
+		slot, ok := r.shown[key]
+		if !ok || r.frames[slot] == nil {
+			continue
+		}
+		slots[key] = slot
+		r.frames[slot].gen = 0
+		again = append(again, slot)
+	}
+	r.mu.Unlock()
+	if len(again) == 0 {
+		return
+	}
+	r.logf("frames: the board missed keys %#02x, storing their frames again", mask)
+	for _, slot := range again {
+		if err := r.storeLocked(dev, gen, slot); err != nil {
+			r.logf("frames: store slot %d again: %v", slot, err)
+			return
+		}
+	}
+	if err := dev.ShowFrames(slots); err != nil {
+		r.logf("frames: show again: %v", err)
+	}
 }
 
 // BeginBatch implements Transport. It sends the message when a device is

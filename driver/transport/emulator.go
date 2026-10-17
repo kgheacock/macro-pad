@@ -29,6 +29,9 @@ type Emulator struct {
 	haveCustomGlyph bool
 	lastBeginBatch  [2]byte
 	haveBeginBatch  bool
+	frames          map[byte]StoredFrame
+	lastShow        []byte
+	shows           int
 
 	msgQueue chan Message
 }
@@ -44,6 +47,7 @@ func NewEmulator() *Emulator {
 		customGlyphW: cgW,
 		msgW:         mW,
 		msgQueue:     make(chan Message, emulatorQueueSize),
+		frames:       make(map[byte]StoredFrame),
 	}
 
 	go e.receiveKeyStates(ksR)
@@ -86,6 +90,37 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 				e.mu.Lock()
 				e.lastBeginBatch = [2]byte{glyphMask, stateMask}
 				e.haveBeginBatch = true
+				e.mu.Unlock()
+			}
+			continue
+		case MessageTypeStoreFrame:
+			if f, err := decodeStoreFrame(payload); err == nil {
+				e.mu.Lock()
+				e.frames[f.Slot] = f
+				e.mu.Unlock()
+			}
+			continue
+		case MessageTypeShowFrames:
+			if slots, err := decodeShowFrames(payload); err == nil {
+				e.mu.Lock()
+				e.lastShow = append([]byte(nil), slots...)
+				e.shows++
+				// The emulator's board draws each named key, so what a test
+				// reads back as the last key state and glyph is what a Set
+				// custom glyph and a key state would have left.
+				for key, slot := range slots {
+					f, ok := e.frames[slot]
+					if slot == SlotUnchanged || !ok {
+						continue
+					}
+					ks := KeyState{KeyIndex: byte(key), Version: ProtocolVersion, Color: f.Color}
+					if f.Pixels != nil {
+						ks.EmojiID = CustomGlyphSentinelEmojiID
+						e.lastCustomGlyph = CustomGlyph{KeyIndex: byte(key), Pixels: f.Pixels}
+						e.haveCustomGlyph = true
+					}
+					e.lastKeyState, e.haveKeyState = ks, true
+				}
 				e.mu.Unlock()
 			}
 			continue
@@ -136,6 +171,50 @@ func (e *Emulator) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 // same pipe as the custom glyphs.
 func (e *Emulator) BeginBatch(glyphMask, stateMask byte) error {
 	return writeFrame(e.customGlyphW, MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
+}
+
+// StoreFrame implements Transport. It encodes a Store frame message per
+// docs/wire-protocol.md and delivers it to the emulator's device side, which
+// keeps the frame in a slot table.
+func (e *Emulator) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	payload, err := encodeStoreFrame(slot, color, pixels)
+	if err != nil {
+		return err
+	}
+	return writeFrame(e.customGlyphW, MessageTypeStoreFrame, payload)
+}
+
+// ShowFrames implements Transport. It encodes a Show frames message per
+// docs/wire-protocol.md and delivers it to the emulator's device side.
+func (e *Emulator) ShowFrames(slots []byte) error {
+	payload, err := encodeShowFrames(slots)
+	if err != nil {
+		return err
+	}
+	return writeFrame(e.customGlyphW, MessageTypeShowFrames, payload)
+}
+
+// StoredFrame returns the frame the emulator's device side holds in slot, and
+// whether a Store frame message for it has arrived.
+func (e *Emulator) StoredFrame(slot byte) (StoredFrame, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	f, ok := e.frames[slot]
+	return f, ok
+}
+
+// LastShowFrames returns the slots of the most recent Show frames message the
+// emulator's device side received, and how many such messages have arrived.
+func (e *Emulator) LastShowFrames() (slots []byte, count int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]byte(nil), e.lastShow...), e.shows
+}
+
+// InjectShowMiss simulates the device answering a Show frames that named an
+// empty slot, for driver tests with no board attached.
+func (e *Emulator) InjectShowMiss(mask byte) error {
+	return writeFrame(e.msgW, MessageTypeShowMiss, encodeShowMiss(mask))
 }
 
 // LastBeginBatch returns the glyph mask and key state mask of the most

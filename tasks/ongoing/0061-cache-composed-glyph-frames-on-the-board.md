@@ -1,14 +1,14 @@
 ---
 id: "0061"
 title: "Cache composed glyph frames on the board, so a layer switch sends slot numbers"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-17"
 updated: "2026-10-17"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0061-cache-composed-glyph-frames"
 related: ["0057", "0058", "0059", "0060", "0048", "0045", "0044"]
 tags: ["firmware", "driver", "wire-protocol", "layers", "performance", "memory"]
 ---

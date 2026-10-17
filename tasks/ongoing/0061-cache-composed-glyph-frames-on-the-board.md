@@ -74,11 +74,11 @@ The goal is 0.15 s, and only a switch with no inflate and no compose reaches it.
 
 Measure first. A probe on the board records the speed of a 32 KB copy, the time to allocate 128 slots, and the free heap after the pool is allocated. The pool is fixed at 128 slots of 32 KB, 4 MB. If the probe shows that 128 slots leave less than 2 MB free, stop and ask the owner. The firmware does not shrink the pool by itself.
 
-The messages, as frame types after those of task 0060:
+The messages, as frame types after those of task 0060 (types 1 to 7 are taken, so these are 8, 9, and 10; the next free trace code is 11, `FRAMES_SHOWN`):
 
-- "Store frame", host to device: a slot number, a color, and a zlib stream of the glyph. The board inflates it and composes it into the slot. A glyph with no image is only the color.
-- "Show frames", host to device: for each key, a slot number or "unchanged". The board queues the pushes of every named key in one pass.
-- "Show miss", device to host: a mask of the keys that named an empty slot. The board draws the others.
+- "Store frame" (type 8), host to device: a slot number, a color, and a zlib stream of the glyph. The board inflates it and composes it into the slot. A glyph with no image is only the color.
+- "Show frames" (type 9), host to device: for each key, a slot number or "unchanged". The board queues the pushes of every named key in one pass.
+- "Show miss" (type 10), device to host: a mask of the keys that named an empty slot. The board draws the others.
 
 Rules:
 

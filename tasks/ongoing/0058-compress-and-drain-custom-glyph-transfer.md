@@ -7,7 +7,7 @@ updated: "2026-10-17"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/69"
 branch: "0058-compress-and-drain-custom-glyph-transfer"
 related: ["0030", "0039", "0042", "0057"]
 tags: ["firmware", "driver", "wire-protocol", "performance"]
@@ -108,7 +108,7 @@ ticked.
   **Missing:** not started. See Notes, "Decision under review".
 - [x] **DoD-8** — `firmware/README.md` records the figures of DoD-5 and DoD-6 next to the 2.5 s starting figure. **Proof:** `firmware/README.md`.
 - [x] **DoD-9** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. The first reports 217 passed.
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
 

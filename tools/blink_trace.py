@@ -6,7 +6,7 @@
 wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst|busyburst|sync TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst|sync|batch TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -22,8 +22,10 @@ from pathlib import Path
 
 # Trace codes, as in firmware/tracer.py.
 HOST_MESSAGE_DECODED = 1
+CUSTOM_GLYPH_DECODED = 5
 PUSH_STARTED = 9
 REFRESH_DONE = 8
+BATCH_TIMED_OUT = 10
 
 # The largest allowed gap, in milliseconds, between two PUSH_STARTED records
 # of one blinking key. Task 0044's DoD-5 allowed 650. Task 0045's DoD-4 allows
@@ -54,6 +56,11 @@ BURST_UPDATES = 6
 # which the board's HOST_MESSAGE_DECODED record carries as its payload, so a
 # burst report can be told from the setup that makes keys 0 to 2 blink.
 BUSY_BURST_EMOJI_BASE = 0x20
+
+# Task 0060's `batch` scenario: a layer change of six keys, sent after Begin
+# batch. DoD-1 limits the span between the first PUSH_STARTED of the six keys.
+BATCH_KEYS = (0, 1, 2, 3, 4, 5)
+MAX_PUSH_SPAN_LIMIT_MS = 40
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -222,6 +229,9 @@ def report(records, scenario, out):
     if scenario == "sync":
         return report_sync(records, out)
 
+    if scenario == "batch":
+        return report_batch(records, out)
+
     gaps = blink_gaps_ms(records)
     if not gaps:
         print("no blink gaps in the trace", file=out)
@@ -229,6 +239,47 @@ def report(records, scenario, out):
     max_gap = max(gaps)
     print("max gap {:.1f} ms (limit {})".format(max_gap, MAX_GAP_LIMIT_MS), file=out)
     return max_gap <= MAX_GAP_LIMIT_MS
+
+
+def batch_window_start(records):
+    """Where the `batch` run's window starts: the first glyph the board
+    decoded. The power-on paint comes before it."""
+    for code, _, _, t in records:
+        if code == CUSTOM_GLYPH_DECODED:
+            return t
+    return None
+
+
+def push_span_ms(records, window_start, keys=BATCH_KEYS):
+    """Return the ms between the first PUSH_STARTED of the earliest key and
+    that of the latest key, counting the first push of each key at or after
+    `window_start`. Returns `None` when a key has no push in the window.
+    """
+    first = {}
+    for code, key, _, t in records:
+        if code == PUSH_STARTED and key in keys and t >= window_start and key not in first:
+            first[key] = t
+    if set(first) != set(keys):
+        return None
+    return (max(first.values()) - min(first.values())) / 1000
+
+
+def report_batch(records, out):
+    """Print the `batch` run's `push span`. Return True when it is within
+    the limit and the board did not time the batch out."""
+    window_start = batch_window_start(records)
+    if window_start is None:
+        print("no custom glyph in the trace", file=out)
+        return False
+    span = push_span_ms(records, window_start)
+    if span is None:
+        print("not every key of {} has a push in the trace".format(list(BATCH_KEYS)), file=out)
+        return False
+    timed_out = any(code == BATCH_TIMED_OUT for code, _, _, _ in records)
+    print("push span {:.1f} ms (limit {})".format(span, MAX_PUSH_SPAN_LIMIT_MS), file=out)
+    if timed_out:
+        print("the board released the batch after its time-out", file=out)
+    return span <= MAX_PUSH_SPAN_LIMIT_MS and not timed_out
 
 
 def report_sync(records, out):
@@ -264,7 +315,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

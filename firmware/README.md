@@ -557,6 +557,58 @@ Record the result here as a line of the form:
 Measured custom-glyph paint latency: decode+transfer N.NNN ms, persist N.NNN ms, glyph build N.NNN ms, refresh N.NNN ms (RP2350)
 ```
 
+### Measured figures (task 0058)
+
+Measured on 2026-10-17 on a Pico Plus 2 (CircuitPython 10.2.1), with
+`make flash`, the tracing `code.py` of `tools/blink_trace.py install`, and
+`go run ./cmd/blinksend --scenario=icons` or `--scenario=glyphs` from
+`driver/`. Both send one glyph and one key state to each of the six keys
+and print `six keys in N s`. `glyphs` sends pseudo-random pixels that do not
+compress. `icons` sends the first six PNG files in `assets/`.
+
+Before task 0058, one glyph took about 450 ms and six keys took 2.5 s:
+
+| Stage of one glyph | Time |
+|---|---|
+| CDC transfer | about 235 ms |
+| Payload copy and decode | about 40 ms |
+| `_compose` (fill, array copy, arrayblit, blit) | 90 to 100 ms |
+| SPI push | about 25 ms |
+| Redraw with the old pixels, before the glyph decodes | about 30 ms |
+
+`CustomGlyphReader.feed` made one read per loop pass. Each read returned at
+most 256 bytes, so a frame needed 129 reads, and a pass took about 1.8 ms.
+
+After the drain loop (`wire.READ_BUDGET_NS`, `readinto` into one buffer),
+six keys take:
+
+| Scenario | Runs | Six keys |
+|---|---|---|
+| `glyphs` (noise) | 3 | 1.24 s, 1.28 s, 1.38 s |
+| `icons` | 6 | 1.21 s to 1.53 s, median 1.38 s |
+
+The first glyph writes in about 78 ms. A bare read loop on the same board
+reached 550 KB/s, which is about 58 ms for 32 KB. A key then waits for the
+previous key, because the loop builds a frame and cannot read while it does.
+One `blinksend` run in 11 stopped with an `IOHIDDeviceSetReport` error on the
+host, and the board kept working.
+
+After compression (frame type 6), six keys with `icons` take 0.80 s to
+0.82 s over 6 runs, on the same board with the same icons. The trace of one
+run shows each key at about 140 ms:
+
+- `_compose`, from `GLYPH_DECODED` to `GLYPH_BUILT`: 70 to 80 ms.
+- Receive and inflate, from `GLYPH_BUILT` to the next `GLYPH_DECODED`:
+  55 to 78 ms. A 32 KB `zlib.decompress` alone took 32 to 65 ms in a probe,
+  and `bytes(32768)` alone took about 11 ms, so the heap is slow.
+- The glyph now arrives before the key-state report, so the redraw with the
+  old pixels is gone. The DMA pushes of the earlier keys overlap the build of
+  the next key.
+
+The 13 icons in `assets/` deflate to 1,213 bytes on average. A flat icon is
+about 3% of a raw frame. Inflate is now the largest cost after `_compose`,
+and the loop cannot read the next frame while it inflates.
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -21,6 +23,10 @@ const (
 	MessageTypePong           MessageType = 3
 	MessageTypeTrace          MessageType = 4
 	MessageTypeSetCustomGlyph MessageType = 5
+	// MessageTypeSetCustomGlyphCompressed carries the same image as type 5,
+	// as a zlib stream. See "Set custom glyph (compressed)" in
+	// docs/wire-protocol.md (task 0058).
+	MessageTypeSetCustomGlyphCompressed MessageType = 6
 )
 
 const (
@@ -237,6 +243,56 @@ func encodeCustomGlyph(keyIndex byte, pixels []byte) ([]byte, error) {
 	buf = append(buf, keyIndex)
 	buf = append(buf, pixels...)
 	return buf, nil
+}
+
+// encodeCustomGlyphFrame picks the frame type and payload for one custom
+// glyph: type 6, a key index and a zlib stream, when the stream is smaller
+// than the raw payload, and type 5 otherwise. A flat icon deflates to about
+// 1 KB, and noise does not deflate at all. Returns ErrInvalidGlyphSize if
+// pixels is not exactly CustomGlyphPixelsSize bytes.
+func encodeCustomGlyphFrame(keyIndex byte, pixels []byte) (MessageType, []byte, error) {
+	raw, err := encodeCustomGlyph(keyIndex, pixels)
+	if err != nil {
+		return 0, nil, err
+	}
+	var buf bytes.Buffer
+	buf.WriteByte(keyIndex)
+	zw, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+	if err != nil {
+		return 0, nil, err
+	}
+	if _, err := zw.Write(pixels); err != nil {
+		return 0, nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return 0, nil, err
+	}
+	if buf.Len() >= len(raw) {
+		return MessageTypeSetCustomGlyph, raw, nil
+	}
+	return MessageTypeSetCustomGlyphCompressed, buf.Bytes(), nil
+}
+
+// decodeCompressedCustomGlyph is the inverse of the type 6 payload
+// encodeCustomGlyphFrame builds. It rejects a stream that does not inflate
+// to exactly CustomGlyphPixelsSize bytes, as the firmware does.
+func decodeCompressedCustomGlyph(payload []byte) (CustomGlyph, error) {
+	if len(payload) < 2 {
+		return CustomGlyph{}, fmt.Errorf("transport: compressed custom glyph payload is %d bytes, want at least 2", len(payload))
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(payload[1:]))
+	if err != nil {
+		return CustomGlyph{}, fmt.Errorf("transport: compressed custom glyph: %w", err)
+	}
+	defer zr.Close()
+	pixels, err := io.ReadAll(io.LimitReader(zr, CustomGlyphPixelsSize+1))
+	if err != nil {
+		return CustomGlyph{}, fmt.Errorf("transport: compressed custom glyph: %w", err)
+	}
+	if len(pixels) != CustomGlyphPixelsSize {
+		return CustomGlyph{}, fmt.Errorf("%w: inflated to %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	}
+	return CustomGlyph{KeyIndex: payload[0], Pixels: pixels}, nil
 }
 
 func decodeCustomGlyph(payload []byte) (CustomGlyph, error) {

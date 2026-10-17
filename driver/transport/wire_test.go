@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"compress/zlib"
 	"errors"
 	"testing"
 )
@@ -91,5 +92,79 @@ func TestCustomGlyph_EncodeRejectsWrongPixelSize(t *testing.T) {
 func TestCustomGlyph_DecodeRejectsWrongSize(t *testing.T) {
 	if _, err := decodeCustomGlyph([]byte{1, 2, 3}); err == nil {
 		t.Fatal("decodeCustomGlyph with a 3-byte payload returned no error")
+	}
+}
+
+// noisePixels returns pixels that do not deflate.
+func noisePixels() []byte {
+	pixels := make([]byte, CustomGlyphPixelsSize)
+	state := uint32(1)
+	for i := range pixels {
+		state = state*1664525 + 1013904223
+		pixels[i] = byte(state >> 24)
+	}
+	return pixels
+}
+
+func TestCustomGlyphFrame_CompressesAFlatGlyph(t *testing.T) {
+	pixels := bytes.Repeat([]byte{0xAB, 0xCD}, CustomGlyphPixelsSize/2)
+
+	frameType, payload, err := encodeCustomGlyphFrame(4, pixels)
+	if err != nil {
+		t.Fatalf("encodeCustomGlyphFrame: %v", err)
+	}
+	if frameType != MessageTypeSetCustomGlyphCompressed {
+		t.Fatalf("frame type = %v, want MessageTypeSetCustomGlyphCompressed", frameType)
+	}
+	if len(payload) >= customGlyphPayload/10 {
+		t.Fatalf("payload is %d bytes, want under %d for a flat glyph", len(payload), customGlyphPayload/10)
+	}
+
+	got, err := decodeCompressedCustomGlyph(payload)
+	if err != nil {
+		t.Fatalf("decodeCompressedCustomGlyph: %v", err)
+	}
+	if got.KeyIndex != 4 || !bytes.Equal(got.Pixels, pixels) {
+		t.Fatalf("decodeCompressedCustomGlyph = key %d, want key 4 and matching pixels", got.KeyIndex)
+	}
+}
+
+func TestCustomGlyphFrame_SendsAGlyphThatDoesNotCompressAsType5(t *testing.T) {
+	pixels := noisePixels()
+
+	frameType, payload, err := encodeCustomGlyphFrame(2, pixels)
+	if err != nil {
+		t.Fatalf("encodeCustomGlyphFrame: %v", err)
+	}
+	if frameType != MessageTypeSetCustomGlyph {
+		t.Fatalf("frame type = %v, want MessageTypeSetCustomGlyph", frameType)
+	}
+	got, err := decodeCustomGlyph(payload)
+	if err != nil {
+		t.Fatalf("decodeCustomGlyph: %v", err)
+	}
+	if got.KeyIndex != 2 || !bytes.Equal(got.Pixels, pixels) {
+		t.Fatalf("decodeCustomGlyph = key %d, want key 2 and matching pixels", got.KeyIndex)
+	}
+}
+
+func TestCustomGlyphFrame_RejectsWrongPixelSize(t *testing.T) {
+	if _, _, err := encodeCustomGlyphFrame(0, make([]byte, CustomGlyphPixelsSize-1)); !errors.Is(err, ErrInvalidGlyphSize) {
+		t.Fatalf("encodeCustomGlyphFrame with a short pixel buffer = %v, want errors.Is(err, ErrInvalidGlyphSize)", err)
+	}
+}
+
+func TestCompressedCustomGlyph_RejectsAStreamOfTheWrongInflatedSize(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	zw.Write(make([]byte, CustomGlyphPixelsSize-2))
+	zw.Close()
+
+	_, err := decodeCompressedCustomGlyph(append([]byte{1}, buf.Bytes()...))
+	if !errors.Is(err, ErrInvalidGlyphSize) {
+		t.Fatalf("decodeCompressedCustomGlyph = %v, want errors.Is(err, ErrInvalidGlyphSize)", err)
+	}
+	if _, err := decodeCompressedCustomGlyph([]byte{1, 0x78, 0x9c, 0xff}); err == nil {
+		t.Fatal("decodeCompressedCustomGlyph with a corrupt stream returned no error")
 	}
 }

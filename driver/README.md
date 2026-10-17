@@ -109,8 +109,8 @@ update still reaches the files at once and `Close` does not wait.
 ## Layers
 
 `macropadd` keeps one JSON object that says what the six keys show. A key can
-hold up to five children. A single press on a key with children opens its
-child layer, and a single press on key 3 returns. The daemon draws the active
+hold up to five children. A press on a key with children opens its
+child layer, and a press on key 3 returns. The daemon draws the active
 layer, saves the object, and shows the same layer after a restart. See task
 0057.
 
@@ -171,15 +171,22 @@ child in the open layer is blank.
 
 | Press | Result |
 |---|---|
-| single press, top layer, key with children | opens that key's child layer |
-| single press, child layer, key 3 | returns to the top layer |
-| any other single press | nothing: no key state is sent and `active` stays |
+| press, top layer, key with children | opens that key's child layer |
+| press, child layer, key 3 | returns to the top layer |
+| any other press | nothing: no key state is sent and `active` stays |
 
-The press is the `singlePress` signal, so a layer change lags the release by
-the 400 ms double-press window ("Click-pattern resolution," below). A layer
-change sends only the keys whose image or color changed. On the board, a burst
-of writes takes about 155 ms each (task 0050), so a change with six images
-may take about 1 s.
+A press is the debounced press-down event. The firmware has already
+debounced it, and the layer tree acts on it at once. It waits for no release
+and for no double-press window, and a key held for a long time navigates
+once, on its press-down. The driver knows from the layer which keys it owns,
+so it needs no click pattern for them. The resolver still broadcasts
+`singlePress`, `doublePress`, and `longPress` to plugins for every key
+("Click-pattern resolution," below). A quick double press on a layer key
+acts twice, in order: the second press lands on the new layer. Presses queue
+in order while a redraw runs, up to 16.
+
+A layer change sends only the keys whose image or color changed. With task
+0058's compressed glyphs, a change with six icons takes about 0.8 s.
 
 A key with no status, icon, count, `iconRef`, or children is a reserved slot.
 The daemon does not draw it, and clears it only if it drew it before.

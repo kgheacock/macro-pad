@@ -248,7 +248,7 @@ func applyUpdate(d *Doc, u Update) error {
 	return nil
 }
 
-// Press handles a single press on a key. On the top layer a key with
+// Press handles a press on a key, the debounced press-down. On the top layer a key with
 // children opens its child layer. In a child layer the up key returns to
 // the top layer. Every other press changes nothing and sends nothing.
 func (c *Controller) Press(keyIndex byte) {

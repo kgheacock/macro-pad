@@ -1,7 +1,7 @@
 ---
 id: "0058"
 title: "Cut custom-glyph transfer time: zlib-compress the pixels and drain the CDC port faster"
-status: "ongoing"
+status: "complete"
 created: "2026-10-17"
 updated: "2026-10-17"
 owner: "kgheacock"
@@ -94,20 +94,15 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — The driver sends a glyph as type `6` when the zlib stream is smaller than 32,768 bytes, and as type `5` when it is not. **Proof:** `cd driver && go test ./transport/...` passes, with one test for each case.
-  **Missing:** not started. See Notes, "Decision under review".
-- [ ] **DoD-2** — The board decodes a type `6` frame to the same pixels as the type `5` frame for the same image. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test that compares the two.
-  **Missing:** not started. See Notes, "Decision under review".
-- [ ] **DoD-3** — The board drops a type `6` frame that does not inflate to 32,768 bytes, and the key keeps its image. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test that feeds a short stream.
-  **Missing:** not started. See Notes, "Decision under review".
+- [x] **DoD-1** — The driver sends a glyph as type `6` when the zlib stream is smaller than 32,768 bytes, and as type `5` when it is not. **Proof:** `cd driver && go test ./transport/...` passes, with one test for each case. `TestCustomGlyphFrame_CompressesAFlatGlyph` and `TestCustomGlyphFrame_SendsAGlyphThatDoesNotCompressAsType5` cover it.
+- [x] **DoD-2** — The board decodes a type `6` frame to the same pixels as the type `5` frame for the same image. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test that compares the two. `test_compressed_glyph_decodes_to_the_same_pixels_as_a_raw_glyph` covers it.
+- [x] **DoD-3** — The board drops a type `6` frame that does not inflate to 32,768 bytes, and the key keeps its image. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test that feeds a short stream. `test_compressed_glyph_that_inflates_to_the_wrong_size_raises_and_the_next_frame_decodes` and `test_compressed_custom_glyph_that_does_not_inflate_keeps_the_old_image` cover it.
 - [x] **DoD-4** — One `feed` call returns after the time budget even when the frame is not complete. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test that uses a fake serial port and a fake clock. `test_custom_glyph_reader_stops_reading_when_the_time_budget_ends` covers it.
-- [ ] **DoD-5** — On the board, `blinksend --scenario=icons` redraws six real icons in at most 1.3 s of host wall time. **Proof:** the line `six keys in N s` that the command prints, in three runs, each with N at most 1.3.
-  **Missing:** the drain loop alone gives 1.21 s to 1.53 s over 6 runs, median 1.38 s. Two of the six runs are at most 1.3 s, and three consecutive runs did not all pass. See Notes.
-- [x] **DoD-6** — On the board, `blinksend --scenario=glyphs` (pseudo-random pixels that do not compress) takes at most 1.9 s for six keys. **Proof:** the line `six keys in N s`, in three runs, each with N at most 1.9. The runs gave 1.38 s, 1.28 s, and 1.24 s.
-- [ ] **DoD-7** — `docs/wire-protocol.md` lists type `6` and its payload layout. **Proof:** `docs/wire-protocol.md`, Type registry and the new section.
-  **Missing:** not started. See Notes, "Decision under review".
-- [x] **DoD-8** — `firmware/README.md` records the figures of DoD-5 and DoD-6 next to the 2.5 s starting figure. **Proof:** `firmware/README.md`.
-- [x] **DoD-9** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. The first reports 217 passed.
+- [x] **DoD-5** — On the board, `blinksend --scenario=icons` redraws six real icons in at most 1.3 s of host wall time. **Proof:** the line `six keys in N s` that the command prints, in three runs, each with N at most 1.3. The six runs gave 0.80 s to 0.82 s. With the drain loop alone they gave 1.21 s to 1.53 s.
+- [x] **DoD-6** — On the board, `blinksend --scenario=glyphs` (pseudo-random pixels that do not compress) takes at most 1.9 s for six keys. **Proof:** the line `six keys in N s`, in three runs, each with N at most 1.9. The runs gave 1.38 s, 1.28 s, and 1.24 s. These runs were made before frame type 6 existed, and they were not repeated, because the task owner chose icons from `assets/` instead of noise for the later runs.
+- [x] **DoD-7** — `docs/wire-protocol.md` lists type `6` and its payload layout. **Proof:** `docs/wire-protocol.md`, Type registry and the section "Set custom glyph (compressed)".
+- [x] **DoD-8** — `firmware/README.md` records the figures of DoD-5 and DoD-6 next to the 2.5 s starting figure, and the stage times after compression. **Proof:** `firmware/README.md`.
+- [x] **DoD-9** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. The first reports 224 passed.
 - [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
@@ -133,16 +128,12 @@ Measured on 2026-10-17 on a Pico Plus 2 (CircuitPython 10.2.1), with the Tracer 
 - The 13 sample icons deflate to 300 to 3,978 bytes, with a mean of 1,213 bytes.
 - Do not call `gc.mem_free()` inside a timing probe. It walks the heap and adds about 20 ms.
 
-### Decision under review (2026-10-17)
+### Outcome (2026-10-17)
 
-The decision chose compression with the faster read loop. The read loop alone now gives these figures, on the real firmware:
+The drain loop alone cut six keys with noise glyphs from 2.5 s to 1.24 s to 1.38 s, and six keys with real icons to 1.21 s to 1.53 s. The task owner chose to build compression anyway, because the owner expected a larger gain than the 30 ms per glyph that the inflate cost suggested.
 
-- Six keys with noise glyphs: 1.24 s to 1.38 s, from 2.5 s.
-- Six keys with real icons: 1.21 s to 1.53 s, median 1.38 s.
-- The first glyph writes in about 78 ms. The bare-loop ceiling is about 58 ms.
+Compression gave 0.80 s to 0.82 s for six keys with the icons from `assets/`, over 6 runs. The estimate of 0.15 s was wrong. The inflate cost is real, 32 to 65 ms for 32 KB in a probe. But a small frame also lets the glyph arrive before the key-state report, so the redraw with the old pixels disappears, and the DMA pushes overlap the next build. The trace shows about 140 ms per key: 70 to 80 ms of `_compose`, and 55 to 78 ms of receive and inflate.
 
-Compression sends about 1.2 KB, but the board then inflates 32 KB in 32 to 65 ms. A glyph now spends 60 to 80 ms in transfer, so compression saves about 30 ms per glyph, or about 0.15 s for six keys. That is about 10% of the redraw, for a new frame type that an old board drops.
-
-The `_compose` step is now the largest part, at 90 to 100 ms per key. Task 0058 lists it as a non-goal. The owner decides whether to build compression anyway, to drop DoD-1, 2, 3, and 7, or to move the work to a new task.
+What remains is serial work on one core. The next task offloads it to the second core. The board's CircuitPython has no API for that core. The follow-up spec is `tasks/backlog/0059-offload-glyph-inflate-to-the-second-core.md`.
 
 The smooth 128 by 128 gradient that the first `glyphs` scenario used deflates to 3,300 bytes. It is not a worst case, so the scenario now sends pseudo-random pixels.

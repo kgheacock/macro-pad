@@ -159,7 +159,7 @@ frame is consumed by its `Length`, so the next frame starts clean.
 
 Firmware that does not know type `6` skips the frame by its `Length`, as
 Framing says, and the key does not change. Update the firmware before the
-driver. See [task 0058](../tasks/ongoing/0058-compress-and-drain-custom-glyph-transfer.md)
+driver. See [task 0058](../tasks/complete/0058-compress-and-drain-custom-glyph-transfer.md)
 for the design decision, and for why inflating on the board costs 32 to
 65 ms, which limits what compression saves.
 

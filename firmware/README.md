@@ -593,10 +593,21 @@ previous key, because the loop builds a frame and cannot read while it does.
 One `blinksend` run in 11 stopped with an `IOHIDDeviceSetReport` error on the
 host, and the board kept working.
 
-Compression does not help as much as the transfer time suggests. A 32 KB
-`zlib.decompress` on the board took 32 to 65 ms, and `bytes(32768)` alone took
-about 11 ms, so the heap is slow. The 13 icons in `assets/` deflate to 1,213
-bytes on average, which saves at most about 30 ms of a 78 ms transfer.
+After compression (frame type 6), six keys with `icons` take 0.80 s to
+0.82 s over 6 runs, on the same board with the same icons. The trace of one
+run shows each key at about 140 ms:
+
+- `_compose`, from `GLYPH_DECODED` to `GLYPH_BUILT`: 70 to 80 ms.
+- Receive and inflate, from `GLYPH_BUILT` to the next `GLYPH_DECODED`:
+  55 to 78 ms. A 32 KB `zlib.decompress` alone took 32 to 65 ms in a probe,
+  and `bytes(32768)` alone took about 11 ms, so the heap is slow.
+- The glyph now arrives before the key-state report, so the redraw with the
+  old pixels is gone. The DMA pushes of the earlier keys overlap the build of
+  the next key.
+
+The 13 icons in `assets/` deflate to 1,213 bytes on average. A flat icon is
+about 3% of a raw frame. Inflate is now the largest cost after `_compose`,
+and the loop cannot read the next frame while it inflates.
 
 ## Out of scope
 

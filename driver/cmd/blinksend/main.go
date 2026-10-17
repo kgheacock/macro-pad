@@ -41,6 +41,11 @@ const (
 	// transport.Device spaces them by minReportGap, so the run measures
 	// that gap.
 	burstUpdates = 6
+
+	// cachedShows and cachedSpacing are task 0061's DoD-2 scenario: six Show
+	// frames messages, alternating two sets of six frames, one second apart.
+	cachedShows   = 6
+	cachedSpacing = time.Second
 )
 
 func main() {
@@ -54,7 +59,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, or warmup (send nothing)")
 	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
@@ -93,7 +98,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, cached or warmup\n", *scenario)
 		return 2
 	}
 
@@ -249,6 +254,44 @@ func sendGlyphs(dev transport.Transport, stdout io.Writer, batch bool, glyph fun
 			key, wrote.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))
 	}
 	fmt.Fprintf(stdout, "blinksend: six keys in %.2f s\n", time.Since(total).Seconds())
+	return nil
+}
+
+// sendCached stores two sets of six frames, set 0 in slots 0 to 5 and set 1 in
+// slots 6 to 11, with a different icon and color for each key in each set. It
+// then shows the sets in turn, one Show frames message for all six keys each
+// time. `tools/blink_trace.py report --scenario=cached` reads `six keys in`
+// and `push span` from the trace, for each Show (task 0061).
+func sendCached(dev transport.Transport, stdout io.Writer, assetsDir string) error {
+	colors := [2]uint16{0x0000, 0x7BEF}
+	start := time.Now()
+	for set := byte(0); set < 2; set++ {
+		for key := byte(0); key < 6; key++ {
+			pixels, err := iconGlyph(assetsDir, (key+3*set)%6)
+			if err != nil {
+				return err
+			}
+			if err := dev.StoreFrame(set*6+key, colors[set], pixels); err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Fprintf(stdout, "blinksend: stored 12 frames in %.2f s\n", time.Since(start).Seconds())
+	time.Sleep(settle)
+
+	for i := 0; i < cachedShows; i++ {
+		set := byte(i % 2)
+		slots := make([]byte, 6)
+		for key := range slots {
+			slots[key] = set*6 + byte(key)
+		}
+		start := time.Now()
+		if err := dev.ShowFrames(slots); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "blinksend: show %d of set %d, write %s\n", i, set, time.Since(start).Round(time.Microsecond))
+		time.Sleep(cachedSpacing)
+	}
 	return nil
 }
 

@@ -6,7 +6,7 @@
 wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst|busyburst|sync|batch TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst|sync|batch|cached TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -26,6 +26,7 @@ CUSTOM_GLYPH_DECODED = 5
 PUSH_STARTED = 9
 REFRESH_DONE = 8
 BATCH_TIMED_OUT = 10
+FRAMES_SHOWN = 11
 
 # The largest allowed gap, in milliseconds, between two PUSH_STARTED records
 # of one blinking key. Task 0044's DoD-5 allowed 650. Task 0045's DoD-4 allows
@@ -61,6 +62,12 @@ BUSY_BURST_EMOJI_BASE = 0x20
 # batch. DoD-1 limits the span between the first PUSH_STARTED of the six keys.
 BATCH_KEYS = (0, 1, 2, 3, 4, 5)
 MAX_PUSH_SPAN_LIMIT_MS = 40
+
+# Task 0061's `cached` scenario: six Show frames messages of six stored frames.
+# DoD-2 limits the time from the board's Show to the end of the last push, and
+# the span between the first PUSH_STARTED of the six keys.
+MAX_SHOW_LIMIT_MS = 150
+ALL_KEYS_MASK = 0b111111
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -232,6 +239,9 @@ def report(records, scenario, out):
     if scenario == "batch":
         return report_batch(records, out)
 
+    if scenario == "cached":
+        return report_cached(records, out)
+
     gaps = blink_gaps_ms(records)
     if not gaps:
         print("no blink gaps in the trace", file=out)
@@ -282,6 +292,65 @@ def report_batch(records, out):
     return span <= MAX_PUSH_SPAN_LIMIT_MS and not timed_out
 
 
+def show_figures(records, keys=BATCH_KEYS):
+    """Return `(six_keys_ms, push_span_ms)` for each Show frames the board
+    applied to all six keys, in time order, or `None` for a Show whose pushes
+    are not all in the trace.
+
+    A Show's window runs from its FRAMES_SHOWN record to the next one.
+    `six_keys_ms` is the time from the record to the last REFRESH_DONE of the
+    keys, and `push_span_ms` the time between the first PUSH_STARTED of the
+    earliest key and that of the latest.
+    """
+    shows = sorted(
+        t for code, _, payload, t in records if code == FRAMES_SHOWN and payload == ALL_KEYS_MASK
+    )
+    figures = []
+    for index, start in enumerate(shows):
+        end = shows[index + 1] if index + 1 < len(shows) else float("inf")
+        first = {}
+        done = {}
+        for code, key, _, t in records:
+            if key not in keys or not start <= t < end:
+                continue
+            if code == PUSH_STARTED:
+                first.setdefault(key, t)
+            elif code == REFRESH_DONE:
+                done[key] = max(done.get(key, t), t)
+        if set(first) != set(keys) or set(done) != set(keys):
+            figures.append(None)
+            continue
+        figures.append(
+            ((max(done.values()) - start) / 1000, (max(first.values()) - min(first.values())) / 1000)
+        )
+    return figures
+
+
+def report_cached(records, out):
+    """Print the `cached` run's `six keys in` and `push span`, the worst of
+    its Shows. Return True when both are within their limits and every Show
+    has all its pushes in the trace."""
+    figures = show_figures(records)
+    if not figures:
+        print("no Show frames of six keys in the trace", file=out)
+        return False
+    complete = [figure for figure in figures if figure is not None]
+    print("shows {}".format(len(figures)), file=out)
+    if len(complete) != len(figures):
+        print("{} of the Shows have no push of some key in the trace".format(len(figures) - len(complete)), file=out)
+    if not complete:
+        return False
+    six_keys = max(figure[0] for figure in complete)
+    span = max(figure[1] for figure in complete)
+    print("six keys in {:.1f} ms (limit {})".format(six_keys, MAX_SHOW_LIMIT_MS), file=out)
+    print("push span {:.1f} ms (limit {})".format(span, MAX_PUSH_SPAN_LIMIT_MS), file=out)
+    return (
+        len(complete) == len(figures)
+        and six_keys <= MAX_SHOW_LIMIT_MS
+        and span <= MAX_PUSH_SPAN_LIMIT_MS
+    )
+
+
 def report_sync(records, out):
     """Print the `sync` run's figures. Return True when all three meet their
     limits."""
@@ -315,7 +384,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "cached"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

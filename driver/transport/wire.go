@@ -27,12 +27,17 @@ const (
 	// as a zlib stream. See "Set custom glyph (compressed)" in
 	// docs/wire-protocol.md (task 0058).
 	MessageTypeSetCustomGlyphCompressed MessageType = 6
+	// MessageTypeBeginBatch is a host→device frame that names the keys the
+	// board draws together. See "Begin batch" in docs/wire-protocol.md
+	// (task 0060).
+	MessageTypeBeginBatch MessageType = 7
 )
 
 const (
 	keyStateSize       = 6
 	eventSize          = 10
 	pongSize           = 1
+	beginBatchSize     = 2
 	traceRecordSize    = 12
 	frameHeaderSize    = 3                         // type + payload length, little-endian uint16
 	customGlyphPayload = 1 + CustomGlyphPixelsSize // key index + pixels
@@ -293,6 +298,19 @@ func decodeCompressedCustomGlyph(payload []byte) (CustomGlyph, error) {
 		return CustomGlyph{}, fmt.Errorf("%w: inflated to %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
 	}
 	return CustomGlyph{KeyIndex: payload[0], Pixels: pixels}, nil
+}
+
+// encodeBeginBatch builds a Begin batch frame's payload: the glyph mask,
+// then the key state mask.
+func encodeBeginBatch(glyphMask, stateMask byte) []byte {
+	return []byte{glyphMask, stateMask}
+}
+
+func decodeBeginBatch(payload []byte) (glyphMask, stateMask byte, err error) {
+	if len(payload) != beginBatchSize {
+		return 0, 0, fmt.Errorf("transport: begin batch payload is %d bytes, want %d", len(payload), beginBatchSize)
+	}
+	return payload[0], payload[1], nil
 }
 
 func decodeCustomGlyph(payload []byte) (CustomGlyph, error) {

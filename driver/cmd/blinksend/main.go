@@ -54,7 +54,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, or warmup (send nothing)")
 	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
@@ -76,10 +76,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "sync":
 		script = sendSync
 	case "glyphs":
-		script = func(dev transport.Transport) error { return sendGlyphs(dev, stdout, noiseGlyph) }
+		script = func(dev transport.Transport) error { return sendGlyphs(dev, stdout, false, noiseGlyph) }
 	case "icons":
 		script = func(dev transport.Transport) error {
-			return sendGlyphs(dev, stdout, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
+			return sendGlyphs(dev, stdout, false, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
+		}
+	case "batch":
+		// The icons scenario, as a layer change sends it: Begin batch first.
+		script = func(dev transport.Transport) error {
+			return sendGlyphs(dev, stdout, true, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
 		}
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
@@ -88,7 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch or warmup\n", *scenario)
 		return 2
 	}
 
@@ -213,8 +218,18 @@ func sendBusyBurst(dev transport.Transport) error {
 // each SendCustomGlyph write blocked, which is how long the board took to
 // drain the 32 KB frame from the CDC buffer, and the time for all six keys
 // (task 0057's layer redraw took 3 to 6 s; task 0058 shortens it).
-func sendGlyphs(dev transport.Transport, stdout io.Writer, glyph func(key byte) ([]byte, error)) error {
+//
+// With batch, it sends Begin batch first, naming all six keys, so the board
+// draws them together (task 0060). `tools/blink_trace.py report
+// --scenario=batch` reads the span of the six pushes from the trace.
+func sendGlyphs(dev transport.Transport, stdout io.Writer, batch bool, glyph func(key byte) ([]byte, error)) error {
 	total := time.Now()
+	if batch {
+		const allKeys = 0b111111
+		if err := dev.BeginBatch(allKeys, allKeys); err != nil {
+			return err
+		}
+	}
 	for key := byte(0); key < 6; key++ {
 		pixels, err := glyph(key)
 		if err != nil {
@@ -233,7 +248,7 @@ func sendGlyphs(dev transport.Transport, stdout io.Writer, glyph func(key byte) 
 		fmt.Fprintf(stdout, "blinksend: key %d: glyph write %s, glyph+state %s\n",
 			key, wrote.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))
 	}
-	fmt.Fprintf(stdout, "blinksend: six keys in %s\n", time.Since(total).Round(time.Millisecond))
+	fmt.Fprintf(stdout, "blinksend: six keys in %.2f s\n", time.Since(total).Seconds())
 	return nil
 }
 

@@ -310,6 +310,23 @@ func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	return dev.SendCustomGlyph(keyIndex, pixels)
 }
 
+// BeginBatch implements Transport. It sends the message when a device is
+// connected, and keeps nothing: a batch only holds the draw of the glyphs
+// and key states that follow it, and a replay after a reconnect sends one
+// key at a time.
+func (r *Reconnecting) BeginBatch(glyphMask, stateMask byte) error {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	dev := r.dev
+	r.mu.Unlock()
+	if dev == nil {
+		return nil
+	}
+	return dev.BeginBatch(glyphMask, stateMask)
+}
+
 // ReadMessage implements Transport. It returns the next message from
 // whichever device is connected, and io.EOF once Close has run.
 func (r *Reconnecting) ReadMessage() (Message, error) {

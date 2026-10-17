@@ -275,3 +275,27 @@ func TestEmulator_SendCustomGlyphDoesNotCompress(t *testing.T) {
 		}
 	}
 }
+
+func TestEmulator_BeginBatch(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+
+	if err := e.BeginBatch(0b101, 0b111); err != nil {
+		t.Fatalf("BeginBatch: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		if g, s, ok := e.LastBeginBatch(); ok {
+			if g != 0b101 || s != 0b111 {
+				t.Fatalf("LastBeginBatch = %#b, %#b, want 0b101, 0b111", g, s)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for emulator to receive the Begin batch")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}

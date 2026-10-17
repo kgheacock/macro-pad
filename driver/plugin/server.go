@@ -236,6 +236,17 @@ func (s *Server) SetCustomGlyph(keyIndex byte, png []byte) error {
 	})
 }
 
+// BeginBatch tells the device which keys the next glyphs and key states
+// belong to, so it draws them together. A client does not see it: the
+// virtual pad draws each key as it arrives.
+func (s *Server) BeginBatch(glyphMask, stateMask byte) error {
+	err := s.dev.BeginBatch(glyphMask, stateMask)
+	if err != nil {
+		s.logf("beginBatch failed: %v", err)
+	}
+	return err
+}
+
 // LayerChanged tells every client which layer is active.
 func (s *Server) LayerChanged(active *string) {
 	s.broadcast(layerChangedMessage(active))

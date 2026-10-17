@@ -91,8 +91,8 @@ func TestLayerChanged(t *testing.T) {
 	}
 	waitForLayerChanges(t, conn, []string{""})
 
-	// And after each change: a single press opens the child layer, and a
-	// single press on the up key returns.
+	// And after each change: a press opens the child layer, and a press on
+	// the up key returns.
 	click(t, dev, 0, 0)
 	waitForLayerChanges(t, conn, []string{"", "github"})
 
@@ -174,4 +174,83 @@ func TestSetLayerKeyWithoutLayersIsLogged(t *testing.T) {
 
 	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "x"}})
 	waitForCondition(t, time.Second, func() bool { return logs.has("setLayerKey dropped") })
+}
+
+// layerTreeWithChild sets a "github" key with one child "build".
+func layerTreeWithChild(t *testing.T, ctl *layers.Controller) {
+	t.Helper()
+	for _, u := range []layers.Update{
+		{ID: "github", Status: layers.StatusRunning},
+		{ID: "build", Parent: "github", Status: layers.StatusError},
+	} {
+		if err := ctl.SetKey(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The layer opens on the press-down, with no release, well inside the 400 ms
+// that the double-press window used to add (task 0058).
+func TestLayerOpensOnPressDownWithoutWaiting(t *testing.T) {
+	s, ctl, dev, _ := layerServer(t)
+	layerTreeWithChild(t, ctl)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	waitForLayerChanges(t, conn, []string{""})
+
+	start := time.Now()
+	dev.InjectEvent(transport.Event{KeyIndex: 0, Type: transport.EventPress, Timestamp: 0})
+	waitForLayerChanges(t, conn, []string{"", "github"})
+
+	if elapsed := time.Since(start); elapsed >= doublePressWindow/2 {
+		t.Fatalf("layer opened after %s, want well under the %s double-press window", elapsed, doublePressWindow)
+	}
+}
+
+// A key held for a long time still navigates, once. The resolver calls it a
+// long press, and plugins still see that signal.
+func TestLayerKeyHeldLongNavigatesOnceAndPluginsSeeLongPress(t *testing.T) {
+	s, ctl, dev, _ := layerServer(t)
+	layerTreeWithChild(t, ctl)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	waitForLayerChanges(t, conn, []string{""})
+
+	dev.InjectEvent(transport.Event{KeyIndex: 0, Type: transport.EventPress, Timestamp: 0})
+	dev.InjectEvent(transport.Event{KeyIndex: 0, Type: transport.EventRelease, Timestamp: 700_000})
+
+	waitForCondition(t, time.Second, func() bool {
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSignal && m.Signal.Name == SignalLongPress {
+				return true
+			}
+		}
+		return false
+	})
+	time.Sleep(50 * time.Millisecond)
+	waitForLayerChanges(t, conn, []string{"", "github"})
+}
+
+// Two quick presses on a layer key act twice, in order: open, then no-op on
+// a key of the child layer that is not the up key. No double-press window
+// merges them into one.
+func TestLayerPressesAreAppliedInOrder(t *testing.T) {
+	s, ctl, dev, _ := layerServer(t)
+	layerTreeWithChild(t, ctl)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	waitForLayerChanges(t, conn, []string{""})
+
+	dev.InjectEvent(transport.Event{KeyIndex: 0, Type: transport.EventPress, Timestamp: 0})
+	dev.InjectEvent(transport.Event{KeyIndex: 0, Type: transport.EventRelease, Timestamp: 40_000})
+	dev.InjectEvent(transport.Event{KeyIndex: layers.UpKey, Type: transport.EventPress, Timestamp: 100_000})
+	dev.InjectEvent(transport.Event{KeyIndex: layers.UpKey, Type: transport.EventRelease, Timestamp: 140_000})
+
+	waitForLayerChanges(t, conn, []string{"", "github", ""})
 }

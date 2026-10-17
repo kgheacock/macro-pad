@@ -25,6 +25,9 @@ const FileName = "layers.json"
 type Out interface {
 	SetKeyState(transport.KeyState) error
 	SetCustomGlyph(keyIndex byte, png []byte) error
+	// BeginBatch tells the board which keys the next glyphs and key states
+	// belong to, so it draws them together. Bit k of each mask is key k.
+	BeginBatch(glyphMask, stateMask byte) error
 	// LayerChanged reports the active layer: nil for the top layer.
 	LayerChanged(active *string)
 }
@@ -350,53 +353,95 @@ func nodeView(n *Node) view {
 	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, count: n.Count}
 }
 
+// keyDraw is one key to send: its key state, and the glyph that goes before
+// it, when it has one.
+type keyDraw struct {
+	key   byte
+	want  view
+	state transport.KeyState
+	png   []byte
+}
+
 // flush sends every key whose view differs from what it shows. A key never
 // drawn stays untouched when it should be blank, so a reserved slot, or a
 // key another process draws, keeps what it shows. The caller holds sendMu.
+//
+// When two or more keys change, flush sends Begin batch first, so the board
+// holds the new frames and draws all of them together (task 0060). One key
+// goes out alone, with no wait.
 func (c *Controller) flush(want [KeyCount]view) {
 	start := time.Now()
-	sent := 0
-	defer func() {
-		if sent > 0 {
-			c.logf("layers: drew %d keys in %s", sent, time.Since(start).Round(time.Millisecond))
-		}
-	}()
+	var draws []keyDraw
 	for i, w := range want {
 		have := c.shown[i]
 		if w == have || (w.kind == kindBlank && have.kind == kindUnknown) {
 			continue
 		}
-		if err := c.send(byte(i), w); err != nil {
-			c.logf("layers: key %d: %v", i, err)
-			c.shown[i] = view{}
+		draws = append(draws, c.prepare(byte(i), w))
+	}
+	if len(draws) == 0 {
+		return
+	}
+
+	if len(draws) >= 2 {
+		var glyphMask, stateMask byte
+		for _, d := range draws {
+			if d.png != nil {
+				glyphMask |= 1 << d.key
+			}
+			stateMask |= 1 << d.key
+		}
+		if err := c.out.BeginBatch(glyphMask, stateMask); err != nil {
+			c.logf("layers: begin batch: %v", err)
+		}
+	}
+
+	sent := 0
+	for _, d := range draws {
+		if err := c.send(d); err != nil {
+			c.logf("layers: key %d: %v", d.key, err)
+			c.shown[d.key] = view{}
 			continue
 		}
-		c.shown[i] = w
+		c.shown[d.key] = d.want
 		sent++
+	}
+	if sent > 0 {
+		c.logf("layers: drew %d keys in %s", sent, time.Since(start).Round(time.Millisecond))
 	}
 }
 
-func (c *Controller) send(key byte, w view) error {
-	ks := transport.KeyState{KeyIndex: key, Version: transport.ProtocolVersion, Color: w.color, EmojiID: w.icon}
+// prepare builds what one key needs on the wire: its key state, and its
+// glyph when it has one. A glyph that cannot be drawn leaves the color
+// alone, rather than nothing.
+func (c *Controller) prepare(key byte, w view) keyDraw {
+	d := keyDraw{key: key, want: w}
+	d.state = transport.KeyState{KeyIndex: key, Version: transport.ProtocolVersion, Color: w.color, EmojiID: w.icon}
 	if w.kind == kindBlank {
-		ks.Color, ks.EmojiID = 0, 0
-		return c.out.SetKeyState(ks)
+		d.state.Color, d.state.EmojiID = 0, 0
+		return d
 	}
 	if w.iconRef != "" || w.count > 0 {
 		png, err := renderGlyph(c.assetsDir, w.iconRef, w.count)
 		if err != nil {
-			// Show the color alone rather than nothing.
 			c.logf("layers: key %d: draw %q: %v", key, w.iconRef, err)
 		} else {
-			glyphStart := time.Now()
-			if err := c.out.SetCustomGlyph(key, png); err != nil {
-				return err
-			}
-			c.logf("layers: key %d: glyph sent in %s", key, time.Since(glyphStart).Round(time.Millisecond))
-			ks.EmojiID = transport.CustomGlyphSentinelEmojiID
+			d.png = png
+			d.state.EmojiID = transport.CustomGlyphSentinelEmojiID
 		}
 	}
-	return c.out.SetKeyState(ks)
+	return d
+}
+
+func (c *Controller) send(d keyDraw) error {
+	if d.png != nil {
+		glyphStart := time.Now()
+		if err := c.out.SetCustomGlyph(d.key, d.png); err != nil {
+			return err
+		}
+		c.logf("layers: key %d: glyph sent in %s", d.key, time.Since(glyphStart).Round(time.Millisecond))
+	}
+	return c.out.SetKeyState(d.state)
 }
 
 func (c *Controller) saveLoop(interval time.Duration) {

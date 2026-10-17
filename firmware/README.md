@@ -609,6 +609,53 @@ The 13 icons in `assets/` deflate to 1,213 bytes on average. A flat icon is
 about 3% of a raw frame. Inflate is now the largest cost after `_compose`,
 and the loop cannot read the next frame while it inflates.
 
+## Drawing a layer change together (task 0060)
+
+A layer change sends each changed key as a glyph over CDC and a key state over
+HID, one key after another. Without help the board draws each key when its data
+arrives, and the panels change one by one: the first `PUSH_STARTED` records of
+the six keys were 732 ms apart with `--scenario=icons`.
+
+The driver now sends "Begin batch" (frame type 7, see the wire protocol) before
+a change of two or more keys. It names the keys that get a glyph and the keys
+that get a key state. `MacroPad` then:
+
+- Composes a named key as its data arrives (`display_render.prepare_key`), but
+  queues no push for it. A frame of a named key that waited in the queue leaves
+  it.
+- Releases the batch when every named glyph is decoded and every named key
+  state is applied. `_release_batch` queues the frames of all the named keys in
+  one pass, so `_start_group` starts the pushes together: two groups, because
+  `pio_spi.MAX_GROUP` is 3.
+- Draws a blinking key of the batch with the frame of the blink slot at the
+  release, in step with the other blinking keys (task 0048).
+- Releases what it has 2 s after the Begin batch (`BATCH_TIMEOUT_US`), and
+  records `BATCH_TIMED_OUT` (code 10). A new Begin batch releases an open one
+  first. A key outside both masks draws at once.
+- Reads the CDC channel before the HID report in each `step`, so a Begin batch
+  and the key state that follows it in the same pass belong together.
+
+Flash the firmware before you run a driver that sends Begin batch. Firmware that
+does not know type 7 skips the frame, and the layer draws key by key.
+
+Measured on 2026-10-17 on a Pico Plus 2 (CircuitPython 10.2.1), with `make
+flash`, the tracing `code.py`, and `go run ./cmd/blinksend --scenario=batch`.
+`tools/blink_trace.py report --scenario=batch` prints `push span`: the time
+between the first `PUSH_STARTED` of the first key and of the last key, from the
+first decoded glyph on. The `batch` scenario is the `icons` scenario with Begin
+batch first.
+
+| Run | Push span | Six keys |
+|---|---|---|
+| 1 | 35.4 ms | 0.82 s |
+| 2 | 32.6 ms | 0.82 s |
+| 3 | 31.5 ms | 0.81 s |
+
+Keys 0 to 2 start within 1 ms of each other, and keys 3 to 5 start 29 to 31 ms
+later, as the second group. The six-key time is the same as for `icons`: the
+HID gap (`minReportGap`, 150 ms) sets it, and Begin batch does not change when
+the data arrives.
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

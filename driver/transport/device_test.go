@@ -376,3 +376,18 @@ func (c *captureWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (c *captureWriteCloser) Close() error { return nil }
+
+func TestDevice_BeginBatchWritesAFrameOfTwoMasks(t *testing.T) {
+	serialConn := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(nopWriteCloser{}, serialConn)
+	defer d.Close()
+
+	if err := d.BeginBatch(0b001001, 0b111111); err != nil {
+		t.Fatalf("BeginBatch: %v", err)
+	}
+
+	want := []byte{7, 0x02, 0x00, 0b001001, 0b111111}
+	if !bytes.Equal(serialConn.written, want) {
+		t.Fatalf("CDC write = % x, want % x", serialConn.written, want)
+	}
+}

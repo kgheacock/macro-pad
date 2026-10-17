@@ -27,6 +27,8 @@ type Emulator struct {
 	haveKeyState    bool
 	lastCustomGlyph CustomGlyph
 	haveCustomGlyph bool
+	lastBeginBatch  [2]byte
+	haveBeginBatch  bool
 
 	msgQueue chan Message
 }
@@ -78,6 +80,15 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 			cg, err = decodeCustomGlyph(payload)
 		case MessageTypeSetCustomGlyphCompressed:
 			cg, err = decodeCompressedCustomGlyph(payload)
+		case MessageTypeBeginBatch:
+			glyphMask, stateMask, err := decodeBeginBatch(payload)
+			if err == nil {
+				e.mu.Lock()
+				e.lastBeginBatch = [2]byte{glyphMask, stateMask}
+				e.haveBeginBatch = true
+				e.mu.Unlock()
+			}
+			continue
 		default:
 			continue
 		}
@@ -118,6 +129,22 @@ func (e *Emulator) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 		return err
 	}
 	return writeFrame(e.customGlyphW, t, payload)
+}
+
+// BeginBatch implements Transport. It encodes a Begin batch message per
+// docs/wire-protocol.md and delivers it to the emulator's device side, on the
+// same pipe as the custom glyphs.
+func (e *Emulator) BeginBatch(glyphMask, stateMask byte) error {
+	return writeFrame(e.customGlyphW, MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
+}
+
+// LastBeginBatch returns the glyph mask and key state mask of the most
+// recent Begin batch message the emulator's device side received, and
+// whether one has arrived yet.
+func (e *Emulator) LastBeginBatch() (glyphMask, stateMask byte, ok bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastBeginBatch[0], e.lastBeginBatch[1], e.haveBeginBatch
 }
 
 // LastCustomGlyph returns the most recent Set custom glyph message the

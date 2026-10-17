@@ -15,6 +15,7 @@ little-endian, matching the RP2350's native byte order.
 | Key state | Host → Device | HID | 6 bytes |
 | Set custom glyph | Host → Device | CDC serial | 1 + 32,768 bytes |
 | Set custom glyph (compressed) | Host → Device | CDC serial | 1 + up to 32,767 bytes |
+| Begin batch | Host → Device | CDC serial | 2 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
@@ -54,6 +55,7 @@ bytes arrive is a truncated message, not a partial value.
 | 4 | Trace record | Device → Host |
 | 5 | Set custom glyph | Host → Device |
 | 6 | Set custom glyph (compressed) | Host → Device |
+| 7 | Begin batch | Host → Device |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -163,6 +165,47 @@ driver. See [task 0058](../tasks/complete/0058-compress-and-drain-custom-glyph-t
 for the design decision, and for why inflating on the board costs 32 to
 65 ms, which limits what compression saves.
 
+### Begin batch (CDC, host → device)
+
+Sent before the glyphs and key states of a layer change, so the board draws
+all the changed keys together and not one after another. Framed per
+[Framing](#framing) as type `7`. A key that changes without a Begin batch
+draws as soon as its data arrives.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Glyph mask | Bit `k` is `1` when key `k` gets a Set custom glyph (type `5` or `6`) in this batch |
+| 1 | 1 | State mask | Bit `k` is `1` when key `k` gets a Key state message in this batch |
+
+The six keys use bits 0 to 5. The board ignores bits for keys it does not
+have.
+
+The board holds the draw of every key that a mask names. It still reads and
+composes the new image as the data arrives, but it queues no push for the
+key. Keys outside both masks draw at once, as before. The board releases the
+batch when every named glyph has been decoded and every named Key state has
+been applied. It then queues the frames of all the named keys in one pass, so
+the pushes start together: one push group holds at most three panels, so six
+keys go out as two groups, about 30 ms apart. A key that blinks draws the frame
+of the blink slot that is current at the release.
+
+The two channels have no common order. A Key state message can reach the
+board before or after the glyphs that follow the Begin batch, and the masks
+make that order unimportant.
+
+The board releases a batch that is not complete 2 s after the Begin batch
+arrived. It draws the keys it has, and records `BATCH_TIMED_OUT` (see the
+[trace code registry](#trace-code-registry)). A new Begin batch that arrives
+while one is open releases the open one first. A Begin batch with a payload
+that is not 2 bytes is dropped, and the frame is consumed by its `Length`.
+
+The driver sends a Begin batch when a layer change changes two or more keys,
+and sends nothing extra for one key. Firmware that does not know type `7`
+skips the frame by its `Length`, as Framing says, and the layer draws key by
+key. Update the firmware before the driver. See [task
+0060](../tasks/complete/0060-draw-a-layer-update-all-at-once.md) for the
+design decision.
+
 ## Emoji IDs
 
 Reserved values for the Key state message's Emoji ID field. Every other
@@ -269,6 +312,7 @@ for the design decision.
 | 7 | `GLYPH_BUILT` | `0`, unused |
 | 8 | `REFRESH_DONE` | `0`, unused. Since task 0045, the end of a push to the panel |
 | 9 | `PUSH_STARTED` | `0`, unused. The start of a push to the panel, task 0045 |
+| 10 | `BATCH_TIMED_OUT` | The pending masks of a batch that the board released after 2 s, task 0060: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last

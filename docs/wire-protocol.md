@@ -203,7 +203,7 @@ The driver sends a Begin batch when a layer change changes two or more keys,
 and sends nothing extra for one key. Firmware that does not know type `7`
 skips the frame by its `Length`, as Framing says, and the layer draws key by
 key. Update the firmware before the driver. See [task
-0060](../tasks/ongoing/0060-draw-a-layer-update-all-at-once.md) for the
+0060](../tasks/complete/0060-draw-a-layer-update-all-at-once.md) for the
 design decision.
 
 ## Emoji IDs

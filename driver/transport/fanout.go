@@ -119,6 +119,14 @@ func (r *fanoutReader) BeginBatch(glyphMask, stateMask byte) error {
 	return r.t.BeginBatch(glyphMask, stateMask)
 }
 
+func (r *fanoutReader) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	return r.t.StoreFrame(slot, color, pixels)
+}
+
+func (r *fanoutReader) ShowFrames(slots []byte) error {
+	return r.t.ShowFrames(slots)
+}
+
 func (r *fanoutReader) ReadMessage() (Message, error) {
 	msg, ok := <-r.sub.ch
 	if !ok {

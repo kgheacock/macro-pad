@@ -11,7 +11,9 @@ interface, an in-memory emulator for driver tests, and `Device`, the
 hardware implementation. [`plugin/`](plugin/) implements the local
 WebSocket API described below, served by the
 [`macropadd`](cmd/macropadd/) daemon. [`e2e/`](e2e/) is the end-to-end
-scenario harness described below, run with `make e2e`.
+scenario harness described below, run with `make e2e`. [`layers/`](layers/)
+holds the layer tree behind the keys, and [`cmd/macro_streamer`](cmd/macro_streamer/)
+shows a process's JSON log on one key; see "Layers."
 
 ## Testing without hardware
 
@@ -104,30 +106,49 @@ A glyph takes about 3 s to cross to the board with the daemon's other replay
 connected). While one crosses, other sends wait their turn, but a state
 update still reaches the files at once and `Close` does not wait.
 
-## State database
+## Layers
 
-`macropadd --state-db PATH` polls a SQLite file and shows the children of the
-active node on keys 0–5. A child's `position` is its key index. A key with no
-child is color 0 with emoji 0 and no blink. See task 0051.
+`macropadd` keeps one JSON object that says what the six keys show. A key can
+hold up to five children. A single press on a key with children opens its
+child layer, and a single press on key 3 returns. The daemon draws the active
+layer, saves the object, and shows the same layer after a restart. See task
+0057.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--state-db PATH` | empty (off) | SQLite file to poll. The daemon opens it read-only and never writes it. The daemon exits if it cannot open the file. |
-| `--state-db-poll D` | `250ms` | How often to poll. |
+| `--state-dir DIR` | `macro-pad` under the user's config directory | Holds `layers.json`, beside `keys.json`. An empty value keeps the object in memory only. |
+| `--assets-dir DIR` | `assets` | Where an `iconRef` resolves, and where a child layer finds `shift.png`. |
 
-The schema is `driver/statedb/schema.sql`. `nodes` and `state` are a
-projection; task 0052 reduces an event log into them.
+`--state-db` and `--state-db-poll` no longer exist: the layer tree replaced
+the SQLite poller of task 0051, and `driver/statedb` is gone. A database file
+the poller used is not read any more; delete it.
 
-- `nodes(id, parent_id, position, channel, message, status, children_rev)`.
-  `UNIQUE(parent_id, position)`. `ON DELETE CASCADE` removes a node's
-  children with it; the writer's connection needs `foreign_keys` on.
-- `state(id, active_node_id)`. One row, `id = 1`.
-- `children_rev` counts changes to the visible fields of a node's children.
-  The writer bumps it on the parent. A write that changes no visible field
-  must not bump it, because the poller trusts it.
+### File format
 
-`status` gives the key color. `NULL` is white. An unknown name logs one line
-and gives color 0. No status blinks.
+```json
+{"version": 1, "active": null,
+ "keys": [{"id": "github", "icon": 0, "status": "RUNNING", "count": 3,
+           "iconRef": "github.png",
+           "children": [{"id": "build", "status": "ERROR", "count": 1}]},
+          null, null, null, null, null]}
+```
+
+- `keys` has at most six entries. The index is the key position, and `null`
+  is an empty key.
+- `children` has at most five entries. A child has the same fields as a key
+  and no children of its own.
+- `id` names a key or child, and is unique among its siblings.
+- `active` is `null` for the top layer. Otherwise it is the `id` of the key
+  whose children the pad shows.
+- `status` is `RUNNING`, `DONE`, `ERROR`, `WARN`, or empty. It gives the key
+  color. No status blinks.
+- `iconRef` is a PNG under the assets directory, 128×128. A path that is
+  absolute or leaves the directory, with `..` or a symbolic link, is
+  rejected. Transparent pixels show the key color. If `iconRef` is empty,
+  `icon` is a built-in Emoji ID; firmware has no glyph table, so it draws
+  only the color.
+- `count` is drawn as a badge in the bottom-right corner of the image. A
+  count of 0 has no badge, and a count above 99 shows `99+`.
 
 | status | color | RGB565 |
 |---|---|---|
@@ -135,26 +156,72 @@ and gives color 0. No status blinks.
 | `DONE` | green `#12D84A` | `0x16C9` |
 | `ERROR` | red | `0xF800` |
 | `WARN` | yellow | `0xFFE0` |
-| `NULL` | white | `0xFFFF` |
+| empty | white | `0xFFFF` |
 
-`channel` and `message` are read and compared, but not drawn yet. The icons
-for each channel are in `assets/`.
+A file with seven keys, six children, a grandchild, an unknown status, a
+duplicate `id`, or an `active` that names a key with no children is rejected.
 
-**How the poller stays cheap.** It holds one connection. Each tick it reads
-`PRAGMA data_version`; if that is unchanged, it stops. Otherwise it reads
-`(active_node_id, children_rev)`; if that pair is unchanged, it stops. Only a
-changed pair reads the children and sends six `KeyState` messages. The
-`children_rev` rule above is what keeps a write that changes no visible field
-from reaching the board.
+### Key layout
 
-**One writer per key.** A plugin and the database can both set one key. The
-last write wins, and the poller sends only when the pair changes, so a plugin's
-color stays until the next database change. A page switch sends six messages
-in a burst; on the board, task 0050 measured about 155 ms per write in a burst,
-so a switch may take about 1 s.
+On the top layer, key N shows `keys[N]`.
 
-**Errors.** A read error is logged and retried on the next tick. The board
-keeps its last state. This covers a database on a stale or network mount.
+In a child layer, child N shows on keys 0, 1, 2, 4, and 5, in that order, and
+key 3 shows `assets/shift.png`, a shift arrow on a dark key. A key with no
+child in the open layer is blank.
+
+| Press | Result |
+|---|---|
+| single press, top layer, key with children | opens that key's child layer |
+| single press, child layer, key 3 | returns to the top layer |
+| any other single press | nothing: no key state is sent and `active` stays |
+
+The press is the `singlePress` signal, so a layer change lags the release by
+the 400 ms double-press window ("Click-pattern resolution," below). A layer
+change sends only the keys whose image or color changed. On the board, a burst
+of writes takes about 155 ms each (task 0050), so a change with six images
+may take about 1 s.
+
+A key with no status, icon, count, `iconRef`, or children is a reserved slot.
+The daemon does not draw it, and clears it only if it drew it before.
+
+### Saving
+
+A changed object is saved every 5 s and on exit, to `layers.json` in the state
+directory. A save writes a temporary file and renames it. A crash can lose up
+to 5 s of changes. A `layers.json` that does not parse, or does not validate,
+moves to `layers.json.bad` and the daemon starts empty. Each of these is
+logged.
+
+### `setLayerKey` and `layerChanged`
+
+A client changes the object with `setLayerKey` (see "Protocol," below). The
+daemon runs all updates one at a time, so any number of clients can write.
+The daemon sends `layerChanged` to every client when the layer changes, and
+to a client when it connects, so a plugin that draws its own keys knows when
+the pad shows a child layer.
+
+### `macro_streamer`
+
+`macro_streamer` reads JSON lines on standard input and updates one key
+through the daemon.
+
+```sh
+CHANNEL=github go run ./cmd/macro_streamer < build.log.jsonl
+```
+
+| Setting | Meaning |
+|---|---|
+| `CHANNEL` | Required. The `id` of the key. Its image is `assets/CHANNEL.png`. An empty value exits with code 2. |
+| `STATE` | Optional. The status the key shows before the first line. Default: none. |
+| `--port` | The daemon's port. Default 8765. |
+
+Each line sets the status from `level`: `error`, `fatal`, and `panic` give
+`ERROR`; `warn` and `warning` give `WARN`; `done`, `success`, and `ok` give
+`DONE`; `info`, `debug`, `trace`, and `running` give `RUNNING`. A `count`
+field sets the count. A `child` field updates that child of the key instead of
+the key. A line that is not JSON, has an unknown `level`, or has a negative
+`count` is logged to standard error with its line number and skipped. The
+streamer sends no `slot`, so its key takes the first free slot.
 
 ## Connectivity check
 
@@ -268,6 +335,30 @@ Every message on the connection is JSON, shaped by
   0016's OSC 133 scanner, task 0015's iTerm2 bridge — calls
   `Server.Broadcast` directly instead of dialing its own daemon over a
   socket.
+
+- **`setLayerKey`** — client to server. Upserts one key or child in the
+  layer tree with its full values (see "Layers," above). `parent` names the
+  key a child belongs to, and is empty for a key. `slot` (0 to 5) puts a key
+  in that slot: if another `id` holds the slot, the daemon logs it and drops
+  the message. Without `slot`, a known key stays where it is and a new key
+  takes the first free slot. A message with only `id` and `slot` reserves the
+  slot. A message the tree rejects is logged and dropped. The daemon does not
+  rebroadcast it; the keys it draws arrive as `setKeyState` and
+  `setCustomGlyph`.
+
+  ```json
+  {"kind": "setLayerKey", "setLayerKey": {"id": "github", "status": "ERROR", "count": 1, "iconRef": "github.png"}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR"}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
+  ```
+
+- **`layerChanged`** — server to client. Names the active layer: the `id` of
+  the open key, or `null` for the top layer. The server sends it to every
+  client when the layer changes, and to a client when it connects.
+
+  ```json
+  {"kind": "layerChanged", "layerChanged": {"active": null}}
+  ```
 
 - **`subscribeAudio`** / **`unsubscribeAudio`** — client to server, no
   payload. Start or stop delivery of every

@@ -249,3 +249,29 @@ func TestReadMessageTruncated(t *testing.T) {
 		t.Fatalf("readMessage returned %+v on truncation, want zero value", msg)
 	}
 }
+
+// Both frame types reach the emulator's device side as the same glyph.
+func TestEmulator_SendCustomGlyphDoesNotCompress(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+
+	pixels := noisePixels()
+	if err := e.SendCustomGlyph(1, pixels); err != nil {
+		t.Fatalf("SendCustomGlyph: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		if got, ok := e.LastCustomGlyph(); ok {
+			if got.KeyIndex != 1 || !bytes.Equal(got.Pixels, pixels) {
+				t.Fatalf("LastCustomGlyph = key %d, want key 1 and matching pixels", got.KeyIndex)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for emulator to receive the custom glyph")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}

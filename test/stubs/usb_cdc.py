@@ -20,6 +20,13 @@ class Serial:
         self.in_waiting = len(self._to_read)
         return chunk
 
+    def readinto(self, buffer):
+        chunk = self._to_read[: len(buffer)]
+        buffer[: len(chunk)] = chunk
+        self._to_read = self._to_read[len(chunk) :]
+        self.in_waiting = len(self._to_read)
+        return len(chunk)
+
     def feed(self, data):
         """Test helper: queue bytes to be returned by the next read()."""
         self._to_read.extend(data)

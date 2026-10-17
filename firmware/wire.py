@@ -8,6 +8,9 @@ guess at field offsets when the version byte does not match.
 See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 """
 
+import time
+import zlib
+
 PROTOCOL_VERSION = 1
 
 KEY_STATE_SIZE = 6  # docs/wire-protocol.md's Key state message
@@ -21,6 +24,13 @@ MESSAGE_TYPE_EVENT = 1  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_PONG = 3  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_TRACE = 4  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_SET_CUSTOM_GLYPH = 5  # docs/wire-protocol.md's Framing type registry
+# Same image as type 5, as a zlib stream (task 0058).
+MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED = 6
+
+# How long one `CustomGlyphReader.feed` call can keep reading while a frame is
+# in progress. The loop does not scan the switches meanwhile. 8 ms drained a
+# 32 KB frame in about 125 ms on the board (task 0058).
+READ_BUDGET_NS = 8000000
 
 PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
 
@@ -156,49 +166,133 @@ def decode_custom_glyph(payload):
     return CustomGlyph(key_index=payload[0], pixels=bytes(payload[1:]))
 
 
+def _inflate_glyph(stream):
+    """Inflate a type 6 zlib stream to a glyph's pixel buffer.
+
+    Raises `ValueError` for a stream that does not inflate, or does not
+    inflate to exactly `CUSTOM_GLYPH_PIXELS_SIZE` bytes. CircuitPython's
+    `zlib` raises a different exception for each kind of bad stream, so any
+    failure of `decompress` counts as one.
+    """
+    try:
+        pixels = zlib.decompress(stream)
+    except Exception:
+        raise ValueError("compressed custom glyph does not inflate")
+    if len(pixels) != CUSTOM_GLYPH_PIXELS_SIZE:
+        raise ValueError(
+            "compressed custom glyph inflated to {} bytes, want {}".format(
+                len(pixels), CUSTOM_GLYPH_PIXELS_SIZE
+            )
+        )
+    return pixels
+
+
 class CustomGlyphReader:
     """Incrementally reads one framed CDC message from the host.
 
-    A Set custom glyph payload is up to 32,769 bytes — too large to read
-    in one `MacroPad.step` without stalling the switch scan and event
-    loop — so this buffers whatever `reader.in_waiting` reports on each
-    `feed` call, across as many calls as it takes, instead of blocking on
-    a full frame arriving at once.
+    A Set custom glyph payload is up to 32,769 bytes. `feed` reads it with
+    `readinto` straight into one preallocated buffer, and reads exactly the
+    bytes the current frame needs, so the next frame stays in the port.
+
+    While a frame is in progress, one `feed` call keeps reading until the
+    frame is complete or `READ_BUDGET_NS` has passed. This drains the port
+    at its own pace, 550 KB/s on the board, instead of one 256-byte read
+    per `MacroPad.step` pass, 140 KB/s (task 0058). The budget bounds how
+    long one call can hold up the switch scan. An idle `feed`, with nothing
+    in progress and nothing waiting, returns at once.
     """
 
-    def __init__(self):
-        self._buffer = bytearray()
+    def __init__(self, clock=None, budget_ns=READ_BUDGET_NS):
+        self._frame = bytearray(FRAME_HEADER_SIZE + CUSTOM_GLYPH_PAYLOAD_SIZE)
+        self._view = memoryview(self._frame)
+        self._filled = 0
+        # Header and payload bytes of the glyph frame in progress, and its type.
+        self._total = 0
+        self._frame_type = 0
+        # Payload bytes of a frame this reader drops, still to discard.
+        self._skip = 0
+        self._bad_length = False
+        self._clock = clock if clock is not None else time.monotonic_ns
+        self._budget_ns = budget_ns
 
     def feed(self, reader):
         """Read whatever is available from `reader`.
 
         Returns a decoded `CustomGlyph` once a full Set custom glyph
         frame has arrived, `None` otherwise. A frame of a type this
-        reader does not know is dropped once fully buffered, by its
-        declared length, matching `driver/transport/wire.go`'s
-        `readFrame`/`decodeMessage` split.
+        reader does not know is dropped, by its declared length, matching
+        `driver/transport/wire.go`'s `readFrame`/`decodeMessage` split. A
+        glyph frame of the wrong length is dropped the same way, and then
+        raises `ValueError`, so the next frame starts clean.
         """
-        available = reader.in_waiting
-        if available:
-            self._buffer.extend(reader.read(available))
-
-        if len(self._buffer) < FRAME_HEADER_SIZE:
+        if not reader.in_waiting and not self._filled and not self._skip:
             return None
 
-        message_type = self._buffer[0]
-        length = self._buffer[1] | (self._buffer[2] << 8)
-        total = FRAME_HEADER_SIZE + length
-        if len(self._buffer) < total:
-            return None
+        start = self._clock()
+        while True:
+            available = reader.in_waiting
+            if available and self._consume(reader, available):
+                return self._finish()
+            if self._clock() - start >= self._budget_ns:
+                return None
 
-        payload = bytes(self._buffer[FRAME_HEADER_SIZE:total])
-        # CircuitPython's bytearray has no slice-delete (`del ba[:n]`
-        # raises "'bytearray' object doesn't support item deletion",
-        # confirmed live testing task 0030's custom glyph upload on real
-        # hardware); CPython's does, so the prior line passed pytest but
-        # crashed on the board. Reassigning a slice works on both.
-        self._buffer = self._buffer[total:]
+    def _consume(self, reader, available):
+        """Read up to `available` bytes of the current frame. Returns True
+        when the frame is complete or fully dropped."""
+        if self._skip:
+            n = min(available, self._skip, len(self._frame))
+            got = reader.readinto(self._view[:n])
+            self._skip -= got or 0
+            return self._skip == 0
 
-        if message_type != MESSAGE_TYPE_SET_CUSTOM_GLYPH:
-            return None
-        return decode_custom_glyph(payload)
+        if self._filled < FRAME_HEADER_SIZE:
+            n = min(available, FRAME_HEADER_SIZE - self._filled)
+            got = reader.readinto(self._view[self._filled : self._filled + n])
+            self._filled += got or 0
+            if self._filled < FRAME_HEADER_SIZE:
+                return False
+            length = self._frame[1] | (self._frame[2] << 8)
+            frame_type = self._frame[0]
+            # A type 6 stream is at least a key index and one byte, and
+            # smaller than the raw payload, or the driver would send type 5.
+            if (
+                frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH
+                and length == CUSTOM_GLYPH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED
+                and 2 <= length < CUSTOM_GLYPH_PAYLOAD_SIZE
+            ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
+                return False
+            self._bad_length = frame_type in (
+                MESSAGE_TYPE_SET_CUSTOM_GLYPH,
+                MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
+            )
+            self._bad_length_size = length
+            self._filled = 0
+            self._skip = length
+            return length == 0
+
+        n = min(available, self._total - self._filled)
+        got = reader.readinto(self._view[self._filled : self._filled + n])
+        self._filled += got or 0
+        return self._filled == self._total
+
+    def _finish(self):
+        if self._filled:
+            total = self._filled
+            self._filled = 0
+            key_index = self._frame[FRAME_HEADER_SIZE]
+            stream = self._view[FRAME_HEADER_SIZE + 1 : total]
+            if self._frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH:
+                return CustomGlyph(key_index=key_index, pixels=bytes(stream))
+            return CustomGlyph(key_index=key_index, pixels=_inflate_glyph(stream))
+        if self._bad_length:
+            self._bad_length = False
+            raise ValueError(
+                "custom glyph payload is {} bytes, want {}".format(
+                    self._bad_length_size, CUSTOM_GLYPH_PAYLOAD_SIZE
+                )
+            )
+        return None

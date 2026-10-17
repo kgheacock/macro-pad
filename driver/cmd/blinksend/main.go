@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/kgheacock/macro-pad/driver/recorder"
@@ -52,7 +54,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, or warmup (send nothing)")
+	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
 	if err := fs.Parse(args); err != nil {
@@ -72,6 +75,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		script = sendBusyBurst
 	case "sync":
 		script = sendSync
+	case "glyphs":
+		script = func(dev transport.Transport) error { return sendGlyphs(dev, stdout, noiseGlyph) }
+	case "icons":
+		script = func(dev transport.Transport) error {
+			return sendGlyphs(dev, stdout, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
+		}
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
 		// code.py has given an unreadable trace stream and no decoded
@@ -79,7 +88,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons or warmup\n", *scenario)
 		return 2
 	}
 
@@ -197,6 +206,68 @@ func sendBusyBurst(dev transport.Transport) error {
 		}
 	}
 	return nil
+}
+
+// sendGlyphs sends one custom glyph to each of the six keys, the way a layer
+// change does: the glyph, then a key state that names it. It prints how long
+// each SendCustomGlyph write blocked, which is how long the board took to
+// drain the 32 KB frame from the CDC buffer, and the time for all six keys
+// (task 0057's layer redraw took 3 to 6 s; task 0058 shortens it).
+func sendGlyphs(dev transport.Transport, stdout io.Writer, glyph func(key byte) ([]byte, error)) error {
+	total := time.Now()
+	for key := byte(0); key < 6; key++ {
+		pixels, err := glyph(key)
+		if err != nil {
+			return err
+		}
+		start := time.Now()
+		if err := dev.SendCustomGlyph(key, pixels); err != nil {
+			return err
+		}
+		wrote := time.Since(start)
+		ks := keyState(key, 0x0000, false)
+		ks.EmojiID = transport.CustomGlyphSentinelEmojiID
+		if err := dev.SendKeyState(ks); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "blinksend: key %d: glyph write %s, glyph+state %s\n",
+			key, wrote.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))
+	}
+	fmt.Fprintf(stdout, "blinksend: six keys in %s\n", time.Since(total).Round(time.Millisecond))
+	return nil
+}
+
+// noiseGlyph returns a CustomGlyphWidth × CustomGlyphHeight RGB565 picture of
+// pseudo-random pixels that depends on key. It does not compress, so it is
+// the worst case for any scheme that sends fewer bytes. No pixel is
+// transparent.
+func noiseGlyph(key byte) ([]byte, error) {
+	pixels := make([]byte, transport.CustomGlyphPixelsSize)
+	state := uint32(key)*2654435761 + 1
+	for i := 0; i < len(pixels); i += 2 {
+		state = state*1664525 + 1013904223
+		v := uint16(state>>16) | 1
+		pixels[i], pixels[i+1] = byte(v>>8), byte(v)
+	}
+	return pixels, nil
+}
+
+// iconGlyph returns the key-th PNG in dir, in file name order, as RGB565
+// pixels: the same pictures a layer shows.
+func iconGlyph(dir string, key byte) ([]byte, error) {
+	names, err := filepath.Glob(filepath.Join(dir, "*.png"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	if int(key) >= len(names) {
+		return nil, fmt.Errorf("%s holds %d PNG files, want at least %d", dir, len(names), key+1)
+	}
+	data, err := os.ReadFile(names[key])
+	if err != nil {
+		return nil, err
+	}
+	return transport.DecodePNGToRGB565(data)
 }
 
 // sendSync makes all six keys blink, then updates key 4 ten times, 2 s apart,

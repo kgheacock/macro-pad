@@ -3,7 +3,7 @@
 // "Layers" section of driver/README.md.
 //
 // The daemon owns one Controller. Clients change it with setLayerKey
-// messages, a single press opens or closes a child layer, and the
+// messages, a press opens or closes a child layer, and the
 // Controller draws only the keys that changed.
 package layers
 
@@ -24,7 +24,7 @@ const (
 	// MaxChildren is the most children one key holds.
 	MaxChildren = 5
 	// UpKey is the key that shows the shift icon in a child layer. A
-	// single press on it returns to the parent layer.
+	// press on it returns to the parent layer.
 	UpKey = 3
 )
 

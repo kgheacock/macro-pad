@@ -51,6 +51,11 @@ func (b *fakeBoard) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	return nil
 }
 
+func (b *fakeBoard) BeginBatch(glyphMask, stateMask byte) error {
+	b.record("batch %#02x %#02x", glyphMask, stateMask)
+	return nil
+}
+
 func (b *fakeBoard) ReadMessage() (Message, error) {
 	msg, ok := <-b.in
 	if !ok {
@@ -427,5 +432,41 @@ func TestReconnecting_SixGlyphsAreSavedAndReplayedInKeyOrder(t *testing.T) {
 	}
 	if got := board.sent(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("replay = %q, want %q", got, want)
+	}
+}
+
+func TestReconnecting_BeginBatchGoesToTheBoardAndIsNotReplayed(t *testing.T) {
+	bs := make(boards, 2)
+	first, second := newFakeBoard(), newFakeBoard()
+	bs <- first
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+	waitFor(t, "the first connect", func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.dev != nil })
+
+	if err := r.BeginBatch(0b11, 0b11); err != nil {
+		t.Fatalf("BeginBatch: %v", err)
+	}
+	r.SendKeyState(key(0, 0x001F, 0, false))
+	if got, want := first.sent(), []string{"batch 0x03 0x03", "key 0 color 0x001f emoji 0 blink false"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first board got %q, want %q", got, want)
+	}
+
+	first.disconnect()
+	bs <- second
+	waitFor(t, "the replay", func() bool { return len(second.sent()) >= 1 })
+	for _, call := range second.sent() {
+		if strings.HasPrefix(call, "batch") {
+			t.Fatalf("replay sent %q, want no Begin batch", call)
+		}
+	}
+}
+
+func TestReconnecting_BeginBatchWithNoBoardIsDropped(t *testing.T) {
+	bs := make(boards)
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+
+	if err := r.BeginBatch(1, 1); err != nil {
+		t.Fatalf("BeginBatch with no board = %v, want nil", err)
 	}
 }

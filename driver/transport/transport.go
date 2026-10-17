@@ -133,6 +133,14 @@ type Transport interface {
 	// one from a PNG file's bytes.
 	SendCustomGlyph(keyIndex byte, pixels []byte) error
 
+	// BeginBatch writes one Begin batch message to the device over CDC
+	// serial. The board holds the frames of the keys the masks name, and
+	// draws them together once every named glyph and key state has arrived,
+	// or after 2 s. Bit k of glyphMask is key k that gets a Set custom
+	// glyph, and bit k of stateMask is key k that gets a key state. See
+	// "Begin batch" in docs/wire-protocol.md (task 0060).
+	BeginBatch(glyphMask, stateMask byte) error
+
 	// ReadMessage blocks until one device→host message arrives over CDC
 	// serial, or the transport is closed. A frame whose type this package
 	// does not know is skipped by its declared length and never returned.

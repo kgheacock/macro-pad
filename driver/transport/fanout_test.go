@@ -144,3 +144,30 @@ func readWithTimeout(t *testing.T, tr Transport) (Message, error) {
 		return Message{}, nil
 	}
 }
+
+func TestFanout_SubscriberBeginBatchReachesTheUnderlyingTransport(t *testing.T) {
+	emu := NewEmulator()
+	defer emu.Close()
+	f := NewFanout(emu)
+	go f.Run()
+	sub := f.Subscribe()
+
+	if err := sub.BeginBatch(0b1, 0b11); err != nil {
+		t.Fatalf("BeginBatch: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		if g, s, ok := emu.LastBeginBatch(); ok {
+			if g != 1 || s != 3 {
+				t.Fatalf("emulator got %#b, %#b, want 0b1, 0b11", g, s)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for the Begin batch")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}

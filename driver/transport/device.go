@@ -323,6 +323,12 @@ func (d *Device) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	return writeFrame(d.serial, t, payload)
 }
 
+// BeginBatch implements Transport. It writes a framed Begin batch message
+// to the device over CDC, ahead of the glyphs it names.
+func (d *Device) BeginBatch(glyphMask, stateMask byte) error {
+	return writeFrame(d.serial, MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
+}
+
 // ReadMessage implements Transport. It decodes one frame from the CDC
 // stream using the same readMessage the emulator uses, so both paths
 // share one framing implementation. ReadMessage does not route by type;

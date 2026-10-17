@@ -22,6 +22,7 @@ import time
 import digitalio
 
 import display_render
+import frame_cache as frame_cache_module
 import tracer as tracer_module
 import wire
 from debounce import Debouncer
@@ -42,6 +43,10 @@ BLINK_INTERVAL_US = 500_000
 # (task 0060).
 BATCH_TIMEOUT_US = 2_000_000
 _NO_KEY = 0xFF
+
+# The longest a Store frame waits for a push that reads its slot to end, so a
+# stuck bus cannot hold the loop (task 0061). A push group takes about 26 ms.
+SLOT_WAIT_NS = 200_000_000
 
 
 class _Batch:
@@ -149,6 +154,7 @@ class MacroPad:
         idle_timer=None,
         tracer=None,
         push_bus=None,
+        frame_cache=None,
     ):
         self._switches = switches
         self._panels = panels
@@ -158,6 +164,11 @@ class MacroPad:
         self._tracer = tracer
         self._push_bus = push_bus
         self._custom_glyph_reader = wire.CustomGlyphReader()
+        # The pool of composed frames (task 0061): all its slots are allocated
+        # here, before the loop, and never freed.
+        self._frame_cache = (
+            frame_cache if frame_cache is not None else frame_cache_module.FrameCache()
+        )
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
         # The switch's own initial reading, not a sentinel, so the first
@@ -361,6 +372,7 @@ class MacroPad:
         # blink on a custom image without resending it.
         if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
             key_state.pixels = None
+            display_render.drop_cached(key_state)
         self._dirty.add(message.key_index)
         if self._batch is not None:
             self._batch.pending_state &= ~(1 << message.key_index)
@@ -385,6 +397,12 @@ class MacroPad:
         if isinstance(glyph, wire.BeginBatch):
             self._begin_batch(glyph, now_us)
             return True
+        if isinstance(glyph, wire.StoreFrame):
+            self._store_frame(glyph)
+            return True
+        if isinstance(glyph, wire.ShowFrames):
+            self._show_frames(glyph, now_us)
+            return True
 
         if self._tracer is not None:
             self._tracer.record(
@@ -404,6 +422,71 @@ class MacroPad:
         if self._batch is not None:
             self._batch.pending_glyph &= ~(1 << glyph.key_index)
         return True
+
+    def _slot_in_use(self, view):
+        """True when a push that reads `view` is queued or on the wire."""
+        for frame in self._queued_frame:
+            if frame is view:
+                return True
+        for frame in self._active_frames:
+            if frame is view:
+                return True
+        return False
+
+    def _store_frame(self, message):
+        """Compose a Store frame's glyph over its color into its slot. It
+        draws nothing. A slot the pool does not have is dropped.
+
+        A push that reads the slot must end first, because the compose
+        changes the bytes the DMA reads (task 0061). The host never stores
+        into a slot that a key shows, so this wait is rare and short.
+        """
+        slot = message.slot
+        if slot >= self._frame_cache.slot_count:
+            return
+        view = self._frame_cache.view(slot)
+        start = time.monotonic_ns()
+        while self._slot_in_use(view) and time.monotonic_ns() - start < SLOT_WAIT_NS:
+            self._service_pushes()
+        self._frame_cache.store(slot, message.color, message.pixels)
+
+    def _show_frames(self, message, now_us):
+        """Queue the push of every key that a Show frames message names, in
+        one pass, so the pushes start together. A key that names an empty slot
+        keeps its image, and the board answers with a Show miss for those keys.
+        An open batch is released first, like a new Begin batch does.
+        """
+        if self._batch is not None:
+            self._release_batch(now_us)
+        cache = self._frame_cache
+        shown = 0
+        missed = 0
+        for key_index in range(min(len(message.slots), len(self.key_states))):
+            slot = message.slots[key_index]
+            if slot == wire.SLOT_UNCHANGED:
+                continue
+            if not cache.filled(slot):
+                missed |= 1 << key_index
+                continue
+            emoji_id = (
+                wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+                if cache.has_glyph(slot)
+                else DEFAULT_EMOJI_ID
+            )
+            display_render.show_cached(
+                self._ports[key_index],
+                self.key_states[key_index],
+                cache.view(slot),
+                cache.color(slot),
+                emoji_id,
+            )
+            self._dirty.discard(key_index)
+            shown |= 1 << key_index
+        self._record_trace(tracer_module.FRAMES_SHOWN, _NO_KEY, shown)
+        if missed:
+            wire.write_frame(
+                self._serial, wire.MESSAGE_TYPE_SHOW_MISS, wire.encode_show_miss(missed)
+            )
 
     def _begin_batch(self, message, now_us):
         """Open a batch. An open one is released first, with what it has.

@@ -1502,3 +1502,305 @@ def test_parallel_push_sends_a_desynced_group_again_with_its_windows():
     for now_us in (2000, 3000):
         pad.step(now_us)
     assert all(bus.frame_count(key) == 1 for key in range(6))
+
+
+# --- Task 0061: the frame cache --------------------------------------------
+
+
+def _store_frame_bytes(slot, color, pixels=None):
+    """The raw framed bytes of a Store frame message: the glyph goes out as a
+    zlib stream, and a frame of the color alone has no stream."""
+    writer = FakeSerial()
+    payload = bytes((slot, color & 0xFF, color >> 8))
+    if pixels is not None:
+        payload += zlib.compress(pixels, 9)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_FRAME, payload)
+    return bytes(writer.written)
+
+
+def _show_frames_bytes(slots):
+    writer = FakeSerial()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES, bytes(slots))
+    return bytes(writer.written)
+
+
+def _show_misses(serial):
+    """The masks of the Show miss messages the board wrote."""
+    return [
+        payload[0]
+        for message_type, payload in _parse_frames(bytes(serial.written))
+        if message_type == wire.MESSAGE_TYPE_SHOW_MISS
+    ]
+
+
+UNCHANGED = wire.SLOT_UNCHANGED
+
+
+def test_the_pool_is_128_slots_allocated_before_the_loop():
+    pad, _, _, _, _, _ = _build_pad()
+
+    assert pad._frame_cache.slot_count == 128
+    assert wire.SLOT_UNCHANGED == 0xFF
+    assert not any(pad._frame_cache.filled(slot) for slot in range(128))
+
+
+def test_store_frame_draws_nothing_and_show_frames_draws_the_stored_frame():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    before = _frame_counts(panels)
+
+    serial.feed(_store_frame_bytes(9, 0x07E0))
+    pad.step(1000)
+    assert _frame_counts(panels) == before
+
+    serial.feed(_show_frames_bytes([UNCHANGED, 9]))
+    pad.step(2000)
+    pad.step(2001)
+
+    assert len(panels.per_key[1].frames) == before[1] + 1
+    assert _last_frame(panels.per_key[1]) == _solid_frame(0x07E0)
+    assert len(panels.per_key[0].frames) == before[0]  # key 0 was unchanged
+
+
+def test_a_stored_glyph_draws_over_its_color_and_a_transparent_pixel_shows_the_color():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+
+    pixels = _rgb565_pixels_with_transparent_corner(0xF800)
+    serial.feed(_store_frame_bytes(4, 0x001F, pixels))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([UNCHANGED, UNCHANGED, 4]))
+    pad.step(2000)
+    pad.step(2001)
+
+    frame = _last_frame(panels.per_key[2])
+    assert _frame_pixel(frame, 0) == 0x001F  # the transparent corner
+    assert _frame_pixel(frame, 1) == 0xF800
+    assert _frame_pixel(frame, PIXEL_COUNT - 1) == 0xF800
+
+
+def test_a_store_into_a_used_slot_replaces_it_for_the_next_show():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_store_frame_bytes(0, 0x1111))
+    pad.step(1000)
+    serial.feed(_store_frame_bytes(0, 0x2222))
+    pad.step(2000)
+    serial.feed(_show_frames_bytes([0]))
+    pad.step(3000)
+    pad.step(3001)
+
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0x2222)
+
+
+def test_a_store_allocates_no_bitmap():
+    import displayio
+
+    created = []
+
+    class CountingBitmap(displayio.Bitmap):
+        def __init__(self, *args, **kwargs):
+            created.append(1)
+            super().__init__(*args, **kwargs)
+
+    pad, _, _, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+
+    original = displayio.Bitmap
+    displayio.Bitmap = CountingBitmap
+    try:
+        for slot in range(3):
+            serial.feed(
+                _store_frame_bytes(
+                    slot, 0xF800, _rgb565_pixels_with_transparent_corner(0x07E0)
+                )
+            )
+            pad.step(1000 + slot)
+    finally:
+        displayio.Bitmap = original
+
+    assert created == []
+
+
+def test_a_show_of_six_stored_frames_queues_every_push_in_one_pass_and_traces_it():
+    tracer = _FakeTracer()
+    pad, bus, _ = _parallel_pad(tracer=tracer)
+    serial = pad._serial
+    _paint_power_on(pad)
+    for key in range(6):
+        serial.feed(_store_frame_bytes(10 + key, 0x0100 * (key + 1)))
+        pad.step(1000 + key)
+    groups_before = len(bus.groups)
+    del tracer.records[:]
+
+    serial.feed(_show_frames_bytes([10, 11, 12, 13, 14, 15]))
+    pad.step(5000)
+    pad.step(5001)
+
+    assert bus.groups[groups_before:] == [[0, 1, 2], [3, 4, 5]]
+    shown = [p for code, _, p in tracer.records if code == tracer_module.FRAMES_SHOWN]
+    assert shown == [ALL_KEYS]
+    assert tracer_module.FRAMES_SHOWN == 11
+
+
+def test_a_show_that_names_an_empty_slot_draws_the_other_keys_keeps_the_old_image_and_sends_a_miss():
+    """DoD-4."""
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_store_frame_bytes(1, 0x07E0))
+    pad.step(1000)
+    old_key2 = _last_frame(panels.per_key[2])
+    counts = _frame_counts(panels)
+
+    # Key 0 names stored slot 1, key 2 names empty slot 50, key 4 names slot 200.
+    serial.feed(_show_frames_bytes([1, UNCHANGED, 50, UNCHANGED, 200]))
+    pad.step(2000)
+    pad.step(2001)
+
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0x07E0)
+    assert len(panels.per_key[0].frames) == counts[0] + 1
+    assert _frame_counts(panels)[2] == counts[2]
+    assert _last_frame(panels.per_key[2]) == old_key2
+    assert _frame_counts(panels)[4] == counts[4]
+    assert _show_misses(serial) == [0b010100]
+
+
+def test_a_show_with_no_miss_writes_no_miss_message():
+    pad, _, _, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_store_frame_bytes(0, 0x1234))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([0]))
+    pad.step(2000)
+
+    assert _show_misses(serial) == []
+
+
+def test_a_store_into_a_slot_that_is_on_the_wire_waits_for_the_push():
+    panels = _slow_panels(polls_to_finish=3)
+    pad, _, _, _, _, serial = _build_pad(panels=panels)
+    for _ in range(40):
+        pad.step(0)  # the power-on paint
+    serial.feed(_store_frame_bytes(7, 0x1111))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([7]))
+    pad.step(2000)
+    assert panels.per_key[0].busy
+
+    serial.feed(_store_frame_bytes(7, 0x2222))
+    pad.step(3000)
+
+    # The frame on the wire reached the panel whole, in the first color.
+    assert panels.per_key[0].sent[-1] == _solid_frame(0x1111)
+    serial.feed(_show_frames_bytes([7]))
+    for _ in range(10):
+        pad.step(4000)
+    assert panels.per_key[0].sent[-1] == _solid_frame(0x2222)
+
+
+def test_a_store_of_a_slot_above_127_is_dropped():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    counts = _frame_counts(panels)
+    serial.feed(_store_frame_bytes(128, 0x1234))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([128]))
+    pad.step(2000)
+
+    assert _frame_counts(panels) == counts
+    assert _show_misses(serial) == [0b1]
+
+
+def test_a_store_frame_that_does_not_inflate_changes_no_slot():
+    pad, _, _, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    writer = FakeSerial()
+    wire.write_frame(
+        writer, wire.MESSAGE_TYPE_STORE_FRAME, bytes((3, 0, 0)) + b"junk junk"
+    )
+    serial.feed(bytes(writer.written))
+    pad.step(1000)
+
+    assert not pad._frame_cache.filled(3)
+
+
+def test_a_key_state_with_the_same_color_keeps_a_shown_frame_and_a_built_in_emoji_drops_it():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    pixels = _rgb565_pixels_with_transparent_corner(0xF800)
+    serial.feed(_store_frame_bytes(2, 0x001F, pixels))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([UNCHANGED, UNCHANGED, 2]))
+    pad.step(2000)
+    shown = _last_frame(panels.per_key[2])
+    calls = len(bitmaptools.calls)
+
+    hid_device.feed(
+        _key_state_report(2, 0x001F, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID)
+    )
+    pad.step(3000)
+    assert _last_frame(panels.per_key[2]) == shown
+    assert len(bitmaptools.calls) == calls  # nothing composed
+
+    hid_device.feed(_key_state_report(2, 0x001F, 5))  # a built-in Emoji ID
+    pad.step(4000)
+    pad.step(4001)
+    assert _last_frame(panels.per_key[2]) == _solid_frame(0x001F)
+
+
+def test_a_key_that_blinks_is_not_cached_and_blinks_as_before():
+    """DoD-6: a Set custom glyph and a blinking key state use the paths of
+    tasks 0044 and 0048. No slot of the pool is written."""
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    pad.step(0)
+    pad.step(1)
+    pixels = _rgb565_pixels_with_transparent_corner(0xF800)
+    serial.feed(_custom_glyph_frame_with_pixels(key_index=4, pixels=pixels))
+    pad.step(2000)
+    hid_device.feed(
+        _key_state_report(
+            4, 0x07E0, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, blink=True
+        )
+    )
+    pad.step(3000)
+    first = _last_frame(panels.per_key[4])
+    pad.step(3000 + BLINK_INTERVAL_US)
+    second = _last_frame(panels.per_key[4])
+    pad.step(3000 + 2 * BLINK_INTERVAL_US)
+
+    assert {_frame_pixel(first, 0), _frame_pixel(second, 0)} == {0x07E0, 0x0000}
+    assert _last_frame(panels.per_key[4]) == first
+    assert not any(pad._frame_cache.filled(slot) for slot in range(128))
+
+
+def test_a_shown_frame_that_then_blinks_alternates_with_black():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_store_frame_bytes(0, 0x07E0))
+    pad.step(1000)
+    serial.feed(_show_frames_bytes([0]))
+    pad.step(2000)
+
+    hid_device.feed(_key_state_report(0, 0x07E0, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID, blink=True))
+    pad.step(3000)
+    first = _last_frame(panels.per_key[0])
+    pad.step(3000 + BLINK_INTERVAL_US)
+    second = _last_frame(panels.per_key[0])
+
+    assert {first, second} == {_solid_frame(0x07E0), _solid_frame(0x0000)}
+
+
+def test_a_show_releases_an_open_batch_first():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_begin_batch_frame(0, 0b1))
+    pad.step(1000)
+    serial.feed(_store_frame_bytes(3, 0x4444))
+    pad.step(2000)
+    serial.feed(_show_frames_bytes([UNCHANGED, 3]))
+    pad.step(3000)
+    pad.step(3001)
+
+    assert pad._batch is None
+    assert _last_frame(panels.per_key[1]) == _solid_frame(0x4444)

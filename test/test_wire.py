@@ -472,3 +472,97 @@ def test_begin_batch_of_the_wrong_length_raises_and_the_next_frame_decodes():
         glyph_reader.feed(reader)
 
     assert glyph_reader.feed(reader).glyph_mask == 1
+
+
+def _framed_store_frame(slot, color, stream=b""):
+    writer = FakeWriter()
+    payload = bytes((slot, color & 0xFF, color >> 8)) + stream
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_FRAME, payload)
+    return bytes(writer.written)
+
+
+def _framed_show_frames(slots):
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES, bytes(slots))
+    return bytes(writer.written)
+
+
+def test_frame_types_follow_those_of_task_0060():
+    assert wire.MESSAGE_TYPE_STORE_FRAME == 8
+    assert wire.MESSAGE_TYPE_SHOW_FRAMES == 9
+    assert wire.MESSAGE_TYPE_SHOW_MISS == 10
+
+
+def test_store_frame_decodes_the_slot_the_color_and_the_inflated_glyph():
+    pixels = _patterned_pixels()
+    framed = _framed_store_frame(77, 0xF81F, zlib.compress(pixels, 9))
+
+    glyph_reader, reader = _read_all(framed)
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.StoreFrame)
+    assert (message.slot, message.color) == (77, 0xF81F)
+    assert message.pixels == pixels
+
+
+def test_store_frame_of_a_color_alone_has_no_pixels():
+    glyph_reader, reader = _read_all(_framed_store_frame(0, 0x07E0))
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.StoreFrame)
+    assert (message.slot, message.color, message.pixels) == (0, 0x07E0, None)
+
+
+def test_store_frame_that_does_not_inflate_raises_and_the_next_frame_decodes():
+    framed = _framed_store_frame(1, 0, b"not a zlib stream") + _framed_show_frames([1])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).slots == bytes((1,))
+
+
+def test_store_frame_shorter_than_its_header_is_dropped():
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_FRAME, b"\x01\x02")
+    framed = bytes(writer.written) + _framed_show_frames([3])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).slots == bytes((3,))
+
+
+def test_show_frames_decodes_a_slot_or_unchanged_for_each_key():
+    slots = [0, 127, wire.SLOT_UNCHANGED, 5, wire.SLOT_UNCHANGED, 64]
+    glyph_reader, reader = _read_all(_framed_show_frames(slots))
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.ShowFrames)
+    assert list(message.slots) == slots
+
+
+def test_show_frames_with_no_key_is_dropped():
+    framed = _framed_show_frames([]) + _framed_show_frames([2])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).slots == bytes((2,))
+
+
+def test_show_miss_payload_is_the_mask_of_the_missed_keys():
+    writer = FakeWriter()
+    wire.write_frame(
+        writer, wire.MESSAGE_TYPE_SHOW_MISS, wire.encode_show_miss(0b100101)
+    )
+
+    assert bytes(writer.written) == bytes((10, 1, 0, 0b100101))

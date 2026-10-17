@@ -92,7 +92,7 @@ type Injector interface {
 type LayerController interface {
 	// SetKey applies one setLayerKey message.
 	SetKey(layers.Update) error
-	// Press handles a single press on a key.
+	// Press handles a debounced press-down on a key.
 	Press(keyIndex byte)
 	// Active is the id of the open key, or nil for the top layer.
 	Active() *string
@@ -149,6 +149,10 @@ type Server struct {
 	// because the controller needs the server as its output.
 	layersMu sync.RWMutex
 	layers   LayerController
+	// layerPresses carries each press-down to layerPressLoop, in order, so
+	// a redraw that takes most of a second does not hold up the events that
+	// follow it.
+	layerPresses chan byte
 
 	// logf reports each setKeyState the server reads, applies, or cannot
 	// apply. It is never nil: NewServer sets a no-op, and SetLogf replaces
@@ -166,11 +170,12 @@ type Server struct {
 // receives.
 func NewServer(dev transport.Transport, injector Injector) *Server {
 	s := &Server{
-		dev:        dev,
-		injector:   injector,
-		clients:    make(map[*client]struct{}),
-		stateCache: make(map[byte]Message),
-		logf:       func(string, ...any) {},
+		dev:          dev,
+		injector:     injector,
+		clients:      make(map[*client]struct{}),
+		stateCache:   make(map[byte]Message),
+		logf:         func(string, ...any) {},
+		layerPresses: make(chan byte, layerPressQueue),
 		upgrader: websocket.Upgrader{
 			// The localhost bind and maxClients are this server's only
 			// access control (see the task spec's Non-goals); a browser
@@ -180,12 +185,8 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 	}
 	s.resolver = newClickResolver(func(keyIndex byte, name string) {
 		s.Broadcast(signalMessage(keyIndex, name))
-		if name == SignalSinglePress {
-			if l := s.layerController(); l != nil {
-				l.Press(keyIndex)
-			}
-		}
 	})
+	go s.layerPressLoop()
 	go s.dispatchLoop()
 	return s
 }
@@ -200,7 +201,7 @@ func (s *Server) SetLogf(logf func(format string, args ...any)) {
 	s.logf = logf
 }
 
-// SetLayers makes a single press open or close a child layer, and lets a
+// SetLayers makes a press open or close a child layer, and lets a
 // client's setLayerKey message change the layer tree. Call it before Run.
 // *Server is the layers.Out the controller draws through.
 func (s *Server) SetLayers(l LayerController) {
@@ -453,6 +454,7 @@ func (s *Server) writePump(c *client) {
 // also feeds s.resolver, which may itself broadcast a resolved
 // click-pattern signal.
 func (s *Server) dispatchLoop() {
+	defer close(s.layerPresses)
 	for {
 		msg, err := s.dev.ReadMessage()
 		if err != nil {
@@ -462,8 +464,41 @@ func (s *Server) dispatchLoop() {
 		case transport.MessageTypeEvent:
 			s.broadcast(eventMessage(msg.Event))
 			s.resolver.handleEvent(msg.Event)
+			if msg.Event.Type == transport.EventPress {
+				s.queueLayerPress(msg.Event.KeyIndex)
+			}
 		case transport.MessageTypeAudioChunk:
 			s.broadcastAudio(msg.AudioChunk)
+		}
+	}
+}
+
+// layerPressQueue is how many press-downs wait for the layer tree. A press
+// beyond it is dropped: nobody wants twenty layer changes replayed after a
+// slow redraw.
+const layerPressQueue = 16
+
+// queueLayerPress hands a press-down to layerPressLoop when a layer tree is
+// set. The firmware has already debounced the event, and the layer tree acts
+// on it at once: it waits for no release and no double-press window, because
+// a key it owns has no click pattern to wait for (task 0058).
+func (s *Server) queueLayerPress(keyIndex byte) {
+	if s.layerController() == nil {
+		return
+	}
+	select {
+	case s.layerPresses <- keyIndex:
+	default:
+		s.logf("layers: press on key %d dropped, %d presses already waiting", keyIndex, layerPressQueue)
+	}
+}
+
+// layerPressLoop applies queued press-downs to the layer tree one at a time,
+// in the order they arrived. It ends when dispatchLoop does.
+func (s *Server) layerPressLoop() {
+	for keyIndex := range s.layerPresses {
+		if l := s.layerController(); l != nil {
+			l.Press(keyIndex)
 		}
 	}
 }

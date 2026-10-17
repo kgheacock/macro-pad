@@ -64,7 +64,9 @@ ping-pong: check-circuitpy
 # 10 updates to key 4 while keys 0 to 2 blink), `burst` (DoD-6: 6 updates
 # back to back) or `sync` (task 0048's DoD-6: 10 updates to key 4 while all
 # six keys blink; it prints max skew, max span and max gap) or `batch` (task
-# 0060: six custom glyphs after Begin batch; it prints the push span). It puts a tracing code.py on the board, so run `make flash`
+# 0060: six custom glyphs after Begin batch; it prints the push span) or
+# `cached` (task 0061: store two sets of six frames, then show them in turn; it
+# prints `six keys in` and `push span`). It puts a tracing code.py on the board, so run `make flash`
 # afterward to restore the real one. It unmounts CIRCUITPY for the run,
 # because a mounted CIRCUITPY on macOS reloads the board and breaks CDC and
 # HID, and it mounts the volume again when the run ends, even if it failed.
@@ -103,6 +105,26 @@ dma-spike: check-circuitpy
 	echo "Waiting for the board to reload code.py and measure."; \
 	sleep 10; \
 	python3 tools/dma_spike.py read; \
+	status=$$?; \
+	diskutil mount /dev/$$dev >/dev/null; \
+	echo "Run 'make flash' to restore the real code.py."; \
+	exit $$status
+
+# `make slot-probe` measures the frame cache's pool (task 0061's DoD-1): the
+# time to allocate 128 slots, the free heap after, and the time of a 32 KB
+# copy. Run `make flash` first, so the board has the current firmware modules.
+# It puts a probe code.py on the board, so run `make flash` afterward to
+# restore the real one. Like `dma-spike`, it unmounts CIRCUITPY for the run and
+# mounts it again at the end.
+.PHONY: slot-probe
+slot-probe: check-circuitpy
+	python3 tools/slot_probe.py install $(CIRCUITPY_VOLUME)
+	sync
+	@dev=$$(diskutil info $(CIRCUITPY_VOLUME) | awk '/Device Identifier:/ {print $$3}'); \
+	diskutil unmount $(CIRCUITPY_VOLUME) || exit 1; \
+	echo "Waiting for the board to reload code.py and allocate the pool."; \
+	sleep 12; \
+	python3 tools/slot_probe.py read; \
 	status=$$?; \
 	diskutil mount /dev/$$dev >/dev/null; \
 	echo "Run 'make flash' to restore the real code.py."; \

@@ -214,3 +214,49 @@ def test_trace_codes_match_the_firmware_tracer():
     assert blink_trace.HOST_MESSAGE_DECODED == tracer_module.HOST_MESSAGE_DECODED
     assert blink_trace.PUSH_STARTED == tracer_module.PUSH_STARTED
     assert blink_trace.REFRESH_DONE == tracer_module.REFRESH_DONE
+
+
+def _batch_run(push_times_us, extra=()):
+    """Six glyphs decoded from 100 ms on, then six pushes at `push_times_us`.
+    The power-on paint of every key comes first."""
+    lines = [_trace_line(blink_trace.PUSH_STARTED, key, key * 1000) for key in range(6)]
+    lines += [
+        _trace_line(blink_trace.CUSTOM_GLYPH_DECODED, key, 100_000 + key * 100_000)
+        for key in range(6)
+    ]
+    lines += [
+        _trace_line(blink_trace.PUSH_STARTED, key, t) for key, t in enumerate(push_times_us)
+    ]
+    return list(lines) + list(extra)
+
+
+def test_batch_run_with_pushes_close_together_passes_and_prints_the_span():
+    times = [1_000_000, 1_000_020, 1_000_040, 1_030_000, 1_030_010, 1_030_020]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(_batch_run(times)), "batch", out) is True
+    assert "push span 30.0 ms" in out.getvalue()
+
+
+def test_batch_run_with_pushes_spread_over_the_run_fails():
+    times = [76_000 + 150_000 * key for key in range(6)]
+    times = [t + 700_000 for t in times]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(_batch_run(times)), "batch", out) is False
+    assert "push span 750.0 ms" in out.getvalue()
+
+
+def test_batch_run_that_timed_out_fails_even_when_the_pushes_are_together():
+    times = [1_000_000 + 1000 * key for key in range(6)]
+    extra = [_trace_line(blink_trace.BATCH_TIMED_OUT, 0xFF, 1_000_000)]
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(_batch_run(times, extra)), "batch", out) is False
+    assert "time-out" in out.getvalue()
+
+
+def test_batch_run_missing_a_key_fails():
+    records = blink_trace.load_trace(_batch_run([1_000_000 + 1000 * key for key in range(5)]))
+
+    assert blink_trace.report(records, "batch", io.StringIO()) is False

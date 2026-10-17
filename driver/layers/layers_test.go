@@ -3,6 +3,7 @@ package layers
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -23,6 +24,10 @@ type fakeOut struct {
 	states  []transport.KeyState
 	glyphs  map[byte][]byte
 	changes []*string
+	// calls is every send in order: "batch", "glyph N", "state N".
+	calls []string
+	// batches is the masks of every Begin batch.
+	batches [][2]byte
 }
 
 func newFakeOut() *fakeOut { return &fakeOut{glyphs: make(map[byte][]byte)} }
@@ -31,6 +36,7 @@ func (f *fakeOut) SetKeyState(ks transport.KeyState) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.states = append(f.states, ks)
+	f.calls = append(f.calls, fmt.Sprintf("state %d", ks.KeyIndex))
 	return nil
 }
 
@@ -38,6 +44,15 @@ func (f *fakeOut) SetCustomGlyph(key byte, png []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.glyphs[key] = png
+	f.calls = append(f.calls, fmt.Sprintf("glyph %d", key))
+	return nil
+}
+
+func (f *fakeOut) BeginBatch(glyphMask, stateMask byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.batches = append(f.batches, [2]byte{glyphMask, stateMask})
+	f.calls = append(f.calls, "batch")
 	return nil
 }
 
@@ -45,6 +60,16 @@ func (f *fakeOut) LayerChanged(active *string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.changes = append(f.changes, active)
+}
+
+// takeCalls returns every send since the last takeCalls, in order, and the
+// masks of the Begin batch messages among them, and clears both.
+func (f *fakeOut) takeCalls() ([]string, [][2]byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls, batches := f.calls, f.batches
+	f.calls, f.batches = nil, nil
+	return calls, batches
 }
 
 // take returns the key states sent since the last take, by key index, and
@@ -566,5 +591,90 @@ func TestMissingIconStillShowsColor(t *testing.T) {
 	ks := out.take()[0]
 	if ks.Color != ColorDone || ks.EmojiID == transport.CustomGlyphSentinelEmojiID {
 		t.Errorf("got %+v, want the color alone", ks)
+	}
+}
+
+func TestBatchLayerChangeSendsBeginBatchFirst(t *testing.T) {
+	out := newFakeOut()
+	c := open(t, "", out)
+	sixKeys(t, c)
+	out.takeCalls()
+
+	c.Press(0) // six keys change
+
+	calls, batches := out.takeCalls()
+	if len(batches) != 1 {
+		t.Fatalf("sent %d Begin batch messages, want 1: %v", len(batches), calls)
+	}
+	if calls[0] != "batch" {
+		t.Errorf("first send is %q, want batch: %v", calls[0], calls)
+	}
+	// Keys 0 (a count) and 3 (the shift icon) get a glyph. All six get a key
+	// state: the child without an icon, and the three blank keys, send
+	// a state alone.
+	if want := [2]byte{1<<0 | 1<<UpKey, 0b111111}; batches[0] != want {
+		t.Errorf("masks %#08b %#08b, want %#08b %#08b", batches[0][0], batches[0][1], want[0], want[1])
+	}
+	want := []string{
+		"batch", "glyph 0", "state 0", "state 1", "state 2", "glyph 3", "state 3", "state 4", "state 5",
+	}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Errorf("sends %v, want %v", calls, want)
+	}
+}
+
+func TestBatchOneKeyChangeSendsNoBeginBatch(t *testing.T) {
+	out := newFakeOut()
+	c := open(t, "", out)
+	sixKeys(t, c)
+	out.takeCalls()
+
+	if err := c.SetKey(Update{ID: "dev", Status: StatusError, IconRef: "dev.png"}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, batches := out.takeCalls()
+	if len(batches) != 0 {
+		t.Errorf("sent Begin batch %v for one key", batches)
+	}
+	if got, want := strings.Join(calls, ","), "glyph 1,state 1"; got != want {
+		t.Errorf("sends %q, want %q", got, want)
+	}
+
+	// A change that sends nothing sends no Begin batch either.
+	if err := c.SetKey(Update{ID: "dev", Status: StatusError, IconRef: "dev.png"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := out.takeCalls(); len(calls) != 0 {
+		t.Errorf("sent %v for no change", calls)
+	}
+}
+
+func TestBatchTwoKeyChangeSendsOneBeginBatch(t *testing.T) {
+	dir := t.TempDir()
+	first := open(t, dir, newFakeOut())
+	for _, u := range []Update{
+		{ID: "github", Status: StatusRunning, IconRef: "github.png"},
+		{ID: "dev", Status: StatusDone},
+	} {
+		if err := first.SetKey(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new controller draws the two saved keys, and the others stay as
+	// they are: two keys change.
+	out := newFakeOut()
+	open(t, dir, out)
+
+	calls, batches := out.takeCalls()
+	if want := [][2]byte{{0b01, 0b11}}; len(batches) != 1 || batches[0] != want[0] {
+		t.Errorf("Begin batch masks %v, want %v", batches, want)
+	}
+	if got, want := strings.Join(calls, ","), "batch,glyph 0,state 0,state 1"; got != want {
+		t.Errorf("sends %q, want %q", got, want)
 	}
 }

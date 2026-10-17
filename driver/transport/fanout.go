@@ -115,6 +115,10 @@ func (r *fanoutReader) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	return r.t.SendCustomGlyph(keyIndex, pixels)
 }
 
+func (r *fanoutReader) BeginBatch(glyphMask, stateMask byte) error {
+	return r.t.BeginBatch(glyphMask, stateMask)
+}
+
 func (r *fanoutReader) ReadMessage() (Message, error) {
 	msg, ok := <-r.sub.ch
 	if !ok {

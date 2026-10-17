@@ -28,6 +28,10 @@ func (f *fakeTransport) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	return nil
 }
 
+func (f *fakeTransport) BeginBatch(glyphMask, stateMask byte) error {
+	return nil
+}
+
 func (f *fakeTransport) ReadMessage() (transport.Message, error) {
 	return f.readMsg, f.readErr
 }

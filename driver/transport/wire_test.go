@@ -168,3 +168,24 @@ func TestCompressedCustomGlyph_RejectsAStreamOfTheWrongInflatedSize(t *testing.T
 		t.Fatal("decodeCompressedCustomGlyph with a corrupt stream returned no error")
 	}
 }
+
+func TestBeginBatchFrameRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeFrame(&buf, MessageTypeBeginBatch, encodeBeginBatch(0b101010, 0b010101)); err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{7, 2, 0, 0b101010, 0b010101}; !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("frame = % x, want % x", buf.Bytes(), want)
+	}
+	typ, payload, err := readFrame(&buf)
+	if err != nil || typ != MessageTypeBeginBatch {
+		t.Fatalf("readFrame = %v, %v", typ, err)
+	}
+	g, s, err := decodeBeginBatch(payload)
+	if err != nil || g != 0b101010 || s != 0b010101 {
+		t.Fatalf("decodeBeginBatch = %#b, %#b, %v", g, s, err)
+	}
+	if _, _, err := decodeBeginBatch([]byte{1}); err == nil {
+		t.Fatal("decodeBeginBatch accepted a one-byte payload")
+	}
+}

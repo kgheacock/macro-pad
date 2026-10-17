@@ -424,3 +424,51 @@ def test_compressed_glyph_frame_arrives_over_several_feeds():
 
     assert glyph.key_index == 4
     assert glyph.pixels == _patterned_pixels()
+
+
+def _framed_begin_batch(glyph_mask, state_mask):
+    writer = FakeWriter()
+    wire.write_frame(
+        writer, wire.MESSAGE_TYPE_BEGIN_BATCH, bytes((glyph_mask, state_mask))
+    )
+    return bytes(writer.written)
+
+
+def test_begin_batch_frame_decodes_to_its_two_masks():
+    framed = _framed_begin_batch(0b101010, 0b010101)
+    reader = _StallingReader(framed, chunk_size=len(framed))
+
+    message = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000)).feed(reader)
+
+    assert isinstance(message, wire.BeginBatch)
+    assert message.glyph_mask == 0b101010
+    assert message.state_mask == 0b010101
+    assert framed[0] == wire.MESSAGE_TYPE_BEGIN_BATCH == 7
+
+
+def test_begin_batch_between_two_glyphs_leaves_both_glyphs_intact():
+    framed = _framed_glyph(1) + _framed_begin_batch(3, 3) + _framed_glyph(2)
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    first = glyph_reader.feed(reader)
+    batch = glyph_reader.feed(reader)
+    second = glyph_reader.feed(reader)
+
+    assert first.key_index == 1
+    assert (batch.glyph_mask, batch.state_mask) == (3, 3)
+    assert second.key_index == 2
+    assert second.pixels == bytes([0xAB]) * wire.CUSTOM_GLYPH_PIXELS_SIZE
+
+
+def test_begin_batch_of_the_wrong_length_raises_and_the_next_frame_decodes():
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_BEGIN_BATCH, b"\x01\x02\x03")
+    framed = bytes(writer.written) + _framed_begin_batch(1, 1)
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).glyph_mask == 1

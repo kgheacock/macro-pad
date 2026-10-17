@@ -38,6 +38,33 @@ DEFAULT_EMOJI_ID = 0
 # during task 0031's key-0 bring-up). 500ms gives a 1Hz blink.
 BLINK_INTERVAL_US = 500_000
 
+# How long a Begin batch waits for its data before the board draws what it has
+# (task 0060).
+BATCH_TIMEOUT_US = 2_000_000
+_NO_KEY = 0xFF
+
+
+class _Batch:
+    """One open Begin batch: the keys it holds, and the data still to come.
+
+    `pending_glyph` and `pending_state` are masks with bit `k` set while key
+    `k` still waits for its glyph or key state. `touched` is the keys that
+    have a frame to draw at the release.
+    """
+
+    def __init__(self, glyph_mask, state_mask, deadline_us):
+        self.keys_mask = glyph_mask | state_mask
+        self.pending_glyph = glyph_mask
+        self.pending_state = state_mask
+        self.deadline_us = deadline_us
+        self.touched = set()
+
+    def holds(self, key_index):
+        return (self.keys_mask >> key_index) & 1 == 1
+
+    def complete(self):
+        return not self.pending_glyph and not self.pending_state
+
 
 class Backlight:
     """One key's PWM backlight, addressed as a 0.0 to 1.0 fraction.
@@ -160,15 +187,20 @@ class MacroPad:
         self._active_keys = []
         self._active_frames = []
         self.resyncs = 0
+        # The open Begin batch, or `None`.
+        self._batch = None
 
     def step(self, now_us):
         """Run one iteration of the loop."""
         self._service_pushes()
+        # The CDC channel first: a Begin batch must open before the key
+        # states it names, which arrive over HID with no order against it.
+        custom_glyph_message = self._apply_cdc_message(now_us)
         host_message = self._apply_host_report(now_us)
-        custom_glyph_message = self._apply_custom_glyph()
         key_event = self._scan_switches(now_us)
 
         self._render_dirty_keys(now_us)
+        self._release_batch_if_done(now_us)
         self._service_pushes()
 
         if host_message or custom_glyph_message or key_event:
@@ -279,9 +311,9 @@ class MacroPad:
         for key_index in keys:
             self._record_trace(tracer_module.PUSH_STARTED, key_index)
 
-    def _record_trace(self, code, key_index):
+    def _record_trace(self, code, key_index, payload=0):
         if self._tracer is not None:
-            self._tracer.record(code, key_index, 0, time.monotonic_ns() // 1000)
+            self._tracer.record(code, key_index, payload, time.monotonic_ns() // 1000)
 
     def _write_trace_record(self, record_bytes):
         wire.write_frame(self._serial, wire.MESSAGE_TYPE_TRACE, record_bytes)
@@ -330,24 +362,29 @@ class MacroPad:
         if message.emoji_id != wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID:
             key_state.pixels = None
         self._dirty.add(message.key_index)
+        if self._batch is not None:
+            self._batch.pending_state &= ~(1 << message.key_index)
         return True
 
-    def _apply_custom_glyph(self):
-        """Decode one Set custom glyph message from the CDC channel and
-        update its key.
+    def _apply_cdc_message(self, now_us):
+        """Read one message from the CDC channel: a Set custom glyph, which
+        updates its key, or a Begin batch, which opens a batch.
 
-        Returns True when a key's state changed. A message of the wrong
-        length, or naming a key index this pad does not have, is dropped,
-        like `_apply_host_report`.
+        Returns True when a message arrived that changed the board. A message
+        of the wrong length, or a glyph naming a key index this pad does not
+        have, is dropped, like `_apply_host_report`.
         """
         try:
             glyph = self._custom_glyph_reader.feed(self._serial)
         except ValueError:
-            # A glyph payload of the wrong length. The reader has already
+            # A payload of the wrong length. The reader has already
             # consumed the whole frame, so the next message starts clean.
             return False
         if glyph is None:
             return False
+        if isinstance(glyph, wire.BeginBatch):
+            self._begin_batch(glyph, now_us)
+            return True
 
         if self._tracer is not None:
             self._tracer.record(
@@ -364,7 +401,64 @@ class MacroPad:
         key_state.emoji_id = wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
         key_state.pixels = glyph.pixels
         self._dirty.add(glyph.key_index)
+        if self._batch is not None:
+            self._batch.pending_glyph &= ~(1 << glyph.key_index)
         return True
+
+    def _begin_batch(self, message, now_us):
+        """Open a batch. An open one is released first, with what it has.
+
+        The keys the batch names hold their frames until every named glyph
+        and key state has arrived, or `BATCH_TIMEOUT_US` has passed (task
+        0060). A frame of a named key that waits in the queue, and has not
+        started, leaves the queue: it would draw before the others. The key
+        draws again at the release, from its current state.
+        """
+        if self._batch is not None:
+            self._release_batch(now_us)
+        limit = (1 << len(self.key_states)) - 1
+        batch = _Batch(
+            message.glyph_mask & limit,
+            message.state_mask & limit,
+            now_us + BATCH_TIMEOUT_US,
+        )
+        for index in range(len(self.key_states)):
+            if batch.holds(index) and self._queued_frame[index] is not None:
+                self._push_queue.remove(index)
+                self._queued_frame[index] = None
+                batch.touched.add(index)
+        self._batch = batch
+
+    def _release_batch_if_done(self, now_us):
+        batch = self._batch
+        if batch is None:
+            return
+        if batch.complete():
+            self._release_batch(now_us)
+        elif now_us >= batch.deadline_us:
+            self._record_trace(
+                tracer_module.BATCH_TIMED_OUT,
+                _NO_KEY,
+                batch.pending_glyph | (batch.pending_state << 8),
+            )
+            self._release_batch(now_us)
+
+    def _release_batch(self, now_us):
+        """Queue the frames of the held keys in one pass, so that the pushes
+        start together. A blinking key draws the frame of the blink slot at
+        this moment.
+        """
+        batch = self._batch
+        self._batch = None
+        blink_on = (now_us // BLINK_INTERVAL_US) % 2 == 0
+        for index in sorted(batch.touched):
+            display_render.render_key(
+                self._ports[index],
+                self.key_states[index],
+                self._tracer,
+                index,
+                blink_on=blink_on,
+            )
 
     @staticmethod
     def _strip_report_id(report):
@@ -434,7 +528,15 @@ class MacroPad:
         is not drawn (task 0048).
         """
         blink_on = (now_us // BLINK_INTERVAL_US) % 2 == 0
+        batch = self._batch
         for index, key_state in enumerate(self.key_states):
+            if batch is not None and batch.holds(index):
+                # A held key composes its frames now and draws at the release.
+                if index in self._dirty:
+                    display_render.prepare_key(key_state, self._tracer, index)
+                    batch.touched.add(index)
+                continue
+
             if index not in self._dirty and not display_render.blink_is_due(
                 key_state, blink_on
             ):

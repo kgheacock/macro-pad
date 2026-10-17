@@ -833,15 +833,272 @@ def test_custom_glyph_wakes_backlight():
     assert all(backlight.duty_cycle == 1.0 for backlight in backlights)
 
 
+def _begin_batch_frame(glyph_mask, state_mask):
+    """The raw framed bytes of a Begin batch message (task 0060)."""
+    writer = FakeSerial()
+    wire.write_frame(
+        writer, wire.MESSAGE_TYPE_BEGIN_BATCH, bytes((glyph_mask, state_mask))
+    )
+    return bytes(writer.written)
 
 
+ALL_KEYS = 0b111111
 
 
+def _paint_power_on(pad):
+    """Run the power-on paint of all six keys to the end."""
+    pad.step(0)
+    pad.step(1)
 
 
+def _frame_counts(panels):
+    return [len(panel.frames) for panel in panels.per_key]
 
 
+def test_batch_draws_no_key_until_the_last_glyph_and_key_state_arrive():
+    """DoD-3: five of six glyphs and five of six key states change no panel."""
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    assert _frame_counts(panels) == [1] * 6
 
+    serial.feed(_begin_batch_frame(ALL_KEYS, ALL_KEYS))
+    pad.step(1000)
+    for key in range(5):
+        serial.feed(_custom_glyph_frame(key_index=key, fill_byte=0x11 + key))
+        pad.step(2000 + key)
+        hid_device.feed(_key_state_report(key, 0x0000, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID))
+        pad.step(3000 + key)
+
+    assert _frame_counts(panels) == [1] * 6
+
+    serial.feed(_custom_glyph_frame(key_index=5, fill_byte=0x22))
+    pad.step(4000)
+    assert _frame_counts(panels) == [1] * 6  # the glyph of key 5 is in, its state is not
+
+    hid_device.feed(_key_state_report(5, 0x0000, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID))
+    pad.step(5000)
+
+    assert _frame_counts(panels) == [2] * 6
+    assert panels.per_key[3].frames[-1] == _custom_glyph_pixels(0x14)
+
+
+def test_batch_queues_every_key_in_one_pass_so_the_pushes_start_in_two_groups():
+    pad, bus, hid_device = _parallel_pad()
+    serial = pad._serial
+    _paint_power_on(pad)
+    groups_before = len(bus.groups)
+
+    serial.feed(_begin_batch_frame(0, ALL_KEYS))
+    pad.step(1000)
+    for key in range(6):
+        hid_device.feed(_key_state_report(key, 0xF800, 0))
+        pad.step(2000 + key)
+        if key < 5:
+            assert len(bus.groups) == groups_before
+
+    assert bus.groups[groups_before:] == [[0, 1, 2], [3, 4, 5]]
+
+
+def test_batch_of_state_only_keys_does_not_wait_for_a_glyph():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b11))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(2000)
+    assert _frame_counts(panels) == [1] * 6
+    hid_device.feed(_key_state_report(1, 0x07E0, 0))
+    pad.step(3000)
+
+    assert _frame_counts(panels) == [2, 2, 1, 1, 1, 1]
+    assert panels.per_key[0].frames[-1] == _solid_frame(0xF800)
+    assert panels.per_key[1].frames[-1] == _solid_frame(0x07E0)
+
+
+def test_batch_is_released_after_two_seconds_with_what_the_board_has():
+    """DoD-4: a fake clock steps past 2 s, the board draws the keys it has and
+    records the time-out with the masks that were still pending.
+    """
+    tracer = _FakeTracer()
+    pad, _, panels, _, hid_device, serial = _build_pad(tracer=tracer)
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b111))
+    pad.step(10_000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(20_000)
+    hid_device.feed(_key_state_report(1, 0x07E0, 0))
+    pad.step(30_000)  # key 2 never arrives
+    assert _frame_counts(panels) == [1] * 6
+
+    pad.step(10_000 + 2_000_000 - 1)
+    assert _frame_counts(panels) == [1] * 6
+    assert not any(code == tracer_module.BATCH_TIMED_OUT for code, _, _ in tracer.records)
+
+    pad.step(10_000 + 2_000_000)
+
+    assert _frame_counts(panels) == [2, 2, 1, 1, 1, 1]
+    timeouts = [r for r in tracer.records if r[0] == tracer_module.BATCH_TIMED_OUT]
+    assert timeouts == [(tracer_module.BATCH_TIMED_OUT, 0xFF, 0b100 << 8)]
+
+    # The batch is closed: a later key state for key 2 draws at once.
+    hid_device.feed(_key_state_report(2, 0x001F, 0))
+    pad.step(3_000_000)
+    assert _frame_counts(panels)[2] == 2
+
+
+def test_a_completed_batch_records_no_time_out():
+    tracer = _FakeTracer()
+    pad, _, _, _, hid_device, serial = _build_pad(tracer=tracer)
+    _paint_power_on(pad)
+    serial.feed(_begin_batch_frame(0, 0b1))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(2000)
+    pad.step(5_000_000)
+
+    assert not any(code == tracer_module.BATCH_TIMED_OUT for code, _, _ in tracer.records)
+
+
+def test_key_outside_the_masks_draws_at_once_while_a_batch_is_open():
+    """DoD-5."""
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0b11, 0b11))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(4, 0xF800, 0))
+    pad.step(2000)
+    assert panels.per_key[4].frames[-1] == _solid_frame(0xF800)
+    assert len(panels.per_key[4].frames) == 2
+
+    serial.feed(_custom_glyph_frame(key_index=5, fill_byte=0x33))
+    pad.step(3000)
+    assert panels.per_key[5].frames[-1] == _custom_glyph_pixels(0x33)
+
+    # The named keys still wait.
+    hid_device.feed(_key_state_report(0, 0x07E0, 0))
+    pad.step(4000)
+    assert len(panels.per_key[0].frames) == 1
+
+
+def _blinking_batch_pad_with_release_at(release_us):
+    """Keys 1 and 2 blink in one batch. Key 1's state comes in slot 0, and
+    key 2's state comes at `release_us`, which completes the batch.
+    """
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_begin_batch_frame(0, 0b110))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(1, 0x001F, 0, blink=True))
+    pad.step(100_000)
+    assert len(panels.per_key[1].frames) == 1
+    hid_device.feed(_key_state_report(2, 0x001F, 0, blink=True))
+    pad.step(release_us)
+    return pad, panels
+
+
+def test_blinking_keys_of_a_batch_draw_the_blink_slot_of_the_release():
+    """DoD-6: released in an even slot, both keys draw "on"; released in an odd
+    slot, both draw "off", and both flip together at the next slot.
+    """
+    _, panels = _blinking_batch_pad_with_release_at(200_000)  # slot 0
+    assert _last_frame(panels.per_key[1]) == _solid_frame(0x001F)
+    assert _last_frame(panels.per_key[2]) == _solid_frame(0x001F)
+
+    pad, panels = _blinking_batch_pad_with_release_at(BLINK_INTERVAL_US + 50_000)  # slot 1
+    assert len(panels.per_key[1].frames) == 2
+    assert _last_frame(panels.per_key[1]) == _solid_frame(0x0000)
+    assert _last_frame(panels.per_key[2]) == _solid_frame(0x0000)
+
+    pad.step(2 * BLINK_INTERVAL_US)  # slot 2
+    assert _last_frame(panels.per_key[1]) == _solid_frame(0x001F)
+    assert _last_frame(panels.per_key[2]) == _solid_frame(0x001F)
+
+
+def test_a_new_batch_releases_the_open_one_first():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b11))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(2000)
+    assert len(panels.per_key[0].frames) == 1  # key 1 is missing
+
+    serial.feed(_begin_batch_frame(0, 0b1000))
+    pad.step(3000)
+
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0xF800)
+    assert len(panels.per_key[1].frames) == 1  # nothing arrived for it
+
+    hid_device.feed(_key_state_report(3, 0x07E0, 0))
+    pad.step(4000)
+    assert _last_frame(panels.per_key[3]) == _solid_frame(0x07E0)
+
+
+def test_a_batch_withdraws_a_waiting_frame_of_a_named_key():
+    """A frame that waits in the queue would draw before the others. It
+    leaves the queue, and the key draws again at the release.
+    """
+    panels = _slow_panels(polls_to_finish=3)
+    pad, _, _, _, hid_device, serial = _build_pad(panels=panels)
+    pad.step(0)  # key 0 on the wire; keys 1 to 5 wait in the queue
+    assert not panels.per_key[3].frames
+
+    serial.feed(_begin_batch_frame(0, 0b1000))
+    pad.step(1000)
+    _steps(pad, 60, now_us=2000)
+    assert panels.per_key[3].frames == []  # held, though it was due
+
+    hid_device.feed(_key_state_report(3, 0xF800, 0))
+    pad.step(3000)
+    _steps(pad, 60, now_us=3000)
+
+    assert panels.per_key[3].frames == [_solid_frame(0xF800)]
+    assert all(len(panels.per_key[key].frames) == 1 for key in (0, 1, 2, 4, 5))
+
+
+def test_a_key_state_that_arrives_with_the_begin_batch_counts():
+    """HID and CDC have no common order. Both arrive in one step, and the
+    key state still belongs to the batch.
+    """
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b11))
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(1000)
+    assert len(panels.per_key[0].frames) == 1
+
+    hid_device.feed(_key_state_report(1, 0x07E0, 0))
+    pad.step(2000)
+    assert _frame_counts(panels) == [2, 2, 1, 1, 1, 1]
+
+
+def test_an_empty_batch_opens_and_closes_at_once():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_begin_batch_frame(0, 0))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(2, 0xF800, 0))
+    pad.step(2000)
+
+    assert len(panels.per_key[2].frames) == 2
+
+
+def test_a_batch_of_the_wrong_length_is_dropped():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    writer = FakeSerial()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_BEGIN_BATCH, b"\x01")
+    serial.feed(bytes(writer.written))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(2, 0xF800, 0))
+    pad.step(2000)
+
+    assert len(panels.per_key[2].frames) == 2
 
 def test_update_keeps_phase():
     """An update to a blinking key draws the frame of the current slot, with

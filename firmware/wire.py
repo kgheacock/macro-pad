@@ -26,6 +26,9 @@ MESSAGE_TYPE_TRACE = 4  # docs/wire-protocol.md's Framing type registry
 MESSAGE_TYPE_SET_CUSTOM_GLYPH = 5  # docs/wire-protocol.md's Framing type registry
 # Same image as type 5, as a zlib stream (task 0058).
 MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED = 6
+# Begin batch: names the keys whose update the board draws together (task 0060).
+MESSAGE_TYPE_BEGIN_BATCH = 7
+BEGIN_BATCH_PAYLOAD_SIZE = 2  # glyph mask + key state mask
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -166,6 +169,17 @@ def decode_custom_glyph(payload):
     return CustomGlyph(key_index=payload[0], pixels=bytes(payload[1:]))
 
 
+class BeginBatch:
+    """One decoded Begin batch message. Bit `k` of `glyph_mask` says key `k`
+    gets a Set custom glyph, and bit `k` of `state_mask` says it gets a key
+    state. See "Begin batch" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, glyph_mask, state_mask):
+        self.glyph_mask = glyph_mask
+        self.state_mask = state_mask
+
+
 def _inflate_glyph(stream):
     """Inflate a type 6 zlib stream to a glyph's pixel buffer.
 
@@ -219,7 +233,8 @@ class CustomGlyphReader:
         """Read whatever is available from `reader`.
 
         Returns a decoded `CustomGlyph` once a full Set custom glyph
-        frame has arrived, `None` otherwise. A frame of a type this
+        frame has arrived, a `BeginBatch` once a full Begin batch frame
+        has arrived, `None` otherwise. A frame of a type this
         reader does not know is dropped, by its declared length, matching
         `driver/transport/wire.go`'s `readFrame`/`decodeMessage` split. A
         glyph frame of the wrong length is dropped the same way, and then
@@ -265,9 +280,17 @@ class CustomGlyphReader:
                 self._frame_type = frame_type
                 self._total = FRAME_HEADER_SIZE + length
                 return False
+            if (
+                frame_type == MESSAGE_TYPE_BEGIN_BATCH
+                and length == BEGIN_BATCH_PAYLOAD_SIZE
+            ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
+                return False
             self._bad_length = frame_type in (
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH,
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
+                MESSAGE_TYPE_BEGIN_BATCH,
             )
             self._bad_length_size = length
             self._filled = 0
@@ -283,6 +306,11 @@ class CustomGlyphReader:
         if self._filled:
             total = self._filled
             self._filled = 0
+            if self._frame_type == MESSAGE_TYPE_BEGIN_BATCH:
+                return BeginBatch(
+                    glyph_mask=self._frame[FRAME_HEADER_SIZE],
+                    state_mask=self._frame[FRAME_HEADER_SIZE + 1],
+                )
             key_index = self._frame[FRAME_HEADER_SIZE]
             stream = self._view[FRAME_HEADER_SIZE + 1 : total]
             if self._frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH:
@@ -291,8 +319,8 @@ class CustomGlyphReader:
         if self._bad_length:
             self._bad_length = False
             raise ValueError(
-                "custom glyph payload is {} bytes, want {}".format(
-                    self._bad_length_size, CUSTOM_GLYPH_PAYLOAD_SIZE
+                "frame payload is {} bytes, which its type does not allow".format(
+                    self._bad_length_size
                 )
             )
         return None

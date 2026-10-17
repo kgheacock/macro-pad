@@ -175,6 +175,16 @@ def blink_is_due(key_state: KeyState, blink_on: bool) -> bool:
     return key_state.blink and key_state._blink_visible != blink_on
 
 
+def prepare_key(key_state: KeyState, tracer=None, key_index=None) -> None:
+    """Build `key_state`'s cached frames and submit nothing.
+
+    `app.MacroPad` calls this for a key held by a batch (task 0060), so the
+    composing happens as the data arrives, and the later `render_key` of the
+    release only picks the cached frame of the blink slot.
+    """
+    _build_frames(key_state, tracer, key_index)
+
+
 def render_key(
     panel, key_state: KeyState, tracer=None, key_index=None, blink_on=True
 ) -> None:

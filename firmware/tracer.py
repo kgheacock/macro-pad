@@ -33,6 +33,10 @@ PERSIST_DONE = 6
 GLYPH_BUILT = 7
 REFRESH_DONE = 8
 PUSH_STARTED = 9
+# Task 0060: a batch that the board released after 2 s, with data missing.
+# The key is 0xFF, and the payload is the pending masks: the glyph mask in the
+# low byte and the key state mask in the high byte.
+BATCH_TIMED_OUT = 10
 
 
 class Tracer:

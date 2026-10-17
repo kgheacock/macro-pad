@@ -145,6 +145,11 @@ type Server struct {
 	// broadcast to arrive. See task 0036.
 	stateCache map[byte]Message
 
+	// frameMu guards frames, the frames the layer controller stored on the
+	// board by slot (task 0061).
+	frameMu sync.Mutex
+	frames  map[byte]frameRecord
+
 	// layersMu guards layers, which SetLayers sets after NewServer
 	// because the controller needs the server as its output.
 	layersMu sync.RWMutex
@@ -174,6 +179,7 @@ func NewServer(dev transport.Transport, injector Injector) *Server {
 		injector:     injector,
 		clients:      make(map[*client]struct{}),
 		stateCache:   make(map[byte]Message),
+		frames:       make(map[byte]frameRecord),
 		logf:         func(string, ...any) {},
 		layerPresses: make(chan byte, layerPressQueue),
 		upgrader: websocket.Upgrader{
@@ -245,6 +251,74 @@ func (s *Server) BeginBatch(glyphMask, stateMask byte) error {
 		s.logf("beginBatch failed: %v", err)
 	}
 	return err
+}
+
+// frameRecord is a frame the layer controller stored on the board: the PNG
+// and color that a client needs to draw the key when the frame is shown.
+type frameRecord struct {
+	png   []byte
+	color uint16
+}
+
+// StoreFrame composes png over color into the board's slot. It draws nothing,
+// so no client hears of it until the frame is shown. A nil png is a frame of
+// the color alone. It implements layers.FrameOut (task 0061).
+func (s *Server) StoreFrame(slot byte, color uint16, png []byte) error {
+	var pixels []byte
+	if len(png) > 0 {
+		var err error
+		if pixels, err = transport.DecodePNGToRGB565(png); err != nil {
+			return err
+		}
+	}
+	if err := s.dev.StoreFrame(slot, color, pixels); err != nil {
+		s.logf("storeFrame slot=%d failed: %v", slot, err)
+		return err
+	}
+	s.frameMu.Lock()
+	s.frames[slot] = frameRecord{png: png, color: color}
+	s.frameMu.Unlock()
+	return nil
+}
+
+// ShowFrames draws the stored frames on the board, one slot for each key, and
+// tells every client what each named key now shows, as a setCustomGlyph and a
+// setKeyState message, so the virtual pad needs no message of its own. It
+// implements layers.FrameOut (task 0061).
+func (s *Server) ShowFrames(slots []byte) error {
+	if err := s.dev.ShowFrames(slots); err != nil {
+		s.logf("showFrames failed: %v", err)
+		return err
+	}
+	for key, slot := range slots {
+		if slot == transport.SlotUnchanged {
+			continue
+		}
+		s.frameMu.Lock()
+		rec, ok := s.frames[slot]
+		s.frameMu.Unlock()
+		if !ok {
+			continue
+		}
+		keyIndex := byte(key)
+		emoji := byte(0)
+		if len(rec.png) > 0 {
+			emoji = transport.CustomGlyphSentinelEmojiID
+			glyph := Message{
+				Kind:           KindSetCustomGlyph,
+				SetCustomGlyph: &SetCustomGlyphPayload{KeyIndex: keyIndex, Image: rec.png},
+			}
+			s.rememberState(keyIndex, glyph)
+			s.broadcast(glyph)
+		}
+		state := Message{
+			Kind:        KindSetKeyState,
+			SetKeyState: &SetKeyStatePayload{KeyIndex: keyIndex, Color: rec.color, EmojiID: emoji},
+		}
+		s.rememberState(keyIndex, state)
+		s.broadcast(state)
+	}
+	return nil
 }
 
 // LayerChanged tells every client which layer is active.

@@ -20,7 +20,7 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox send CHANNEL MESSAGE` | Send one message to `CHANNEL`. |
 | `inbox send MESSAGE` | Send one message to the channel of the working directory. |
 | `inbox pipe [CHANNEL]` | Send each line of standard input as one message. |
-| `inbox list [CHANNEL \| --all-channels] [--seen] [--json] [-n N]` | List unseen messages, oldest first. `--seen` adds seen ones (a leading `*` marks the unseen). `-n N` keeps the newest N. Default scope: the inferred channel, else every channel. |
+| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | List messages, oldest first, seen and unseen (a leading `*` marks the unseen). `--unseen` lists only the unseen. `-n N` keeps the newest N. Default scope: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Print the unseen count. Same default scope as `list`. |
 | `inbox channels [--json]` | Print each channel with unseen messages, its count, and the time of its newest message. |
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |

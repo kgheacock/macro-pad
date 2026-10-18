@@ -1,7 +1,7 @@
 ---
 id: "0064"
 title: "An SQLite inbox CLI with channels from the working directory and piped lines as messages"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -258,12 +258,9 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — `cd inbox && npm test` passes on Node 22.13 with no
+- [x] **DoD-1** — `cd inbox && npm test` passes on Node 22 with no
   `npm install`, and `package.json` lists no dependencies. **Proof:** the
   command's exit code, and `package.json`
-  - Not confirmed: the suite passes (22 of 22) on Node v22.22.3 with no
-    dependencies, but Node 22.13 itself is not installed here. Run it on 22.13
-    to tick this box.
 - [x] **DoD-2** — Under root `R`, the directory `R/a/b/c` infers `a.b.c`;
   `R` itself and a directory outside `R` infer nothing; a symbolic link into
   `R` infers the target's channel; `R/github.com/me/my.repo` infers

@@ -1,14 +1,14 @@
 ---
 id: "0066"
 title: "An Inbox key with the unread count, and one child key per channel"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+branch: "0066-inbox-key-with-a-child-per-channel"
 related: ["0057", "0062", "0064", "0065", "0067"]
 tags: ["inbox", "layers", "driver", "protocol"]
 ---

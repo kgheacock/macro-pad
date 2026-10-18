@@ -1,14 +1,14 @@
 ---
 id: "0064"
 title: "An SQLite inbox CLI with channels from the working directory and piped lines as messages"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+pr: null
+branch: "0064-inbox-sqlite-store-and-cli"
 related: ["0057", "0065", "0066", "0067"]
 tags: ["inbox", "cli", "sqlite"]
 ---

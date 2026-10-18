@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/72"
 branch: "0061-cache-composed-glyph-frames"
 related: ["0057", "0058", "0059", "0060", "0048", "0045", "0044"]
 tags: ["firmware", "driver", "wire-protocol", "layers", "performance", "memory"]
@@ -116,7 +116,7 @@ ticked.
 - [x] **DoD-8** — Six layer switches write no glyph file after the first, and write `keys.json` only when a key state changed. **Proof:** `cd driver && go test ./transport -run StateWrites` passes, with a counting store.
 - [x] **DoD-9** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` record the messages, the pool, and the state files. **Proof:** those three files.
 - [x] **DoD-10** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
-- [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
 

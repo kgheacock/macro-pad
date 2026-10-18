@@ -4,7 +4,7 @@ The host sends a Store frame message once for each picture and color, and the
 board composes it into a slot. A later Show frames message names slots, and a
 layer switch then sends no image and composes nothing.
 
-The pool is `SLOT_COUNT` slots of 32 KB, 4 MB, allocated when `FrameCache` is
+The pool is `SLOT_COUNT` slots of 32 KB, 2 MB, allocated when `FrameCache` is
 built, before the loop runs, and never freed. It does not grow or shrink, so
 the heap does not fragment and the free heap is the same for the whole run.
 Compose writes into the slot's own `Bitmap`, with one scratch `Bitmap` for the
@@ -21,7 +21,10 @@ import displayio
 import display_render
 
 # docs/wire-protocol.md's "Store frame": slot numbers are 0 to SLOT_COUNT - 1.
-SLOT_COUNT = 128
+# 64, not 128: the garbage collector scans every live heap block, about 1 ms per
+# 32 KB, so 128 slots made one collection take 115 to 150 ms, longer than the
+# 150 ms gap between HID reports (task 0063).
+SLOT_COUNT = 64
 
 
 class FrameCache:

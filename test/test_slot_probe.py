@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 import slot_probe
 
 _FIGURES = (
-    "pool slots=128 alloc_ms=410 free_before=7000000 free_after={free}\n"
+    "pool slots=64 alloc_ms=410 free_before=7000000 free_after={free}\n"
     "copy bytes=32768 copy_us=900\n"
     "copy bytes=32768 copy_us=700\n"
     "copy bytes=32768 copy_us=800\n"

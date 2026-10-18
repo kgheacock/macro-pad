@@ -111,7 +111,7 @@ dma-spike: check-circuitpy
 	exit $$status
 
 # `make slot-probe` measures the frame cache's pool (task 0061's DoD-1): the
-# time to allocate 128 slots, the free heap after, and the time of a 32 KB
+# time to allocate the slots, the free heap after, and the time of a 32 KB
 # copy. Run `make flash` first, so the board has the current firmware modules.
 # It puts a probe code.py on the board, so run `make flash` afterward to
 # restore the real one. Like `dma-spike`, it unmounts CIRCUITPY for the run and

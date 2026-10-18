@@ -42,6 +42,10 @@ BLINK_INTERVAL_US = 500_000
 # How long a Begin batch waits for its data before the board draws what it has
 # (task 0060).
 BATCH_TIMEOUT_US = 2_000_000
+# An open batch that gets no new data for this long asks the host for what it
+# lacks, at most BATCH_NUDGES times (task 0063).
+BATCH_NUDGE_US = 500_000
+BATCH_NUDGES = 3
 _NO_KEY = 0xFF
 
 # The longest a Store frame waits for a push that reads its slot to end, so a
@@ -57,8 +61,12 @@ class _Batch:
     have a frame to draw at the release.
     """
 
-    def __init__(self, glyph_mask, state_mask, deadline_us):
+    def __init__(self, glyph_mask, state_mask, deadline_us, opened_us=0):
         self.keys_mask = glyph_mask | state_mask
+        # The time of the last data that arrived, and how often the board has
+        # asked the host for the rest.
+        self.last_us = opened_us
+        self.nudges = 0
         self.pending_glyph = glyph_mask
         self.pending_state = state_mask
         self.deadline_us = deadline_us
@@ -376,6 +384,7 @@ class MacroPad:
         self._dirty.add(message.key_index)
         if self._batch is not None:
             self._batch.pending_state &= ~(1 << message.key_index)
+            self._batch.last_us = now_us
         return True
 
     def _apply_cdc_message(self, now_us):
@@ -421,6 +430,7 @@ class MacroPad:
         self._dirty.add(glyph.key_index)
         if self._batch is not None:
             self._batch.pending_glyph &= ~(1 << glyph.key_index)
+            self._batch.last_us = now_us
         return True
 
     def _slot_in_use(self, view):
@@ -504,6 +514,7 @@ class MacroPad:
             message.glyph_mask & limit,
             message.state_mask & limit,
             now_us + BATCH_TIMEOUT_US,
+            now_us,
         )
         for index in range(len(self.key_states)):
             if batch.holds(index) and self._queued_frame[index] is not None:
@@ -525,6 +536,29 @@ class MacroPad:
                 batch.pending_glyph | (batch.pending_state << 8),
             )
             self._release_batch(now_us)
+        elif (
+            batch.nudges < BATCH_NUDGES
+            and now_us - batch.last_us >= BATCH_NUDGE_US
+        ):
+            self._nudge_batch(batch, now_us)
+
+    def _nudge_batch(self, batch, now_us):
+        """Ask the host for the glyphs and key states the batch still lacks.
+        A HID report is lost when a loop pass outlasts the gap between two
+        reports (task 0044), and the host holds the data to send it again.
+        """
+        batch.nudges += 1
+        batch.last_us = now_us
+        self._record_trace(
+            tracer_module.BATCH_INCOMPLETE,
+            _NO_KEY,
+            batch.pending_glyph | (batch.pending_state << 8),
+        )
+        wire.write_frame(
+            self._serial,
+            wire.MESSAGE_TYPE_BATCH_INCOMPLETE,
+            wire.encode_batch_incomplete(batch.pending_glyph, batch.pending_state),
+        )
 
     def _release_batch(self, now_us):
         """Queue the frames of the held keys in one pass, so that the pushes

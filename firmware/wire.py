@@ -40,6 +40,9 @@ SHOW_FRAMES_MAX_KEYS = 32
 SLOT_UNCHANGED = 0xFF
 # Show miss, device to host: the mask of the keys that named an empty slot.
 MESSAGE_TYPE_SHOW_MISS = 10
+# Batch incomplete, device to host: the masks of the glyphs and the key states
+# that an open batch still waits for (task 0063).
+MESSAGE_TYPE_BATCH_INCOMPLETE = 11
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -218,6 +221,14 @@ def encode_show_miss(mask):
     `MESSAGE_TYPE_SHOW_MISS`.
     """
     return bytes((mask & 0xFF,))
+
+
+def encode_batch_incomplete(glyph_mask, state_mask):
+    """Build a Batch incomplete payload: the glyph mask, then the key state
+    mask, bit `k` for key `k`. Pass it to `write_frame` with
+    `MESSAGE_TYPE_BATCH_INCOMPLETE`.
+    """
+    return bytes((glyph_mask & 0xFF, state_mask & 0xFF))
 
 
 def _inflate_glyph(stream):

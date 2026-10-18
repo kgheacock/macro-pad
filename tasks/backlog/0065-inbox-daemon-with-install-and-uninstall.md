@@ -142,6 +142,16 @@ At start the daemon takes an exclusive `flock` on `<db>.daemon.lock`. If the
 lock is held, it prints `inbox: a daemon already runs for <db>` and exits
 with code 3. A crashed daemon releases the lock with its process.
 
+### Help and error messages
+
+`inbox daemon -h` and `--help` print the flags with their defaults, and exit
+0. Errors follow task 0064's form: one line on standard error that starts
+with `inbox:`, names the bad value, and says what to do. Examples:
+
+- `inbox: --slot 7 is out of range; use 0 to 5`
+- `inbox: cannot reach macropadd on 127.0.0.1:8765 (connection refused); retrying every 5 s` (logged once per change of state)
+- `inbox: assets dir "assets" is relative; pass an absolute path, as macropadd sees it`
+
 ### Stopping
 
 SIGINT and SIGTERM close the WebSocket cleanly and exit 0. The daemon does
@@ -183,7 +193,11 @@ relative path, because launchd starts the daemon in `/`.
 Running it when nothing is installed exits 0 and says so.
 
 Both scripts are POSIX `sh`, pass `shellcheck`, and take `--dry-run` to
-print each action without doing it.
+print each action without doing it. Both take `-h` and `--help`, which print
+their options and what they install or remove, and exit 0. An unknown option
+prints `install.sh: unknown option "--foo"; run 'install.sh -h' for help` and
+exits 2. A failed step names the step and the command that failed, such as
+`install.sh: go build failed; is Go 1.22 or newer on PATH?`, and exits 1.
 
 Files to change:
 
@@ -225,7 +239,11 @@ is ticked.
 - [ ] **DoD-10** — `inbox/README.md` "Daemon" records the flags, the
   service paths, the log path, and how to install and uninstall. **Proof:**
   `inbox/README.md`
-- [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [ ] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
+  (and `--help`) print usage and exit 0. An unknown option exits 2 with a
+  message that names it. **Proof:** `go test ./cmd/inbox -run TestDaemonHelp`
+  and running the scripts
+- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

@@ -189,6 +189,34 @@ any command overrides `$INBOX_DB`.
 Exit codes: 0 success, 1 a store error, 2 a usage error (including a missing
 channel).
 
+### Help and error messages
+
+- `-h` and `--help` work on `inbox` and on every subcommand, before or after
+  other arguments. They print usage to standard output and exit 0, even when
+  the rest of the command line is wrong. `inbox help` and
+  `inbox help SUBCOMMAND` print the same text.
+- `inbox -h` lists every subcommand with one line each, and two examples:
+  `inbox send debug "build done"` and `my_cmd 2>&1 | inbox pipe debug`.
+- `inbox SUBCOMMAND -h` prints its synopsis, what each argument and flag
+  means, how the channel is chosen, and one or two examples.
+- Every error is one line on standard error that starts with `inbox:`, names
+  what was wrong with the value the person gave, and says what to do next. A
+  usage error then prints `run 'inbox SUBCOMMAND -h' for help`. No error
+  prints a Go stack trace or a raw driver error alone.
+
+| Situation | Message |
+|---|---|
+| Unknown subcommand | `inbox: unknown command "sned"; did you mean "send"? Run 'inbox -h' for the list.` (the hint names the closest command, when one is close) |
+| No channel outside the root | `inbox: no channel: /tmp/x is not under ~/source. Pass it first, as in: inbox send CHANNEL MESSAGE` |
+| Bad channel | `inbox: bad channel "my repo": a channel segment may hold only letters, digits, - and _` |
+| Directory that cannot be a channel | `inbox: cannot use directory "my.repo" in ~/source/my.repo as a channel segment; pass the channel first` |
+| `send` with three or more arguments | `inbox: send takes CHANNEL and MESSAGE; quote a message with spaces, as in: inbox send debug "build done"` |
+| `send` with no arguments | `inbox: send needs a message, as in: inbox send debug "build done"` |
+| `pipe` on a terminal | `inbox: pipe reads lines from a pipe or file, as in: my_cmd 2>&1 \| inbox pipe debug` |
+| Store cannot open | `inbox: cannot open inbox at PATH: REASON. Set INBOX_DB or pass --db to use another file.` |
+| Store locked past the timeout | `inbox: inbox at PATH is busy (another writer held it for 5 s); try again` |
+| Newer schema | `inbox: inbox at PATH has schema N; this inbox reads up to M. Update the inbox binary.` |
+
 ### Piped input
 
 - Each line is one message. A trailing `\r` is dropped. A line that is empty
@@ -250,7 +278,13 @@ is ticked.
 - [ ] **DoD-12** — `inbox/README.md` records the commands, the channel
   rules, the schema, `$INBOX_DB`, `$INBOX_SOURCE_ROOT`, and the exit codes.
   **Proof:** `inbox/README.md`
-- [ ] **DoD-13** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [ ] **DoD-13** — `-h` and `--help` on `inbox` and on each subcommand
+  print usage to standard output and exit 0, also with otherwise bad
+  arguments. **Proof:** `go test ./cmd/inbox -run TestHelpFlags`
+- [ ] **DoD-14** — Each situation in the "Help and error messages" table
+  gives one line on standard error that starts with `inbox:` and matches the
+  table, with the stated exit code. **Proof:** `go test ./cmd/inbox -run TestErrorMessages`
+- [ ] **DoD-15** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

@@ -7,7 +7,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+export const DEFAULT_STATUS = 'info';
 
 // MIGRATIONS[n] takes a file from user_version n to n + 1.
 const MIGRATIONS = [
@@ -20,6 +21,7 @@ const MIGRATIONS = [
      cwd        TEXT    NOT NULL
    );
    CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;`,
+  `ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '${DEFAULT_STATUS}';`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -156,23 +158,25 @@ export class Store {
   }
 
   // Returns the id of the new message.
-  insert(channel, body, cwd, now = Date.now()) {
+  insert(channel, body, cwd, { status = DEFAULT_STATUS, now = Date.now() } = {}) {
     return this.#guard(() => {
       const result = this.#db
-        .prepare('INSERT INTO messages (channel, body, created_at, cwd) VALUES (?, ?, ?, ?)')
-        .run(channel, body, now, cwd);
+        .prepare(
+          'INSERT INTO messages (channel, body, created_at, cwd, status) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(channel, body, now, cwd, status);
       return Number(result.lastInsertRowid);
     });
   }
 
   // Inserts every body in one transaction. Returns how many rows it added.
-  insertMany(channel, bodies, cwd, now = Date.now()) {
+  insertMany(channel, bodies, cwd, { status = DEFAULT_STATUS, now = Date.now() } = {}) {
     return this.#guard(() =>
       this.#inTransaction(() => {
         const stmt = this.#db.prepare(
-          'INSERT INTO messages (channel, body, created_at, cwd) VALUES (?, ?, ?, ?)',
+          'INSERT INTO messages (channel, body, created_at, cwd, status) VALUES (?, ?, ?, ?, ?)',
         );
-        for (const body of bodies) stmt.run(channel, body, now, cwd);
+        for (const body of bodies) stmt.run(channel, body, now, cwd, status);
         return bodies.length;
       }),
     );
@@ -190,7 +194,7 @@ export class Store {
       }
       if (!includeSeen) where.push('seen_at IS NULL');
       const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      const select = `SELECT id, channel, body, created_at, seen_at, cwd FROM messages ${clause}`;
+      const select = `SELECT id, channel, body, created_at, seen_at, cwd, status FROM messages ${clause}`;
       const sql =
         limit === null
           ? `${select} ORDER BY id`

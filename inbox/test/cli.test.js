@@ -131,15 +131,16 @@ test('TestPipeBurst', (t) => {
 test('TestCommands', (t) => {
   const sc = scratch(t);
   const store = openStore(sc.db);
-  store.insert('a', 'a one', '/x', Date.UTC(2026, 0, 1, 12));
-  store.insert('a', 'a two', '/x', Date.UTC(2026, 0, 1, 13));
-  store.insert('b', 'b one', '/x', Date.UTC(2026, 0, 1, 14));
-  const b2 = store.insert('proj.sub', 'p one', '/x', Date.UTC(2026, 0, 1, 15));
+  store.insert('a', 'a one', '/x', { now: Date.UTC(2026, 0, 1, 12) });
+  store.insert('a', 'a two', '/x', { now: Date.UTC(2026, 0, 1, 13) });
+  store.insert('b', 'b one', '/x', { now: Date.UTC(2026, 0, 1, 14) });
+  const b2 = store.insert('proj.sub', 'p one', '/x', { now: Date.UTC(2026, 0, 1, 15) });
   store.markSeen('proj.sub', b2);
-  store.insert('proj.sub', 'p two', '/x', Date.UTC(2026, 0, 1, 16));
+  store.insert('proj.sub', 'p two', '/x', { now: Date.UTC(2026, 0, 1, 16) });
   store.close();
   const inside = subdir(sc, 'proj', 'sub');
-  const bodies = (out) => out.trim().split('\n').map((l) => l.replace(/^.*?:\d\d {2}(\S+ {2})?/, ''));
+  const bodies = (out) =>
+    out.trimEnd().split('\n').map((l) => l.replace(/^..\d{4}-\d\d-\d\d \d\d:\d\d:\d\d {2}\S+ +(?:\S+ {2})?/, '').trim());
 
   // count
   assert.equal(run(['count', 'a'], { sc }).stdout, '2\n');
@@ -152,13 +153,13 @@ test('TestCommands', (t) => {
   assert.deepEqual(bodies(run(['list', '--all-channels'], { sc }).stdout), [
     'a one', 'a two', 'b one', 'p one', 'p two',
   ]);
-  assert.match(run(['list', '--all-channels'], { sc }).stdout, /\ba {2}a one/);
+  assert.match(run(['list', '--all-channels'], { sc }).stdout, /info {2}a {2}a one/);
   assert.deepEqual(bodies(run(['list'], { sc, cwd: inside }).stdout), ['p one', 'p two']);
   assert.equal(bodies(run(['list'], { sc, cwd: sc.dir }).stdout).length, 5);
   const lines = run(['list', 'proj.sub'], { sc }).stdout.trimEnd().split('\n');
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /^ {2}\d{4}-.* {2}p one$/);
-  assert.match(lines[1], /^\* \d{4}-.* {2}p two$/);
+  assert.match(lines[0], /^ {2}\d{4}-\S+ \S+ {2}info {2}p one$/);
+  assert.match(lines[1], /^\* \d{4}-\S+ \S+ {2}info {2}p two$/);
   assert.deepEqual(bodies(run(['list', '--unseen', 'proj.sub'], { sc }).stdout), ['p two']);
   assert.deepEqual(bodies(run(['list', '--unseen', '--all-channels'], { sc }).stdout), [
     'a one', 'a two', 'b one', 'p two',
@@ -169,7 +170,7 @@ test('TestCommands', (t) => {
     ['a', 'a one', false], ['a', 'a two', false], ['b', 'b one', false],
     ['proj.sub', 'p one', true], ['proj.sub', 'p two', false],
   ]);
-  assert.deepEqual(Object.keys(json[0]), ['id', 'channel', 'body', 'created_at', 'seen_at', 'cwd']);
+  assert.deepEqual(Object.keys(json[0]), ['id', 'channel', 'body', 'created_at', 'seen_at', 'cwd', 'status']);
   assert.equal(json[0].created_at, Date.UTC(2026, 0, 1, 12));
   assert.equal(json[0].seen_at, null);
   const unseenJson = JSON.parse(run(['list', '--json', '--unseen', '--all-channels'], { sc }).stdout);
@@ -250,9 +251,9 @@ test('TestErrorMessages', async (t) => {
   expect(run(['send', 'my repo', 'hi'], { sc }), 2,
     /^inbox: bad channel "my repo": a channel segment may hold only letters, digits, - and _$/);
 
-  const dotted = subdir(sc, 'my.repo');
+  const dotted = subdir(sc, 'my repo');
   expect(run(['send', 'hi'], { sc, cwd: dotted }), 2,
-    new RegExp(`^inbox: cannot use directory "my\\.repo" in ${dotted.replace(/\./g, '\\.')} as a channel segment; pass the channel first$`));
+    new RegExp(`^inbox: cannot use directory "my repo" in ${dotted} as a channel segment; pass the channel first$`));
 
   expect(run(['send', 'a', 'b', 'c'], { sc }), 2,
     /^inbox: send takes CHANNEL and MESSAGE; quote a message with spaces, as in: inbox send debug "build done"$/);
@@ -294,7 +295,7 @@ test('TestErrorMessages', async (t) => {
   raw.exec('PRAGMA user_version = 9');
   raw.close();
   expect(run(['count', '--all-channels'], { sc }), 1,
-    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to 1\\. Update the inbox checkout\\.$`));
+    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to 2\\. Update the inbox checkout\\.$`));
 });
 
 test('TestSymlinkedWorkingDirectory', (t) => {
@@ -303,4 +304,31 @@ test('TestSymlinkedWorkingDirectory', (t) => {
   symlinkSync(target, path.join(sc.dir, 'link'));
   assert.equal(run(['send', 'hi'], { sc, cwd: path.join(sc.dir, 'link') }).status, 0);
   assert.equal(rows(sc)[0].channel, 'real.dir');
+});
+
+test('TestStatus', (t) => {
+  const sc = scratch(t);
+  assert.equal(run(['send', 'debug', 'plain'], { sc }).status, 0);
+  assert.equal(run(['send', '--status', 'error', 'debug', 'bad'], { sc }).status, 0);
+  assert.equal(run(['pipe', '--status', 'warn', 'debug'], { sc, input: 'w1\nw2\n' }).status, 0);
+  assert.deepEqual(rows(sc).map((m) => [m.body, m.status]), [
+    ['plain', 'info'], ['bad', 'error'], ['w1', 'warn'], ['w2', 'warn'],
+  ]);
+  const lines = run(['list', 'debug'], { sc }).stdout.trimEnd().split('\n');
+  assert.match(lines[0], /^\* \S+ \S+ {2}info {3}plain$/);
+  assert.match(lines[1], /^\* \S+ \S+ {2}error {2}bad$/);
+  const json = JSON.parse(run(['list', '--json', 'debug'], { sc }).stdout);
+  assert.deepEqual(json.map((m) => m.status), ['info', 'error', 'warn', 'warn']);
+
+  const bad = run(['send', '--status', 'not ok', 'debug', 'x'], { sc });
+  assert.equal(bad.status, 2);
+  assert.equal(bad.stderr.split('\n')[0], 'inbox: bad status "not ok": a status may hold only letters, digits, - and _');
+  assert.equal(rows(sc).length, 4);
+});
+
+test('TestDottedDirectoryChannel', (t) => {
+  const sc = scratch(t);
+  const dir = subdir(sc, 'github.com', 'me', 'app');
+  assert.equal(run(['send', 'hi'], { sc, cwd: dir }).status, 0);
+  assert.equal(rows(sc)[0].channel, 'github.com.me.app');
 });

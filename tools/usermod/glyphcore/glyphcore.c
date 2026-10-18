@@ -189,9 +189,10 @@ static uint8_t *glyph_buffer(mp_int_t index) {
     return pool_base + (frame_slot_count + (size_t)index) * GLYPH_BYTES;
 }
 
-// glyphcore.slot_view(slot) -> memoryview('B', 32768)
+// glyphcore.slot_view(slot) -> a writable memoryview('B', 32768)
 static mp_obj_t glyphcore_slot_view(mp_obj_t slot_in) {
-    return mp_obj_new_memoryview('B', GLYPH_BYTES, frame_slot(mp_obj_get_int(slot_in)));
+    // Writable: FrameCache copies a composed frame into the slot.
+    return mp_obj_new_memoryview('B' | MP_OBJ_ARRAY_TYPECODE_FLAG_RW, GLYPH_BYTES, frame_slot(mp_obj_get_int(slot_in)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(glyphcore_slot_view_obj, glyphcore_slot_view);
 

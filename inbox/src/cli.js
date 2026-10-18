@@ -545,24 +545,31 @@ async function runDaemon(io, { values, positionals }) {
   if (positionals.length) throw new UsageError('daemon takes no arguments');
   const settings = daemonSettings(io, values);
   const log = (text) => io.stderr.write(`inbox: ${text}\n`);
-  const release = acquirePidFile(settings.file, { log });
+  // Listen for signals before anything else, so one that arrives right after
+  // the start line still ends in a clean stop.
+  let onSignal = () => {};
+  const signalled = new Promise((resolve) => {
+    onSignal = resolve;
+  });
+  io.process.on('SIGINT', onSignal);
+  io.process.on('SIGTERM', onSignal);
+  const forget = () => {
+    io.process.off('SIGINT', onSignal);
+    io.process.off('SIGTERM', onSignal);
+  };
+  let release = () => {};
   let daemon;
   try {
+    release = acquirePidFile(settings.file, { log });
     daemon = startDaemon({ ...settings, env: io.env, log });
   } catch (e) {
+    forget();
     release();
     throw e;
   }
   log(`daemon started for ${settings.file} (pid ${process.pid})`);
-  await new Promise((resolve) => {
-    const onSignal = () => {
-      io.process.off('SIGINT', onSignal);
-      io.process.off('SIGTERM', onSignal);
-      resolve();
-    };
-    io.process.on('SIGINT', onSignal);
-    io.process.on('SIGTERM', onSignal);
-  });
+  await signalled;
+  forget();
   await daemon.stop();
   release();
   log('daemon stopped');

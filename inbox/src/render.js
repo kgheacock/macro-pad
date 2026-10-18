@@ -1,0 +1,118 @@
+// The renderer the daemon uses: one `inbox` key with the total unseen count,
+// and one child per channel with unseen messages, at most five. A renderer has
+//   plan({ unseen, active }) -> the messages to send macropadd now
+//   reset(channels)          -> forget what it sent (called on every connect)
+// where `unseen` is Store.unseen(), `active` is the open layer's id or null,
+// and `channels` is every channel the store has ever held, so reset can clear
+// children an earlier daemon left on the pad.
+
+import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
+import { writeChannelImage } from './png.js';
+
+// A picture under the assets directory (see `--assets-dir`).
+export const INBOX_ICON = 'gmail.png';
+export const INBOX_ID = 'inbox';
+export const MAX_CHILDREN = 5;
+
+export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = writeChannelImage } = {}) {
+  // The last values sent per node, as JSON, so only a change is sent again.
+  const sent = new Map();
+  // The channels macropadd holds as children of `inbox`, in its order.
+  let shown = [];
+  // False until the children on the pad are known: after a connect, macropadd
+  // may hold children this renderer never sent.
+  let known = false;
+  let leftovers = [];
+  const icons = new Map();
+
+  const iconFor = (channel) => {
+    if (!icons.has(channel)) {
+      let ref = '';
+      try {
+        ref = drawImage(assetsDir, channel);
+      } catch (e) {
+        log(`cannot draw the picture for ${channel}: ${e.message}`);
+      }
+      icons.set(channel, ref);
+    }
+    return icons.get(channel);
+  };
+
+  // Adds the node to out when its values differ from the last ones sent.
+  const set = (out, key, fields) => {
+    const json = JSON.stringify(fields);
+    if (sent.get(key) === json) return;
+    sent.set(key, json);
+    out.push(setLayerKeyMessage(fields));
+  };
+
+  const setChild = (out, channel, count) => {
+    set(out, channel, {
+      id: channel,
+      parent: INBOX_ID,
+      status: count > 0 ? 'WARN' : '',
+      count,
+      iconRef: iconFor(channel),
+    });
+  };
+
+  const removeChild = (out, channel) => {
+    sent.delete(channel);
+    out.push(removeLayerKeyMessage(channel, INBOX_ID));
+  };
+
+  return {
+    reset(channels = []) {
+      sent.clear();
+      shown = [];
+      known = false;
+      leftovers = channels;
+    },
+
+    plan({ unseen, active }) {
+      const out = [];
+      const total = unseen.reduce((sum, row) => sum + row.count, 0);
+      const key = { id: INBOX_ID, status: total > 0 ? 'WARN' : '', count: total, iconRef: INBOX_ICON };
+      if (slot !== undefined) key.slot = slot;
+      set(out, INBOX_ID, key);
+
+      const counts = new Map(unseen.map((row) => [row.channel, row.count]));
+      // Newest unseen message first; only the first five show.
+      const wanted = [...unseen]
+        .sort((a, b) => b.newestId - a.newestId)
+        .slice(0, MAX_CHILDREN)
+        .map((row) => row.channel);
+
+      if (active === INBOX_ID) {
+        // Open: no key moves or goes. A channel at zero stays with count 0.
+        for (const channel of shown) setChild(out, channel, counts.get(channel) ?? 0);
+        for (const channel of wanted) {
+          if (shown.length >= MAX_CHILDREN) break;
+          if (shown.includes(channel)) continue;
+          shown.push(channel);
+          setChild(out, channel, counts.get(channel));
+        }
+        return out;
+      }
+
+      // Closed: nobody sees the children, so remove, reorder, and add.
+      if (!known) {
+        for (const channel of new Set([...leftovers, ...shown])) removeChild(out, channel);
+        shown = [];
+        leftovers = [];
+        known = true;
+      }
+      const stay = shown.filter((channel) => wanted.includes(channel));
+      for (const channel of shown) {
+        if (!stay.includes(channel)) removeChild(out, channel);
+      }
+      // Children macropadd keeps in a different order than wanted go and come back.
+      let same = 0;
+      while (same < stay.length && stay[same] === wanted[same]) same++;
+      for (const channel of stay.slice(same)) removeChild(out, channel);
+      shown = wanted;
+      for (const channel of shown) setChild(out, channel, counts.get(channel));
+      return out;
+    },
+  };
+}

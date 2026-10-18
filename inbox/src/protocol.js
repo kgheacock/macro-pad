@@ -3,9 +3,23 @@
 // them against test/fixtures/protocol.json.
 
 // A message to send: the full values of one key or child (`parent` names the
-// key a child belongs to). Returns the JSON text of the frame.
+// key a child belongs to).
+export function setLayerKeyMessage(fields) {
+  return { kind: 'setLayerKey', setLayerKey: fields };
+}
+
+// A message to send: remove one key, or with `parent` one child of it.
+export function removeLayerKeyMessage(id, parent) {
+  return { kind: 'removeLayerKey', removeLayerKey: parent ? { id, parent } : { id } };
+}
+
+// The JSON text of a frame.
 export function encodeSetLayerKey(fields) {
-  return JSON.stringify({ kind: 'setLayerKey', setLayerKey: fields });
+  return JSON.stringify(setLayerKeyMessage(fields));
+}
+
+export function encodeRemoveLayerKey(id, parent) {
+  return JSON.stringify(removeLayerKeyMessage(id, parent));
 }
 
 // Reads one text frame from macropadd. Returns

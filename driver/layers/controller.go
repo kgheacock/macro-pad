@@ -293,6 +293,45 @@ func applyUpdate(d *Doc, u Update) error {
 	return nil
 }
 
+// RemoveKey removes one node. With a parent, it removes that child, and the
+// children after it move up one position. Without, it removes the top-level
+// key with its children, and frees its slot. An unknown id changes nothing
+// and sends nothing. When the removal empties the open layer, the active
+// layer returns to the top.
+func (c *Controller) RemoveKey(id, parent string) error {
+	return c.mutate(func(d *Doc) error { return applyRemove(d, id, parent) })
+}
+
+func applyRemove(d *Doc, id, parent string) error {
+	if parent != "" {
+		p := d.find(parent)
+		if p < 0 {
+			return errNoChange
+		}
+		k := d.Keys[p]
+		for i := range k.Children {
+			if k.Children[i].ID != id {
+				continue
+			}
+			k.Children = append(k.Children[:i], k.Children[i+1:]...)
+			if len(k.Children) == 0 && d.Active != nil && *d.Active == parent {
+				d.Active = nil
+			}
+			return nil
+		}
+		return errNoChange
+	}
+	i := d.find(id)
+	if i < 0 {
+		return errNoChange
+	}
+	d.Keys[i] = nil
+	if d.Active != nil && *d.Active == id {
+		d.Active = nil
+	}
+	return nil
+}
+
 // Press handles a press on a key, the debounced press-down. On the top layer a key with
 // children opens its child layer. In a child layer the up key returns to
 // the top layer. Every other press changes nothing and sends nothing.

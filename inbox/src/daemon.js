@@ -4,9 +4,9 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DaemonRunningError, StoreError } from './errors.js';
-import { decodeMessage, encodeSetLayerKey } from './protocol.js';
+import { decodeMessage } from './protocol.js';
 import { openStore } from './store.js';
-import { createSummaryRenderer } from './summary.js';
+import { createRenderer as createInboxRenderer } from './render.js';
 
 export const DEFAULT_PORT = 8765;
 export const DEFAULT_POLL_MS = 500;
@@ -78,7 +78,7 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 //
 // store     an open Store (a test passes one to count queries); else the
 //           daemon opens `file` and closes it on stop
-// renderer  createRenderer({ slot, assetsDir }), see summary.js
+// renderer  createRenderer({ slot, assetsDir, log }), see render.js
 // onEvent   (event, { active }) for each event from macropadd; task 0067's hook
 export function startDaemon({
   file,
@@ -91,12 +91,12 @@ export function startDaemon({
   layerWaitMs = LAYER_WAIT_MS,
   log = () => {},
   store,
-  createRenderer = createSummaryRenderer,
+  createRenderer = createInboxRenderer,
   onEvent = () => {},
   WebSocketImpl = globalThis.WebSocket,
 }) {
   const db = store ?? openStore(file, env);
-  const renderer = createRenderer({ slot, assetsDir });
+  const renderer = createRenderer({ slot, assetsDir, log });
   const url = `ws://127.0.0.1:${port}/`;
 
   let version;
@@ -132,9 +132,9 @@ export function startDaemon({
   // keeps the newest state, and the next connect sends all of it.
   const push = () => {
     if (!ready || !socket) return;
-    for (const payload of renderer.plan({ unseen, active })) {
+    for (const message of renderer.plan({ unseen, active })) {
       try {
-        socket.send(encodeSetLayerKey(payload));
+        socket.send(JSON.stringify(message));
       } catch (e) {
         log(`cannot send to macropadd: ${e.message}`);
         return;
@@ -145,7 +145,13 @@ export function startDaemon({
   const becomeReady = () => {
     if (ready || stopped || !socket) return;
     clearTimeout(layerTimer);
-    renderer.reset();
+    let channels = [];
+    try {
+      channels = db.channels();
+    } catch (e) {
+      log(e.message);
+    }
+    renderer.reset(channels);
     ready = true;
     push();
   };

@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { decodeMessage, encodeSetLayerKey } from '../src/protocol.js';
+import { decodeMessage, encodeRemoveLayerKey, encodeSetLayerKey } from '../src/protocol.js';
 
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures/protocol.json', import.meta.url), 'utf8'));
 
 test('TestEncodeMatchesFixtures', () => {
   for (const fixture of fixtures.setLayerKey) {
     assert.deepEqual(JSON.parse(encodeSetLayerKey(fixture.setLayerKey)), fixture);
+  }
+});
+
+test('TestEncodeRemoveMatchesFixtures', () => {
+  for (const fixture of fixtures.removeLayerKey) {
+    const { id, parent } = fixture.removeLayerKey;
+    assert.deepEqual(JSON.parse(encodeRemoveLayerKey(id, parent)), fixture);
   }
 });
 

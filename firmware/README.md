@@ -850,19 +850,23 @@ The pixels from core 1 equal those of `zlib.decompress` in every trial. The
 probe line for DoD-8: `gc.collect() with 128 slots in module memory 2716 us
 (median; limit 10000)`. On the heap the same pool took 115 to 150 ms.
 
-`blinksend --scenario=icons`, three runs: `six keys in 0.80 s`, `0.79 s`, and
-`0.81 s`. The 0.65 s of the spec was not met, and this is not a firmware
-limit: the run sends a glyph and then a Key state for each key, and the driver
-waits 150 ms (`minReportGap`) between two HID reports. Five gaps and the last
-key take 0.75 s or more whatever the board does, and the run was already at
-that floor after task 0058. The traces show `compose` at 57 to 72 ms for each
-key (from `CUSTOM_GLYPH_DECODED` to `GLYPH_BUILT`), and no `TRACE_DROPPED`
-record. Below 0.75 s a layer change must not wait for one HID report per key:
-`blinksend --scenario=cached` (task 0061, Show frames) and `--scenario=batch`
-(task 0060) draw the six keys within 31 to 35 ms of each other.
+`blinksend --scenario=icons`, three runs with the HID gap in the way (key
+state over HID): `six keys in 0.80 s`, `0.79 s`, and `0.81 s`. The 0.65 s of
+the spec was not met, and the board was not the limit: the run sends a glyph
+and then a Key state for each key, and the driver waits 150 ms (`minReportGap`)
+between two HID reports. Five gaps and the last key take 0.75 s or more
+whatever the board does, and the run was already at that floor after task 0058.
 
-`blinksend --scenario=batch`, 15 runs with the 64-slot pool in module memory:
-no `BATCH_TIMED_OUT`, and a push span of 31.0 to 35.0 ms (limit 40) in all 15.
+With the Key state sent as a type 12 frame over CDC (the default since this
+task), three runs gave `six keys in 0.56 s` each, with `compose` at 59 to 74 ms
+for each key (from `CUSTOM_GLYPH_DECODED` to `GLYPH_BUILT`) and no
+`TRACE_DROPPED` record. `--scenario=batchloss` still released the batch after
+one resend (515 ms after the last report), and `--scenario=burst` decoded 6 of 6.
+
+`blinksend --scenario=batch`, 15 runs with the 64-slot pool in module memory and
+key state over CDC: no `BATCH_TIMED_OUT`, `six keys in 0.46 to 0.51 s`, and a
+push span of 32.6 to 35.9 ms (limit 40) in all 15. Over HID the same 15 runs gave
+`six keys in 0.77 to 0.83 s` and a push span of 31.0 to 35.0 ms.
 
 ## Out of scope
 

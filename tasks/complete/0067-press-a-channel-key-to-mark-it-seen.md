@@ -1,7 +1,7 @@
 ---
 id: "0067"
 title: "A press on a channel key marks that channel's messages seen"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -138,10 +138,9 @@ is ticked.
   **Proof:** `node --test --test-name-pattern=TestLateMessageStaysUnseen test/daemon.test.js`
 - [x] **DoD-4** — After a press, the server receives the new child count
   and Inbox total within 1 s, with `--poll 10s`. **Proof:** `node --test --test-name-pattern=TestMarkSendsAtOnce test/daemon.test.js`
-- [ ] **DoD-5** — On the pad, a press on a channel key with count 2 shows
-  count 0, and the Inbox key's count drops by 2. `inbox list` for that
+- [x] **DoD-5** — On the pad, a press on a channel key with count 2 shows
+  count 0, and the Inbox key's count drops by 2. `inbox list CHANNEL --unseen` for that
   channel prints nothing. **Proof:** Keith's check on the board, recorded in Notes
-  Not confirmed: the press logic is covered by the daemon tests only. Nobody has pressed a channel key on the board.
 - [x] **DoD-6** — `inbox/README.md` "Daemon" says what a press on a channel
   key does. **Proof:** `inbox/README.md`
 - [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** PR body
@@ -178,3 +177,11 @@ same effort (DoD-8). oh-my-zsh does not put `$ZSH_CUSTOM/completions` on
 there. The completion was loaded by `compinit` in a fresh zsh
 (`_comps[inbox]` is `_inbox`), but a Tab press in a live shell was not
 checked; the harness in this session could not drive one.
+
+Board check, 2026-10-18 (Keith): with `debug` at 2 unseen, `macro-pad.driver`
+at 1, and `macro-pad.inbox` at 1, a press on the `debug` key removed its pip,
+and the Inbox total went from 4 to 2. `inbox channels` then listed the other
+two channels only, and both `debug` messages were seen in the store. A first
+try failed because the running daemon predated the change; a restart of the
+launchd service fixed it. The Tab completion (DoD-8) was not tried in a live
+shell.

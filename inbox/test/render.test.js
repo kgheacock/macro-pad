@@ -41,6 +41,20 @@ test('TestPlan', () => {
   assert.deepEqual(empty.map((m) => m.setLayerKey), [{ id: 'inbox', status: '', count: 0, iconRef: 'gmail.png' }]);
 });
 
+test('TestTarget', () => {
+  const r = renderer();
+  assert.equal(r.target(0), null);
+  r.plan({ unseen: [row('a', 2, 5), row('b', 1, 9)], active: null });
+  assert.deepEqual(r.target(0), { channel: 'b', shownId: 9 });
+  assert.deepEqual(r.target(1), { channel: 'a', shownId: 5 });
+  assert.equal(r.target(2), null);
+  // A channel at zero stays in its place, with nothing to mark.
+  r.plan({ unseen: [row('a', 2, 5)], active: 'inbox' });
+  assert.deepEqual(r.target(0), { channel: 'b', shownId: 0 });
+  r.reset([]);
+  assert.equal(r.target(0), null);
+});
+
 test('TestPlanSlot', () => {
   const [key] = renderer({ slot: 2 }).plan({ unseen: [], active: null });
   assert.equal(key.setLayerKey.slot, 2);

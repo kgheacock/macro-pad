@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -673,4 +674,141 @@ func TestBatchTwoKeyChangeSendsOneBeginBatch(t *testing.T) {
 	if got, want := strings.Join(calls, ","), "batch,glyph 0,state 0,state 1"; got != want {
 		t.Errorf("sends %q, want %q", got, want)
 	}
+}
+
+func TestRemoveKey(t *testing.T) {
+	childIDs := func(c *Controller) []string {
+		var ids []string
+		for _, ch := range c.Snapshot().Keys[0].Children {
+			ids = append(ids, ch.ID)
+		}
+		return ids
+	}
+
+	t.Run("child", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		out.take()
+
+		if err := c.RemoveKey("build", "github"); err != nil {
+			t.Fatal(err)
+		}
+		if got := childIDs(c); len(got) != 1 || got[0] != "test" {
+			t.Errorf("children %v, want [test]", got)
+		}
+		// The top layer shows the parent, which did not change.
+		if got := out.take(); len(got) != 0 {
+			t.Errorf("sent %+v for a child that is not on screen", got)
+		}
+
+	})
+
+	t.Run("child on screen", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		c.Press(0)
+		out.take()
+
+		// The children after it move up one position.
+		if err := c.RemoveKey("build", "github"); err != nil {
+			t.Fatal(err)
+		}
+		states := out.take()
+		if got := states[0]; got.Color != ColorDone {
+			t.Errorf("key 0 color %#04x, want the test child, DONE %#04x", got.Color, ColorDone)
+		}
+		if got := states[1]; got.Color != 0 || got.EmojiID != 0 {
+			t.Errorf("key 1 is %+v, want blank", got)
+		}
+		if len(states) != 2 {
+			t.Errorf("sent keys %v, want 0 and 1 alone", states)
+		}
+	})
+
+	t.Run("top-level key with its children", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		out.take()
+
+		if err := c.RemoveKey("github", ""); err != nil {
+			t.Fatal(err)
+		}
+		if k := c.Snapshot().Keys[0]; k != nil {
+			t.Errorf("slot 0 holds %+v, want it free", k)
+		}
+		if got := out.take(); len(got) != 1 || got[0].Color != 0 {
+			t.Errorf("sent %+v, want key 0 alone, blank", got)
+		}
+		// The slot is free for the next key.
+		if err := c.SetKey(Update{ID: "next", Status: StatusDone}); err != nil {
+			t.Fatal(err)
+		}
+		if k := c.Snapshot().Keys[0]; k == nil || k.ID != "next" {
+			t.Errorf("slot 0 holds %+v, want next", k)
+		}
+	})
+
+	t.Run("unknown id", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		out.take()
+		before := c.Snapshot()
+
+		for _, tc := range [][2]string{{"nope", ""}, {"nope", "github"}, {"build", "nope"}, {"dev", "github"}} {
+			if err := c.RemoveKey(tc[0], tc[1]); err != nil {
+				t.Errorf("RemoveKey(%q, %q): %v", tc[0], tc[1], err)
+			}
+		}
+		if got := out.take(); len(got) != 0 {
+			t.Errorf("sent %+v for ids that are not in the tree", got)
+		}
+		if !reflect.DeepEqual(before, c.Snapshot()) {
+			t.Error("the tree changed")
+		}
+	})
+
+	t.Run("last child of the open layer", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		c.Press(0)
+		out.take()
+
+		if err := c.RemoveKey("build", "github"); err != nil {
+			t.Fatal(err)
+		}
+		if a := c.Active(); a == nil {
+			t.Fatal("active returned to the top with a child left")
+		}
+		if err := c.RemoveKey("test", "github"); err != nil {
+			t.Fatal(err)
+		}
+		if a := c.Active(); a != nil {
+			t.Errorf("active %q, want the top layer", *a)
+		}
+		if n := len(out.changes); n != 2 || out.changes[1] != nil {
+			t.Errorf("layerChanged calls %v, want github then null", out.changes)
+		}
+	})
+
+	t.Run("key of the open layer", func(t *testing.T) {
+		out := newFakeOut()
+		c := open(t, "", out)
+		sixKeys(t, c)
+		c.Press(0)
+
+		if err := c.RemoveKey("github", ""); err != nil {
+			t.Fatal(err)
+		}
+		if a := c.Active(); a != nil {
+			t.Errorf("active %q, want the top layer", *a)
+		}
+		if n := len(out.changes); n != 2 || out.changes[1] != nil {
+			t.Errorf("layerChanged calls %v, want github then null", out.changes)
+		}
+	})
 }

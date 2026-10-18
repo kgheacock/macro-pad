@@ -254,3 +254,67 @@ func TestLayerPressesAreAppliedInOrder(t *testing.T) {
 
 	waitForLayerChanges(t, conn, []string{"", "github", ""})
 }
+
+func TestRemoveLayerKey(t *testing.T) {
+	s, ctl, _, logs := layerServer(t)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	for _, u := range []layers.Update{
+		{ID: "github", Status: layers.StatusRunning},
+		{ID: "dev", Status: layers.StatusDone},
+	} {
+		if err := ctl.SetKey(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stateCount := func() int {
+		n := 0
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSetKeyState {
+				n++
+			}
+		}
+		return n
+	}
+	waitForCondition(t, time.Second, func() bool { return stateCount() >= 2 })
+	before := stateCount()
+
+	// The tree drops "github", and only its key redraws: blank.
+	conn.send(t, Message{Kind: KindRemoveLayerKey, RemoveLayerKey: &RemoveLayerKeyPayload{ID: "github"}})
+	waitForCondition(t, time.Second, func() bool { return ctl.Snapshot().Keys[0] == nil })
+	waitForCondition(t, time.Second, func() bool { return stateCount() == before+1 })
+	msgs := conn.messages(t)
+	last := msgs[len(msgs)-1]
+	if last.Kind != KindSetKeyState || last.SetKeyState.KeyIndex != 0 || last.SetKeyState.Color != 0 {
+		t.Errorf("last message %+v, want key 0 blank", last)
+	}
+	if k := ctl.Snapshot().Keys[1]; k == nil || k.ID != "dev" {
+		t.Errorf("slot 1 holds %+v, want dev untouched", k)
+	}
+
+	// An unknown id changes nothing and is not logged as an error.
+	conn.send(t, Message{Kind: KindRemoveLayerKey, RemoveLayerKey: &RemoveLayerKeyPayload{ID: "nope"}})
+	conn.send(t, Message{Kind: KindRemoveLayerKey, RemoveLayerKey: &RemoveLayerKeyPayload{ID: "x", Parent: "nope"}})
+	time.Sleep(50 * time.Millisecond)
+	if n := stateCount(); n != before+1 {
+		t.Errorf("%d key states, want %d", n, before+1)
+	}
+	if logs.has("removeLayerKey") {
+		t.Error("an unknown id was logged as dropped")
+	}
+}
+
+func TestRemoveLayerKeyWithoutLayersIsLogged(t *testing.T) {
+	dev := transport.NewEmulator()
+	defer dev.Close()
+	s := NewServer(dev, dev)
+	logs := &logCollector{}
+	s.SetLogf(logs.logf)
+	conn := newFakeConn()
+	s.addClient(conn)
+
+	conn.send(t, Message{Kind: KindRemoveLayerKey, RemoveLayerKey: &RemoveLayerKeyPayload{ID: "x"}})
+	waitForCondition(t, time.Second, func() bool { return logs.has("removeLayerKey dropped") })
+}

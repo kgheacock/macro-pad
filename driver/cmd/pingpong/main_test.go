@@ -32,6 +32,14 @@ func (f *fakeTransport) BeginBatch(glyphMask, stateMask byte) error {
 	return nil
 }
 
+func (f *fakeTransport) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	return nil
+}
+
+func (f *fakeTransport) ShowFrames(slots []byte) error {
+	return nil
+}
+
 func (f *fakeTransport) ReadMessage() (transport.Message, error) {
 	return f.readMsg, f.readErr
 }

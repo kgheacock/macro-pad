@@ -31,6 +31,17 @@ const (
 	// board draws together. See "Begin batch" in docs/wire-protocol.md
 	// (task 0060).
 	MessageTypeBeginBatch MessageType = 7
+	// MessageTypeStoreFrame is a host→device frame that composes one glyph
+	// over one color into a slot of the board's frame cache. See "Store
+	// frame" in docs/wire-protocol.md (task 0061).
+	MessageTypeStoreFrame MessageType = 8
+	// MessageTypeShowFrames is a host→device frame that names a slot for each
+	// key. See "Show frames" in docs/wire-protocol.md (task 0061).
+	MessageTypeShowFrames MessageType = 9
+	// MessageTypeShowMiss is a device→host frame: the keys of a Show frames
+	// that named an empty slot. See "Show miss" in docs/wire-protocol.md
+	// (task 0061).
+	MessageTypeShowMiss MessageType = 10
 )
 
 const (
@@ -142,6 +153,12 @@ func decodeMessage(t MessageType, payload []byte) (msg Message, ok bool, err err
 			return Message{}, false, err
 		}
 		return Message{Type: t, Trace: tr}, true, nil
+	case MessageTypeShowMiss:
+		mask, err := decodeShowMiss(payload)
+		if err != nil {
+			return Message{}, false, err
+		}
+		return Message{Type: t, ShowMiss: ShowMiss{Mask: mask}}, true, nil
 	default:
 		return Message{}, false, nil
 	}

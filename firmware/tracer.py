@@ -37,6 +37,9 @@ PUSH_STARTED = 9
 # The key is 0xFF, and the payload is the pending masks: the glyph mask in the
 # low byte and the key state mask in the high byte.
 BATCH_TIMED_OUT = 10
+# Task 0061: a Show frames message that the board applied. The key is 0xFF, and
+# the payload is the mask of the keys it drew, bit k for key k.
+FRAMES_SHOWN = 11
 
 
 class Tracer:

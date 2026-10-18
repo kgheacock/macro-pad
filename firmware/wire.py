@@ -29,6 +29,17 @@ MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED = 6
 # Begin batch: names the keys whose update the board draws together (task 0060).
 MESSAGE_TYPE_BEGIN_BATCH = 7
 BEGIN_BATCH_PAYLOAD_SIZE = 2  # glyph mask + key state mask
+# Store frame: composes a glyph over a color into a slot of the frame cache
+# (task 0061). Payload: slot (1), color (2, little-endian), zlib stream (0 or
+# more bytes; none means a frame of the color alone).
+MESSAGE_TYPE_STORE_FRAME = 8
+STORE_FRAME_HEADER_SIZE = 3
+# Show frames: for each key a slot number, or SLOT_UNCHANGED (task 0061).
+MESSAGE_TYPE_SHOW_FRAMES = 9
+SHOW_FRAMES_MAX_KEYS = 32
+SLOT_UNCHANGED = 0xFF
+# Show miss, device to host: the mask of the keys that named an empty slot.
+MESSAGE_TYPE_SHOW_MISS = 10
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -180,6 +191,35 @@ class BeginBatch:
         self.state_mask = state_mask
 
 
+class StoreFrame:
+    """One decoded Store frame message: the slot, the color the frame is
+    composed over, and the glyph's pixels, or `None` for a frame of the color
+    alone. See "Store frame" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, slot, color, pixels):
+        self.slot = slot
+        self.color = color
+        self.pixels = pixels
+
+
+class ShowFrames:
+    """One decoded Show frames message: `slots[k]` is the slot key `k` shows,
+    or `SLOT_UNCHANGED`. See "Show frames" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, slots):
+        self.slots = slots
+
+
+def encode_show_miss(mask):
+    """Build a Show miss payload: the mask of the keys that named an empty
+    slot, bit `k` for key `k`. Pass it to `write_frame` with
+    `MESSAGE_TYPE_SHOW_MISS`.
+    """
+    return bytes((mask & 0xFF,))
+
+
 def _inflate_glyph(stream):
     """Inflate a type 6 zlib stream to a glyph's pixel buffer.
 
@@ -234,7 +274,8 @@ class CustomGlyphReader:
 
         Returns a decoded `CustomGlyph` once a full Set custom glyph
         frame has arrived, a `BeginBatch` once a full Begin batch frame
-        has arrived, `None` otherwise. A frame of a type this
+        has arrived, a `StoreFrame` or a `ShowFrames` once a full frame of
+        that type has arrived (task 0061), `None` otherwise. A frame of a type this
         reader does not know is dropped, by its declared length, matching
         `driver/transport/wire.go`'s `readFrame`/`decodeMessage` split. A
         glyph frame of the wrong length is dropped the same way, and then
@@ -287,10 +328,22 @@ class CustomGlyphReader:
                 self._frame_type = frame_type
                 self._total = FRAME_HEADER_SIZE + length
                 return False
+            if (
+                frame_type == MESSAGE_TYPE_STORE_FRAME
+                and STORE_FRAME_HEADER_SIZE <= length <= CUSTOM_GLYPH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_SHOW_FRAMES
+                and 1 <= length <= SHOW_FRAMES_MAX_KEYS
+            ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
+                return False
             self._bad_length = frame_type in (
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH,
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
                 MESSAGE_TYPE_BEGIN_BATCH,
+                MESSAGE_TYPE_STORE_FRAME,
+                MESSAGE_TYPE_SHOW_FRAMES,
             )
             self._bad_length_size = length
             self._filled = 0
@@ -310,6 +363,17 @@ class CustomGlyphReader:
                 return BeginBatch(
                     glyph_mask=self._frame[FRAME_HEADER_SIZE],
                     state_mask=self._frame[FRAME_HEADER_SIZE + 1],
+                )
+            if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES:
+                return ShowFrames(slots=bytes(self._frame[FRAME_HEADER_SIZE:total]))
+            if self._frame_type == MESSAGE_TYPE_STORE_FRAME:
+                base = FRAME_HEADER_SIZE
+                stream = self._view[base + STORE_FRAME_HEADER_SIZE : total]
+                pixels = _inflate_glyph(stream) if len(stream) else None
+                return StoreFrame(
+                    slot=self._frame[base],
+                    color=self._frame[base + 1] | (self._frame[base + 2] << 8),
+                    pixels=pixels,
                 )
             key_index = self._frame[FRAME_HEADER_SIZE]
             stream = self._view[FRAME_HEADER_SIZE + 1 : total]

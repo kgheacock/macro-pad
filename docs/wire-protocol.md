@@ -16,6 +16,9 @@ little-endian, matching the RP2350's native byte order.
 | Set custom glyph | Host → Device | CDC serial | 1 + 32,768 bytes |
 | Set custom glyph (compressed) | Host → Device | CDC serial | 1 + up to 32,767 bytes |
 | Begin batch | Host → Device | CDC serial | 2 bytes |
+| Store frame | Host → Device | CDC serial | 3 + up to 32,766 bytes |
+| Show frames | Host → Device | CDC serial | 1 to 32 bytes |
+| Show miss | Device → Host | CDC serial | 1 byte |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
@@ -56,6 +59,9 @@ bytes arrive is a truncated message, not a partial value.
 | 5 | Set custom glyph | Host → Device |
 | 6 | Set custom glyph (compressed) | Host → Device |
 | 7 | Begin batch | Host → Device |
+| 8 | Store frame | Host → Device |
+| 9 | Show frames | Host → Device |
+| 10 | Show miss | Device → Host |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -206,6 +212,91 @@ key. Update the firmware before the driver. See [task
 0060](../tasks/complete/0060-draw-a-layer-update-all-at-once.md) for the
 design decision.
 
+### Store frame (CDC, host → device)
+
+Composes one picture over one color into a slot of the board's frame cache. It
+draws nothing. Framed per [Framing](#framing) as type `8`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Slot | `0` to `127` |
+| 1 | 2 | Color | Background color, RGB565, little-endian |
+| 3 | 0 to 32,766 | Stream | A zlib stream (RFC 1950) that inflates to exactly 32,768 bytes, the Pixels field of Set custom glyph. An empty stream is a frame of the color alone, with no glyph |
+
+The board keeps a fixed pool of 128 slots in RAM, one frame in each: the
+picture, with a transparent pixel (`0x0000`) showing the color, as a Set custom
+glyph and a Key state would draw the key. A Store frame replaces the frame in
+its slot. The board allocates the pool when it starts, before its loop, and
+never frees, grows, or shrinks it, and never writes it to flash. A board that
+resets has an empty cache.
+
+The host owns the slot numbers. It picks a slot for each frame, and when all
+128 are in use it overwrites the least recently used one. The board is only an
+array. A Store frame for a slot above `127`, or with a stream that does not
+inflate to exactly 32,768 bytes, is dropped, and the frame is consumed by its
+`Length`: the slot keeps what it held.
+
+The `Length` of a Store frame is at least 3 and at most 32,769. A glyph that
+does not compress to fit is not a Store frame: the host draws that key with
+Set custom glyph and a Key state. A key that blinks is not cached either: it
+keeps the paths of Set custom glyph and Key state (tasks 0044 and 0048).
+
+The board must not change a slot while a push that reads it is queued or on the
+wire, so a Store frame for such a slot waits for that push (at most about 55 ms).
+The host never stores into a slot that a key shows, so this wait is rare. A
+Store frame takes about 140 ms of the board's time, the same as a Set custom
+glyph, because the board inflates the stream and composes the frame. Firmware
+that does not know type `8` skips the frame by its `Length`, as Framing says.
+Update the firmware before the driver.
+
+### Show frames (CDC, host → device)
+
+Names a slot for each key. The board draws the named keys together. Framed per
+[Framing](#framing) as type `9`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| `k` | 1 | Slot of key `k` | `0` to `127`, or `255` for "unchanged" |
+
+The payload has one byte for each key, key `0` first, and at least one byte. The
+board ignores the bytes of keys it does not have. A key whose byte is `255`
+keeps what it shows. For every other key, the board queues the push of the frame
+in the slot in one pass, so the pushes start together: one push group holds at
+most three panels, so six keys go out as two groups, about 30 ms apart. A Show
+frames needs no Begin batch, because one message is already atomic. It releases
+an open batch first.
+
+After a Show frames, the key's state is what a Set custom glyph and a Key state
+would have left: the frame's color, `0xFE` as its Emoji ID when the frame has a
+glyph, and no blink. A later Key state that names the same color keeps the
+frame. A later Key state with another color, or a built-in Emoji ID, builds a
+plain color frame.
+
+A key that names an empty slot, or a slot above `127`, keeps the image it had.
+The board draws the other keys, and answers with a Show miss. The board records
+`FRAMES_SHOWN` (see the [trace code registry](#trace-code-registry)) for the
+keys it drew.
+
+A Show frames with no byte is dropped, and the frame is consumed by its
+`Length`. Firmware that does not know type `9` skips the frame, and no key
+changes. See [task 0061](../tasks/ongoing/0061-cache-composed-glyph-frames-on-the-board.md)
+for the design decision.
+
+### Show miss (CDC, device → host)
+
+Sent when a Show frames named at least one empty slot. Framed per
+[Framing](#framing) as type `10`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Mask | Bit `k` is `1` when key `k` named an empty slot and kept its image |
+
+The host stores the frames of those keys again, and sends a Show frames for
+them. This repairs a table that the host and the board disagree on, for example
+after a code reload that kept USB up. After a reconnect the host does not wait
+for a miss: it clears its record of what the board holds and stores every frame
+again.
+
 ## Emoji IDs
 
 Reserved values for the Key state message's Emoji ID field. Every other
@@ -313,6 +404,7 @@ for the design decision.
 | 8 | `REFRESH_DONE` | `0`, unused. Since task 0045, the end of a push to the panel |
 | 9 | `PUSH_STARTED` | `0`, unused. The start of a push to the panel, task 0045 |
 | 10 | `BATCH_TIMED_OUT` | The pending masks of a batch that the board released after 2 s, task 0060: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
+| 11 | `FRAMES_SHOWN` | The keys a Show frames drew, task 0061: bit `k` for key `k`. The Key field is `0xFF`. The board records it as it queues the pushes, so the `PUSH_STARTED` records of the keys follow it |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last

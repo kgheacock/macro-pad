@@ -56,6 +56,16 @@ func (b *fakeBoard) BeginBatch(glyphMask, stateMask byte) error {
 	return nil
 }
 
+func (b *fakeBoard) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	b.record("store %d color %#04x %d bytes", slot, color, len(pixels))
+	return nil
+}
+
+func (b *fakeBoard) ShowFrames(slots []byte) error {
+	b.record("show %v", slots)
+	return nil
+}
+
 func (b *fakeBoard) ReadMessage() (Message, error) {
 	msg, ok := <-b.in
 	if !ok {
@@ -249,18 +259,19 @@ func TestReconnecting_SavesStateFilesAReaderCanCheck(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("keys.json does not parse: %v\n%s", err, raw)
 	}
+	hash := newGlyphRec(glyph).hash
 	want := []storedKey{
 		{KeyIndex: 0, Color: 0xF800, EmojiID: 0, Blink: true},
 		{KeyIndex: 1, Color: 0x07E0, EmojiID: 3},
-		{KeyIndex: 2, Color: 0x001F, EmojiID: CustomGlyphSentinelEmojiID},
+		{KeyIndex: 2, Color: 0x001F, EmojiID: CustomGlyphSentinelEmojiID, Glyph: hash},
 	}
 	if !reflect.DeepEqual(got.Keys, want) {
 		t.Fatalf("keys.json keys = %+v, want %+v", got.Keys, want)
 	}
 
-	pixels, err := os.ReadFile(filepath.Join(dir, "glyph-2.bin"))
+	pixels, err := os.ReadFile(filepath.Join(dir, glyphFileName(hash)))
 	if err != nil || !bytes.Equal(pixels, glyph) {
-		t.Fatalf("glyph-2.bin: err %v, %d bytes, want the glyph's %d bytes", err, len(pixels), len(glyph))
+		t.Fatalf("%s: err %v, %d bytes, want the glyph's %d bytes", glyphFileName(hash), err, len(pixels), len(glyph))
 	}
 
 	entries, _ := os.ReadDir(dir)
@@ -294,19 +305,64 @@ func TestReconnecting_ALaterRunReplaysSavedStateToTheFirstBoard(t *testing.T) {
 	}
 }
 
-func TestReconnecting_ABuiltInEmojiRemovesTheGlyphFile(t *testing.T) {
+func TestReconnecting_ABuiltInEmojiLeavesTheGlyphOutOfKeysJSON(t *testing.T) {
 	dir := t.TempDir()
 	r, _ := connected(t, dir, nil)
 	defer r.Close()
 
-	r.SendCustomGlyph(0, fullGlyph(0x22))
-	if _, err := os.Stat(filepath.Join(dir, "glyph-0.bin")); err != nil {
+	glyph := fullGlyph(0x22)
+	r.SendCustomGlyph(0, glyph)
+	if _, err := os.Stat(filepath.Join(dir, glyphFileName(newGlyphRec(glyph).hash))); err != nil {
 		t.Fatalf("glyph file after a glyph: %v", err)
 	}
 	r.SendKeyState(key(0, 0x001F, 7, false))
 
-	if _, err := os.Stat(filepath.Join(dir, "glyph-0.bin")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("glyph file after a built-in Emoji ID: err %v, want it removed", err)
+	raw, err := os.ReadFile(filepath.Join(dir, "keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "glyph") {
+		t.Fatalf("keys.json after a built-in Emoji ID names a glyph:\n%s", raw)
+	}
+}
+
+func TestReconnecting_ALegacyGlyphFileIsMovedToItsHashedName(t *testing.T) {
+	dir := t.TempDir()
+	glyph := fullGlyph(0x44)
+	os.WriteFile(filepath.Join(dir, "glyph-1.bin"), glyph, 0o644)
+	os.WriteFile(filepath.Join(dir, "keys.json"),
+		[]byte(`{"keys":[{"key_index":1,"color":63488,"emoji_id":254,"blink":false}]}`), 0o644)
+
+	r, board := connected(t, dir, nil)
+	defer r.Close()
+	waitFor(t, "the replay", func() bool { return len(board.sent()) >= 2 })
+
+	want := []string{"glyph 1 32768 bytes", "key 1 color 0xf800 emoji 254 blink false"}
+	if got := board.sent(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, glyphFileName(newGlyphRec(glyph).hash))); err != nil {
+		t.Fatalf("hashed glyph file after the load: %v", err)
+	}
+}
+
+func TestReconnecting_AGlyphFileNoKeyShowsIsPrunedAtStart(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := connected(t, dir, nil)
+	shown, unused := fullGlyph(0x51), fullGlyph(0x52)
+	r.SendCustomGlyph(0, shown)
+	r.SendKeyState(key(0, 1, CustomGlyphSentinelEmojiID, false))
+	r.SendCustomGlyph(1, unused)
+	r.SendKeyState(key(1, 1, 3, false)) // a built-in glyph replaces it
+	r.Close()
+
+	r2, _ := connected(t, dir, nil)
+	defer r2.Close()
+	if _, err := os.Stat(filepath.Join(dir, glyphFileName(newGlyphRec(shown).hash))); err != nil {
+		t.Fatalf("the glyph a key shows: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, glyphFileName(newGlyphRec(unused).hash))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the glyph no key shows: err %v, want it pruned", err)
 	}
 }
 
@@ -391,7 +447,7 @@ func TestReconnecting_ASlowGlyphUploadDoesNotBlockCloseOrTheSavedState(t *testin
 
 	// The glyph is on its way. Its state is already on disk, and Close
 	// does not wait for the upload.
-	if _, err := os.Stat(filepath.Join(dir, "glyph-2.bin")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, glyphFileName(newGlyphRec(fullGlyph(0x33)).hash))); err != nil {
 		t.Fatalf("glyph file during the upload: %v", err)
 	}
 	closed := make(chan struct{})
@@ -413,9 +469,10 @@ func TestReconnecting_SixGlyphsAreSavedAndReplayedInKeyOrder(t *testing.T) {
 	r.Close()
 
 	for k := byte(0); k < 6; k++ {
-		pixels, err := os.ReadFile(filepath.Join(dir, glyphFileName(k)))
+		name := glyphFileName(newGlyphRec(fullGlyph(0x10 + k)).hash)
+		pixels, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || !bytes.Equal(pixels, fullGlyph(0x10+k)) {
-			t.Fatalf("glyph-%d.bin: err %v, want the key's own glyph", k, err)
+			t.Fatalf("%s: err %v, want the key's own glyph", name, err)
 		}
 	}
 

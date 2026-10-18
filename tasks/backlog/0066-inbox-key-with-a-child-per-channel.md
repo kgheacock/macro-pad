@@ -134,7 +134,9 @@ looks for news.
 - `iconRef` is `.generated/inbox/<channel>.png` under `--assets-dir`. The
   daemon draws it: a dark tile with the channel's last segment in large
   letters, and the segment before it in small letters above, cut with `…`
-  to fit 128 px. It uses `golang.org/x/image/font/basicfont`, scaled. It
+  to fit 128 px. Node has no image library built in, so `inbox/src/png.js` holds a
+  small bitmap font (printable ASCII, 5x7), draws it scaled, and encodes the
+  PNG with `node:zlib` (`deflateSync` and `crc32`). No npm package. It
   writes the file with a temporary name and a rename, and only when the
   name has no file yet.
 - The layer tree draws the count badge (task 0057, or task 0062's pip once it
@@ -165,9 +167,9 @@ Files to change:
 - `driver/plugin/protocol.go`, `driver/plugin/server.go` — `removeLayerKey`
 - `driver/README.md` — "Protocol" and "Layers"
 - `assets/inbox.png` — the Inbox icon
-- `inbox/render` — the plan from `Unseen()` and the active layer to
-  messages, and the channel images
-- `inbox/go.mod` — `golang.org/x/image`
+- `inbox/src/render.js` — the plan from `unseen()` and the active layer to
+  messages
+- `inbox/src/png.js` — the channel images
 
 ## Definition of done
 
@@ -183,28 +185,30 @@ is ticked.
 - [ ] **DoD-3** — Unseen counts `{a:2, b:1}` give an `inbox` key with count
   3 and status `WARN`, and children `a` and `b` with counts 2 and 1, newest
   first. No unseen messages give an `inbox` key with count 0, no status, and
-  no children. **Proof:** `cd inbox && go test ./render -run TestPlan`
+  no children. **Proof:** `cd inbox && node --test --test-name-pattern=TestPlan test/render.test.js`
 - [ ] **DoD-4** — Seven channels with news give five children, the five
-  newest; the Inbox count includes all seven. **Proof:** `go test ./render -run TestFiveNewest`
+  newest; the Inbox count includes all seven. **Proof:** `node --test --test-name-pattern=TestFiveNewest test/render.test.js`
 - [ ] **DoD-5** — While `active` is `inbox`, a channel at zero keeps its
   position with count 0, and no child moves. After `layerChanged` to the top,
-  the zero channel is removed and the rest reorder. **Proof:** `go test ./render -run TestStableWhileOpen`
-- [ ] **DoD-6** — A second plan with no change sends nothing. **Proof:** `go test ./render -run TestNoChangeSendsNothing`
+  the zero channel is removed and the rest reorder. **Proof:** `node --test --test-name-pattern=TestStableWhileOpen test/render.test.js`
+- [ ] **DoD-6** — A second plan with no change sends nothing. **Proof:** `node --test --test-name-pattern=TestNoChangeSendsNothing test/render.test.js`
 - [ ] **DoD-7** — The channel image for `macro-pad.driver` is 128x128, and
-  its pixels match a golden PNG in `inbox/render/testdata`. **Proof:** `go test ./render -run TestChannelImage`
+  its pixels match a golden PNG in `inbox/test/fixtures`. **Proof:** `node --test --test-name-pattern=TestChannelImage test/render.test.js`
 - [ ] **DoD-8** — On the pad, with `macropadd` and `inbox daemon` running,
   `inbox send demo hi` shows a count on the Inbox key; a press shows a
   `demo` key with count 1 on key 0, and the shift arrow on key 3. **Proof:**
   Keith's check on the board, recorded in Notes
 - [ ] **DoD-9** — `driver/README.md` records `removeLayerKey`. **Proof:** `driver/README.md`, "Protocol"
-- [ ] **DoD-10** — `go build ./... && go vet ./...` exits 0 in `driver` and
-  in `inbox` on go 1.22.0. **Proof:** the exit codes
+- [ ] **DoD-10** — `cd driver && go build ./... && go vet ./...` exits 0 on
+  go 1.22.0, and `cd inbox && npm test` passes on Node 22.13. **Proof:** the
+  exit codes
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 
-- `golang.org/x/image` may need a newer Go than 1.22.0 → pin a release whose
-  `go` line is 1.22 or older.
+- A hand-made PNG encoder can write a file a decoder rejects → the golden
+  test decodes it with Go's `image/png` too, through `transport.DecodePNGToRGB565`
+  in a small Go test in `driver`.
 - Each new channel sends a new image to the board, about 155 ms → the
   frame cache of task 0061 keeps it after the first draw.
 - Generated images pile up under `assets/.generated/inbox/` → one small PNG

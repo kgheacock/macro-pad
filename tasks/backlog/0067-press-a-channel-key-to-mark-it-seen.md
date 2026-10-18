@@ -96,14 +96,14 @@ it last sent, in order (task 0066). On an `event` of type `press` with key
 2. If `k` is 3, do nothing. The layer tree returns to the top layer.
 3. Map `k` to a child position: keys 0, 1, 2, 4, 5 are positions 0 to 4.
 4. If no child is at that position, do nothing.
-5. Otherwise call `store.MarkSeen(channel, shownID)`, where `shownID` is the
+5. Otherwise call `markSeen(channel, shownId)`, where `shownId` is the
    newest unseen id the daemon had when it last sent that child.
 
 A child at count 0 marks nothing new, and is harmless.
 
 ### After the mark
 
-`MarkSeen` commits, so the next `data_version` poll (task 0065) sees the
+`markSeen` commits, so the next `data_version` poll (task 0065) sees the
 change and task 0066 sends the new counts. To meet the 1 s goal without
 waiting for the poll, the daemon runs the read and the send right after the
 mark. The child stays in its position at count 0 until the layer closes
@@ -111,12 +111,12 @@ mark. The child stays in its position at count 0 until the layer closes
 
 ### Errors
 
-A failed `MarkSeen`, such as a locked store past the busy timeout, is
+A failed `markSeen`, such as a locked store past the busy timeout, is
 logged with the channel, and the counts stay. The next press tries again.
 
 Files to change:
 
-- `inbox/daemon` — press handling
+- `inbox/src/daemon.js` — press handling
 - `inbox/README.md` — "Daemon": what a press does
 
 ## Definition of done
@@ -127,15 +127,15 @@ is ticked.
 
 - [ ] **DoD-1** — With `active` `inbox` and children `a`, `b`, `c`, presses
   on keys 0, 1, 2 mark `a`, `b`, `c` seen; keys 4 and 5 with no child mark
-  nothing; key 3 marks nothing. **Proof:** `cd inbox && go test ./daemon -run TestPressMarksChannel`
+  nothing; key 3 marks nothing. **Proof:** `cd inbox && node --test --test-name-pattern=TestPressMarksChannel test/daemon.test.js`
 - [ ] **DoD-2** — A press while `active` is `null` marks nothing, including
   the press on the Inbox key that opens the layer, with Inbox on key 0.
-  **Proof:** `go test ./daemon -run TestOpenPressMarksNothing`
+  **Proof:** `node --test --test-name-pattern=TestOpenPressMarksNothing test/daemon.test.js`
 - [ ] **DoD-3** — A message inserted after the child was sent, and before
   the press, stays unseen, and the child shows count 1 after the press.
-  **Proof:** `go test ./daemon -run TestLateMessageStaysUnseen`
+  **Proof:** `node --test --test-name-pattern=TestLateMessageStaysUnseen test/daemon.test.js`
 - [ ] **DoD-4** — After a press, the server receives the new child count
-  and Inbox total within 1 s, with `--poll 10s`. **Proof:** `go test ./daemon -run TestMarkSendsAtOnce`
+  and Inbox total within 1 s, with `--poll 10s`. **Proof:** `node --test --test-name-pattern=TestMarkSendsAtOnce test/daemon.test.js`
 - [ ] **DoD-5** — On the pad, a press on a channel key with count 2 shows
   count 0, and the Inbox key's count drops by 2. `inbox list` for that
   channel prints nothing. **Proof:** Keith's check on the board, recorded in Notes

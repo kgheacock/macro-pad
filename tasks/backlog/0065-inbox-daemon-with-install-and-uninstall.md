@@ -37,10 +37,10 @@ draws, and task 0067 says what a press does.
 - It starts with or without `macropadd` running, and survives `macropadd`
   restarts. It reconnects and sends its full state again.
 - Only one daemon runs per store.
-- `inbox/scripts/install.sh` builds the binary, installs it, and starts the
+- `inbox/scripts/install.sh` puts `inbox` on the `PATH` and starts the
   daemon at login. Running it again upgrades in place.
 - `inbox/scripts/uninstall.sh` stops the daemon, removes the service and the
-  binary, and keeps the store unless asked.
+  `inbox` command, and keeps the store unless asked.
 - macOS uses a launchd LaunchAgent. Linux uses a systemd user unit.
 
 ## Non-goals
@@ -64,17 +64,19 @@ it a slot.
   reconnect, routing, and tests from `hosttest`.
 - Bad, because task 0055 is still an open PR (#65) and is not on `main`.
   This task would wait on it.
+- Bad, because the host is Go and the inbox is Node, so the inbox cannot
+  be a host plugin without a rewrite in Go.
 - Bad, because the code would live in `driver/plugins/`, not in the new
-  `inbox/` folder Keith asked for, and the driver module would gain SQLite.
+  `inbox/` folder Keith asked for, and the driver would gain SQLite.
 - Bad, because the inbox then runs only while the plugin host runs, and its
   install script would have to install the host.
 
 ### Approach B — A standalone daemon in `inbox/`, a WebSocket client of `macropadd`
 
-`inbox daemon` is a subcommand of the task 0064 binary. It talks to
+`inbox daemon` is a subcommand of the task 0064 command. It talks to
 `macropadd` with `setLayerKey`, as `macro_streamer` does (task 0057).
 
-- Good, because everything inbox lives in `inbox/` and ships as one binary.
+- Good, because everything inbox lives in `inbox/` and ships as one package.
 - Good, because it works on `main` today, with no wait on task 0055.
 - Good, because the layer tree already lets several clients share the keys,
   so it coexists with the plugin host when that lands.
@@ -114,14 +116,17 @@ inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500
 - `--assets-dir` must be the same directory `macropadd` uses. Task 0066
   writes generated images under it.
 - `--slot` and the key layout are task 0066's.
-- `inbox/cmd/inbox` imports `driver/plugin` for the message types, through
-  `go.work` and a `replace` line in `inbox/go.mod`.
+- The client uses Node's built-in `WebSocket` (Node 22), so it needs no
+  npm package. `inbox/src/protocol.js` builds the `setLayerKey` and reads the
+  `event` and `layerChanged` messages, as `driver/README.md` "Protocol"
+  documents them. A test checks its JSON against fixtures copied from
+  `driver/plugin` tests.
 
 ### Watching the store
 
 The daemon keeps one read connection open and runs `PRAGMA data_version`
 every `--poll`. The value changes when any other connection commits. On a
-change it runs `store.Unseen()` and hands the result to the renderer of task
+change it runs `unseen()` and hands the result to the renderer of task
 0066. A poll that sees no change does no other query. The daemon also runs
 one full read every 30 s, as a guard against a missed change.
 
@@ -138,9 +143,12 @@ one full read every 30 s, as a guard against a missed change.
 
 ### One daemon per store
 
-At start the daemon takes an exclusive `flock` on `<db>.daemon.lock`. If the
-lock is held, it prints `inbox: a daemon already runs for <db>` and exits
-with code 3. A crashed daemon releases the lock with its process.
+Node has no `flock`. At start the daemon creates `<db>.daemon.pid` with the
+`wx` flag and writes its pid. If the file exists and that pid is alive
+(`process.kill(pid, 0)`), it prints
+`inbox: a daemon already runs for <db> (pid N)` and exits with code 3. If
+that pid is gone, the file is stale: it is replaced, and the daemon logs it.
+The daemon removes the file on exit.
 
 ### Help and error messages
 
@@ -162,8 +170,11 @@ the next daemon start corrects them.
 
 `inbox/scripts/install.sh [--assets-dir DIR] [--port N] [--slot N]`:
 
-1. Run `go build -o "$PREFIX/bin/inbox" ./inbox/cmd/inbox`, with
-   `PREFIX=$HOME/.local` by default.
+1. Check that `node` is 22.13 or newer, and record its absolute path, because
+   launchd and systemd do not see the shell's `PATH` (nvm, Homebrew). Write
+   `$PREFIX/bin/inbox`, with `PREFIX=$HOME/.local` by default: a two-line
+   `sh` wrapper that runs that `node` on the repo's `inbox/bin/inbox.js`. The
+   service runs the same wrapper.
 2. On macOS, write
    `~/Library/LaunchAgents/com.kgheacock.macropad.inbox.plist` with
    `RunAtLoad`, `KeepAlive`, `ThrottleInterval` 5, the daemon flags, and
@@ -173,11 +184,12 @@ the next daemon start corrects them.
 3. On Linux, write `~/.config/systemd/user/inbox-daemon.service` with
    `Restart=always` and `RestartSec=5`, then
    `systemctl --user daemon-reload` and `systemctl --user enable --now`.
-4. Print where the binary, the service file, the log, and the store are, and
+4. Print where the wrapper, the service file, the log, and the store are, and
    whether the daemon is running.
 
-The script is idempotent. A second run rebuilds the binary and restarts the
-daemon. `--assets-dir` defaults to the repo's `assets/` as an absolute path,
+The script is idempotent. A second run rewrites the wrapper and restarts the
+daemon. The repo checkout must stay where it is; the README says to rerun
+the script after moving it or after changing Node versions. `--assets-dir` defaults to the repo's `assets/` as an absolute path,
 which matches `macropadd` run from the repo root. The script refuses a
 relative path, because launchd starts the daemon in `/`.
 
@@ -186,7 +198,7 @@ relative path, because launchd starts the daemon in `/`.
 `inbox/scripts/uninstall.sh [--purge]`:
 
 1. Stop and remove the LaunchAgent or the systemd unit.
-2. Remove `$PREFIX/bin/inbox`.
+2. Remove the `$PREFIX/bin/inbox` wrapper.
 3. With `--purge`, also remove the store and its `-wal` and `-shm` files.
    Without it, print where the store is.
 
@@ -197,12 +209,13 @@ print each action without doing it. Both take `-h` and `--help`, which print
 their options and what they install or remove, and exit 0. An unknown option
 prints `install.sh: unknown option "--foo"; run 'install.sh -h' for help` and
 exits 2. A failed step names the step and the command that failed, such as
-`install.sh: go build failed; is Go 1.22 or newer on PATH?`, and exits 1.
+`install.sh: node 18.19.0 is too old; install Node 22.13 or newer`, and exits 1.
 
 Files to change:
 
-- `inbox/cmd/inbox` — the `daemon` subcommand
-- `inbox/daemon` — the watch loop, the client, the lock
+- `inbox/src/cli.js` — the `daemon` subcommand
+- `inbox/src/daemon.js` — the watch loop, the client, the pid file
+- `inbox/src/protocol.js` — the messages
 - `inbox/scripts/install.sh`, `inbox/scripts/uninstall.sh`
 - `inbox/scripts/com.kgheacock.macropad.inbox.plist.tmpl`,
   `inbox/scripts/inbox-daemon.service.tmpl`
@@ -216,15 +229,15 @@ is ticked.
 
 - [ ] **DoD-1** — With a test WebSocket server in place of `macropadd`, a
   row inserted by another process reaches the server as a message within 1 s.
-  **Proof:** `cd inbox && go test ./daemon -run TestChangeReachesPad`
+  **Proof:** `cd inbox && node --test --test-name-pattern=TestChangeReachesPad test/daemon.test.js`
 - [ ] **DoD-2** — A poll with no commit runs no query but `data_version`.
-  **Proof:** `go test ./daemon -run TestIdlePollIsCheap`
+  **Proof:** `node --test --test-name-pattern=TestIdlePollIsCheap test/daemon.test.js`
 - [ ] **DoD-3** — Started with no server listening, the daemon connects when
   one starts. After the server restarts, it sends its full state again.
-  **Proof:** `go test ./daemon -run 'TestConnectLate|TestResendOnReconnect'`
+  **Proof:** `node --test --test-name-pattern='TestConnectLate|TestResendOnReconnect' test/daemon.test.js`
 - [ ] **DoD-4** — A second daemon on the same store exits with code 3 and
-  the message above. **Proof:** `go test ./cmd/inbox -run TestSecondDaemonRefused`
-- [ ] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `go test ./cmd/inbox -run TestDaemonSignal`
+  the message above. **Proof:** `node --test --test-name-pattern=TestSecondDaemonRefused test/cli.test.js`
+- [ ] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
 - [ ] **DoD-6** — `install.sh --dry-run` and `uninstall.sh --dry-run` print
   the plist path on macOS and the unit path on Linux, and change nothing.
   **Proof:** run both, then `git status` and `ls` the service paths
@@ -241,7 +254,7 @@ is ticked.
   `inbox/README.md`
 - [ ] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
   (and `--help`) print usage and exit 0. An unknown option exits 2 with a
-  message that names it. **Proof:** `go test ./cmd/inbox -run TestDaemonHelp`
+  message that names it. **Proof:** `node --test --test-name-pattern=TestDaemonHelp test/cli.test.js`
   and running the scripts
 - [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
@@ -253,8 +266,9 @@ is ticked.
   with the same one.
 - launchd starts the daemon before `macropadd` → the dial backs off and
   connects later (DoD-3).
-- A user whose `go` is not on launchd's `PATH` → the install script builds
-  in the user's shell, so only the built binary runs under launchd.
+- launchd does not see nvm's or Homebrew's `node` on `PATH` → the wrapper
+  names `node` by absolute path, found when the install script runs in the
+  user's shell.
 - Polling every 500 ms costs a little CPU → `data_version` is a cheap pragma
   on an open connection, and DoD-2 checks no more runs.
 

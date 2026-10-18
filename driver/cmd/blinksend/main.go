@@ -91,6 +91,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		script = func(dev transport.Transport) error {
 			return sendGlyphs(dev, stdout, true, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
 		}
+	case "cached":
+		// Task 0061: store two sets of six frames, then show them in turn.
+		script = func(dev transport.Transport) error { return sendCached(dev, stdout, *assetsDir) }
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
 		// code.py has given an unreadable trace stream and no decoded

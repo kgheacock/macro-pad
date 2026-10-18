@@ -2320,3 +2320,8 @@ def test_a_show_with_pips_draws_every_named_key_in_one_pass_and_traces_it():
     assert bus.groups[groups_before:] == [[0, 1, 2], [3, 4, 5]]
     shown = [p for code, _, p in tracer.records if code == tracer_module.FRAMES_SHOWN]
     assert shown == [ALL_KEYS]
+    codes = [code for code, _, _ in tracer.records]
+    started = [p for code, _, p in tracer.records if code == tracer_module.SHOW_WITH_PIPS_STARTED]
+    assert started == [ALL_KEYS]
+    assert codes.index(tracer_module.SHOW_WITH_PIPS_STARTED) < codes.index(tracer_module.FRAMES_SHOWN)
+    assert tracer_module.SHOW_WITH_PIPS_STARTED == 13

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kgheacock/macro-pad/driver/layers"
 	"github.com/kgheacock/macro-pad/driver/recorder"
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
@@ -65,7 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, pips, or warmup (send nothing)")
 	keyStateOverHID := fs.Bool("key-state-over-hid", false, "send key states as HID reports, 150 ms apart, as before task 0059; for the burst and busyburst scenarios, which test lost HID reports")
 	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
@@ -108,6 +109,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "cached":
 		// Task 0061: store two sets of six frames, then show them in turn.
 		script = func(dev transport.Transport) error { return sendCached(dev, stdout, *assetsDir) }
+	case "pips":
+		// Task 0062: send the pip sheet and six frames, then show them in turn
+		// with a count on each key.
+		script = func(dev transport.Transport) error { return sendPips(dev, stdout, *assetsDir) }
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
 		// code.py has given an unreadable trace stream and no decoded
@@ -115,7 +120,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, batchloss, cached or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, batchloss, cached, pips or warmup\n", *scenario)
 		return 2
 	}
 
@@ -331,6 +336,44 @@ func sendCached(dev transport.Transport, stdout io.Writer, assetsDir string) err
 			return err
 		}
 		fmt.Fprintf(stdout, "blinksend: show %d of set %d, write %s\n", i, set, time.Since(start).Round(time.Microsecond))
+		time.Sleep(cachedSpacing)
+	}
+	return nil
+}
+
+// sendPips sends the pip sheet, stores six frames in slots 0 to 5, one for each
+// status color, and then shows them in turn with a count on every key, one Show
+// frames with pips message for all six each time. `tools/blink_trace.py report
+// --scenario=pips` reads `six keys in`, which includes the stamps, and `push
+// span` from the trace, for each Show (task 0062).
+func sendPips(dev transport.Transport, stdout io.Writer, assetsDir string) error {
+	sheet, err := layers.BuildPipSheet()
+	if err != nil {
+		return err
+	}
+	if err := dev.StorePipSheet(sheet.Colors, sheet.Pixels); err != nil {
+		return err
+	}
+	for key := byte(0); key < 6; key++ {
+		pixels, err := iconGlyph(assetsDir, key)
+		if err != nil {
+			return err
+		}
+		if err := dev.StoreFrame(key, layers.PipColors[int(key)%len(layers.PipColors)], pixels); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(stdout, "blinksend: stored the pip sheet and 6 frames")
+	time.Sleep(settle)
+
+	counts := [][]byte{{1, 12, 99, 100, 7, 42}, {2, 13, 98, 255, 8, 41}}
+	slots := []byte{0, 1, 2, 3, 4, 5}
+	for i := 0; i < cachedShows; i++ {
+		start := time.Now()
+		if err := dev.ShowFramesWithPips(slots, counts[i%2]); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "blinksend: show %d with pips %v, write %s\n", i, counts[i%2], time.Since(start).Round(time.Microsecond))
 		time.Sleep(cachedSpacing)
 	}
 	return nil

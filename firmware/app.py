@@ -508,13 +508,19 @@ class MacroPad:
         keeps its image, and the board answers with a Show miss for those keys.
         An open batch is released first, like a new Begin batch does.
         """
+        # A Show frames with pips has a count for each key; a plain one has none.
+        counts = getattr(message, "counts", None)
+        if counts is not None:
+            named = 0
+            for key_index in range(min(len(message.slots), len(self.key_states))):
+                if message.slots[key_index] != wire.SLOT_UNCHANGED:
+                    named |= 1 << key_index
+            self._record_trace(tracer_module.SHOW_WITH_PIPS_STARTED, _NO_KEY, named)
         if self._batch is not None:
             self._release_batch(now_us)
         cache = self._frame_cache
         shown = 0
         missed = 0
-        # A Show frames with pips has a count for each key; a plain one has none.
-        counts = getattr(message, "counts", None)
         for key_index in range(min(len(message.slots), len(self.key_states))):
             slot = message.slots[key_index]
             if slot == wire.SLOT_UNCHANGED:

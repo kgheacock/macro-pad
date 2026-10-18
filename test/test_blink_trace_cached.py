@@ -75,3 +75,45 @@ def test_cached_run_with_no_show_fails():
 
     assert blink_trace.report([], "cached", out) is False
     assert "no Show frames" in out.getvalue()
+
+
+def _pips_lines(show_times_us, stamp_us=40_000, group_gap_us=30_000, push_us=26_000):
+    """One Show frames with pips of six keys per entry: SHOW_WITH_PIPS_STARTED,
+    the stamps (`stamp_us`), FRAMES_SHOWN, then two groups of three pushes."""
+    lines = []
+    for t in show_times_us:
+        lines.append(_record(blink_trace.SHOW_WITH_PIPS_STARTED, 255, 0b111111, t))
+        shown = t + stamp_us
+        lines.append(_record(blink_trace.FRAMES_SHOWN, 255, 0b111111, shown))
+        for key in range(6):
+            start = shown + 100 + (key // 3) * group_gap_us
+            lines.append(_record(blink_trace.PUSH_STARTED, key, 0, start + key))
+            lines.append(_record(blink_trace.REFRESH_DONE, key, 0, start + push_us))
+    return lines
+
+
+def test_the_show_with_pips_started_code_is_13():
+    assert blink_trace.SHOW_WITH_PIPS_STARTED == 13
+
+
+def test_pips_run_counts_the_stamps_in_six_keys_in_and_does_not_limit_the_span():
+    records = blink_trace.load_trace(_pips_lines([1_000_000, 2_000_000], group_gap_us=45_000))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "pips", out) is True
+    text = out.getvalue()
+    assert "shows 2" in text
+    assert "six keys in 111.1 ms (limit 150)" in text  # 40 stamp + 100 us + 45 gap + 26 push
+    assert "push span 45.0 ms (not limited)" in text
+
+
+def test_pips_run_with_slow_stamps_fails():
+    records = blink_trace.load_trace(_pips_lines([1_000_000], stamp_us=120_000))
+
+    assert blink_trace.report(records, "pips", io.StringIO()) is False
+
+
+def test_pips_run_with_no_show_with_pips_fails():
+    records = blink_trace.load_trace(_cached_lines([1_000_000]))
+
+    assert blink_trace.report(records, "pips", io.StringIO()) is False

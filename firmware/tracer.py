@@ -43,6 +43,11 @@ FRAMES_SHOWN = 11
 # Task 0063: an open batch asked the host for what it lacks. The key is 0xFF,
 # and the payload is the pending masks, as for BATCH_TIMED_OUT.
 BATCH_INCOMPLETE = 12
+# Task 0062: the board began a Show frames with pips message, before it copied
+# and stamped any frame. The key is 0xFF and the payload is the mask of the keys
+# the message names a slot for. `FRAMES_SHOWN` follows, so the two bound the
+# time of the stamps.
+SHOW_WITH_PIPS_STARTED = 13
 
 
 class Tracer:

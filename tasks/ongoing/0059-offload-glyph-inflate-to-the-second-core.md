@@ -1,14 +1,14 @@
 ---
 id: "0059"
 title: "Offload glyph inflate to the second core, keep the frame pool off the Python heap, and resend lost key states"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-17"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0059-offload-glyph-inflate-to-the-second-core"
 related: ["0058", "0060", "0061", "0044", "0045", "0048", "0057"]
 tags: ["firmware", "driver", "performance", "multicore", "circuitpython", "memory", "reliability"]
 ---

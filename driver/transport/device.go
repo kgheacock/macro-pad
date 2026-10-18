@@ -74,6 +74,13 @@ type Options struct {
 	// Confirmed live during task 0031's key-0 bring-up.
 	CDCPort string
 
+	// KeyStateOverHID sends key states as HID output reports, spaced by
+	// minReportGap, as before task 0059. The default is a Key state frame
+	// over CDC (type 12), which the firmware of task 0059 reads in order with
+	// the glyphs and never loses. Firmware older than that drops the frame, so
+	// set this for it, or for a test of the lost-report path.
+	KeyStateOverHID bool
+
 	// DropKeyState, when not nil, is called for each key state before it is
 	// written, and a key state for which it returns true is not written at
 	// all, as if the board had lost the report. It is a fault injection for
@@ -165,10 +172,18 @@ type Device struct {
 	hid    io.WriteCloser
 	serial io.ReadWriteCloser
 
-	// reportMu serialises SendKeyState and guards lastReport, the time the
-	// previous report was written. It is the zero time before the first.
+	// reportMu serialises SendKeyState over HID and guards lastReport, the time
+	// the previous report was written. It is the zero time before the first.
 	reportMu   sync.Mutex
 	lastReport time.Time
+
+	// writeMu serialises the frames written to serial: a frame is a header and
+	// a payload in two writes, and a key state sent while a glyph is on the
+	// wire must not land between them.
+	writeMu sync.Mutex
+
+	// keyStateOverHID is Options.KeyStateOverHID.
+	keyStateOverHID bool
 
 	// closeOnce makes Close safe to call more than once: a second hid_close
 	// on the same handle crashes the process.
@@ -249,6 +264,7 @@ func tryOpen(opts Options, hidB hidBackend, serialB serialBackend) (*Device, err
 
 	d := newDevice(hidConn, serialConn)
 	d.dropKeyState = opts.DropKeyState
+	d.keyStateOverHID = opts.KeyStateOverHID
 	return d, nil
 }
 
@@ -299,14 +315,27 @@ func (d *Device) receiveMessages() {
 	}
 }
 
-// SendKeyState implements Transport. It writes one HID output report
-// carrying ks, encoded per docs/wire-protocol.md and prefixed by
-// firmware/boot.py's KEY_STATE_REPORT_ID.
+// SendKeyState implements Transport. It writes ks as a Key state frame over
+// CDC (type 12), in order with the glyphs that precede it, with no wait: CDC is
+// flow controlled, so the board cannot lose it to the next one (task 0059).
 //
-// SendKeyState waits until minReportGap has passed since the previous
-// report, because the board holds one report and a faster burst overwrites
-// itself. Concurrent callers take turns.
+// With Options.KeyStateOverHID it writes one HID output report instead,
+// carrying ks, encoded per docs/wire-protocol.md and prefixed by
+// firmware/boot.py's KEY_STATE_REPORT_ID. It then waits until minReportGap has
+// passed since the previous report, because the board holds one report and a
+// faster burst overwrites itself. Concurrent callers take turns.
 func (d *Device) SendKeyState(ks KeyState) error {
+	if !d.keyStateOverHID {
+		payload, err := encodeKeyStateFrame(ks)
+		if err != nil {
+			return err
+		}
+		if d.dropKeyState != nil && d.dropKeyState(ks) {
+			return nil
+		}
+		return d.writeFrame(MessageTypeKeyState, payload)
+	}
+
 	var buf bytes.Buffer
 	buf.WriteByte(keyStateReportID)
 	if err := encodeKeyState(&buf, ks); err != nil {
@@ -327,6 +356,14 @@ func (d *Device) SendKeyState(ks KeyState) error {
 	return err
 }
 
+// writeFrame writes one frame to serial. Frames from concurrent callers do not
+// interleave.
+func (d *Device) writeFrame(t MessageType, payload []byte) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+	return writeFrame(d.serial, t, payload)
+}
+
 // SendCustomGlyph implements Transport. It writes a framed Set custom
 // glyph message to the device over the same CDC connection ReadMessage
 // reads from — the two directions are independent byte streams on one
@@ -336,13 +373,13 @@ func (d *Device) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(d.serial, t, payload)
+	return d.writeFrame(t, payload)
 }
 
 // BeginBatch implements Transport. It writes a framed Begin batch message
 // to the device over CDC, ahead of the glyphs it names.
 func (d *Device) BeginBatch(glyphMask, stateMask byte) error {
-	return writeFrame(d.serial, MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
+	return d.writeFrame(MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
 }
 
 // StoreFrame implements Transport. It writes a framed Store frame message to
@@ -354,7 +391,7 @@ func (d *Device) StoreFrame(slot byte, color uint16, pixels []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(d.serial, MessageTypeStoreFrame, payload)
+	return d.writeFrame(MessageTypeStoreFrame, payload)
 }
 
 // ShowFrames implements Transport. It writes a framed Show frames message to
@@ -364,7 +401,7 @@ func (d *Device) ShowFrames(slots []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(d.serial, MessageTypeShowFrames, payload)
+	return d.writeFrame(MessageTypeShowFrames, payload)
 }
 
 // ReadMessage implements Transport. It decodes one frame from the CDC

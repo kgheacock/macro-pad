@@ -27,12 +27,13 @@ Task 0061 found two more limits. First, the garbage collector scans every live h
 - Six keys with the icons from `assets/` take at most 0.65 s on the board, from 0.80 s to 0.82 s today.
 - One garbage collection takes at most 10 ms with the 128-slot pool of task 0061 in use.
 - A key state that the board loses is resent. A batch that lost one completes within 1.0 s of the last send, not 2 s.
+- Key state goes over CDC as a frame (type 12), in order with the glyphs and without the 150 ms HID gap. The measurement on 2026-10-18 showed that the gap, not the board, held the six-key `icons` run at 0.75 s or more, so Goal 2 needs this. Added to this task on 2026-10-18 at the owner's request.
 - Stock CircuitPython still runs the firmware, at the 0.8 s speed of task 0058.
 
 ## Non-goals
 
 - A glyph cache on the board. Task 0061 builds it. This task changes where its pool lives.
-- Key state over CDC, and the 150 ms HID report gap.
+- Removing the HID path. The board still reads HID reports, and `--key-state-over-hid` keeps the old host path for older firmware and for `make ping-pong`.
 - A resend for a plain `setKeyState` that is not part of a batch. The board cannot tell that one is missing.
 - Moving the SPI push. Task 0045 already does it by DMA.
 - Any change to `docs/wire-protocol.md`.
@@ -100,13 +101,19 @@ The resend fix, first and on stock CircuitPython:
 - The host keeps the data of the last batch until the next flush. On "Batch incomplete" it sends the named items again.
 - The 2 s time-out stays as the last resort.
 
+Key state over CDC (added after the board run, because the HID gap held `icons` at 0.8 s):
+
+- `docs/wire-protocol.md` adds type 12, "Key state", host to device: the same 6 bytes as the HID report. Version 1 is unchanged.
+- `firmware/wire.py` reads a type 12 frame of length 6 into a `KeyState`. A frame that waits behind a glyph on core 1 leaves after it, so a key state never draws before its glyph. `firmware/app.py` applies it with the code of the HID path.
+- `transport.Device.SendKeyState` writes the frame, with no wait, and a mutex so frames from two goroutines do not interleave. `Options.KeyStateOverHID` keeps the HID path with its 150 ms gap. `Reconnecting`, the emulator, and the batch resend need no change. `pingpong` stays on HID, because it checks that path.
+
 Files to change:
 
 - `firmware/wire.py` — hand the stream to core 1, with the fallback; the "Batch incomplete" frame.
 - `firmware/app.py` — pass the pending glyph through the loop; send "Batch incomplete".
 - `firmware/frame_cache.py` — take the slots from `glyphcore` when it exists (task 0061).
 - `driver/transport/`, `driver/layers/controller.go` — keep the last batch, and resend on "Batch incomplete".
-- `docs/wire-protocol.md` — the new frame, as the next free type.
+- `docs/wire-protocol.md` — the new frame, as the next free type, and type 12.
 - `tools/` — a script that builds the patched CircuitPython.
 - `firmware/README.md` — the build recipe, the flash steps, and the figures.
 - `test/test_wire.py`, `test/test_app.py`, `test/stubs/` — a fake `glyphcore`, and tests for the resend.
@@ -119,7 +126,7 @@ ticked.
 
 - [x] **DoD-1** — The spike inflates one 32 KB glyph on core 1 and returns pixels equal to `zlib.decompress` on core 0. **Proof:** the figures in this spec's Notes, and the build recipe in `firmware/README.md`. Measured 2026-10-18 with `make glyphcore-spike`: `pixels equal to zlib on core 0: yes` in every trial; the figures are in Notes and the recipe is in `firmware/README.md`.
 - [x] **DoD-2** — The spike records the time of one inflate on core 1, the time one key costs core 0 with it, the time of `gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy into a slot. **Proof:** this spec's Notes, with the trace file of `blinksend --scenario=icons`. Inflate on core 1: 12.7 ms (45.9 ms on core 0). A compose on core 0 takes 44 ms alone and 50 ms while core 1 inflates. `gc.collect()` with 128 slots in module memory: 2.7 ms. A 32 KB copy into a slot: 5.9 ms. Trace files of `blinksend --scenario=icons`: three runs, compose 57 to 72 ms for each key.
-- [ ] **DoD-3** — Six keys with `blinksend --scenario=icons` take at most 0.65 s on the patched build. **Proof:** the line `six keys in N s`, in three runs, each with N at most 0.65.
+- [ ] **DoD-3** — Six keys with `blinksend --scenario=icons` take at most 0.65 s on the patched build, with key state over CDC. **Proof:** the line `six keys in N s`, in three runs, each with N at most 0.65.
   - Not met, and the cause is not the board. Three runs gave `six keys in 0.80 s`, `0.79 s`, `0.81 s`. `blinksend` sends a Key state after each glyph, and the driver waits 150 ms between HID reports (`minReportGap`, a non-goal of this task), so six keys take 0.75 s at least. Task 0058's 0.80 s was already at that floor, so the premise "board work is the bottleneck" was wrong for this scenario. The limit needs a change on the host (a key state over CDC, or `--scenario=cached`) or a different DoD-3.
 - [x] **DoD-4** — When `import glyphcore` fails, the firmware inflates on core 0, and the glyph is the same. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test for each path. `test_without_the_module_the_reader_inflates_on_core_0` and `test_the_glyph_from_core_1_has_the_same_pixels_as_from_core_0` cover the two paths, with `test/fake_glyphcore.py`. 368 tests pass.
 - [x] **DoD-5** — When core 1 does not answer within the set time, the board drops the glyph, the key keeps its image, and the loop goes on. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a fake module that never answers. `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_reader_goes_on` (`test/test_wire.py`) and `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_key_keeps_its_image` (`test/test_app.py`) use a fake module that never answers.
@@ -130,6 +137,9 @@ ticked.
 - [x] **DoD-10** — On the board, 15 runs of `blinksend --scenario=batch` with the 128-slot or 64-slot pool of task 0061 end with no `BATCH_TIMED_OUT` record, and each completes within 1.0 s of its last send. **Proof:** the 15 JSONL trace files. 15 runs of `make blink-trace SCENARIO=batch` on the board with the 64-slot pool in module memory: no `BATCH_TIMED_OUT`, push span 31.0 to 35.0 ms in all 15, and the board never had to ask for a resend. The report does not time the "1.0 s of the last send" directly; the batch released with the pushes 31 to 35 ms apart and no time-out (2 s).
 - [x] **DoD-11** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. `.venv/bin/pytest test/ -q`: 368 passed. `cd driver && go test ./...`: all packages ok.
 - [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-13** — A Key state frame (type 12) over CDC updates the key like an HID report, and a frame that waits behind a glyph on core 1 leaves after it. A frame of the wrong length or version is dropped. **Proof:** `.venv/bin/pytest test/test_wire.py test/test_app.py` passes, with a test for each case. `.venv/bin/pytest test/ -q`: 380 passed.
+- [x] **DoD-14** — `Device.SendKeyState` writes the type 12 frame, without a wait, and frames from two goroutines do not interleave. With `KeyStateOverHID` it writes the HID report 150 ms apart as before. **Proof:** `cd driver && go test -race ./transport` passes, with a test for each path.
+- [x] **DoD-15** — `docs/wire-protocol.md` lists type 12 and says when to use HID. **Proof:** `docs/wire-protocol.md`.
 
 ## Risks
 

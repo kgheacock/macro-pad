@@ -775,3 +775,66 @@ def test_the_reader_clears_a_job_that_a_reload_left_in_the_module():
     wire.CustomGlyphReader(core1=core1)
 
     assert core1.cancels == 1
+
+
+# --- Key state over CDC (task 0059) --------------------------------------------
+
+
+def _framed_key_state(key_index=0, color=0x0000, emoji_id=0, blink=False, version=wire.PROTOCOL_VERSION):
+    writer = FakeWriter()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_KEY_STATE,
+        _key_state_bytes(key_index, version, color, emoji_id, blink),
+    )
+    return bytes(writer.written)
+
+
+def test_a_key_state_frame_decodes_like_the_hid_report():
+    framed = _framed_key_state(key_index=3, color=0xF81F, emoji_id=0xA2, blink=True)
+    glyph_reader, reader = _read_all(framed)
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.KeyState)
+    assert (message.key_index, message.color, message.emoji_id, message.blink) == (
+        3, 0xF81F, 0xA2, True
+    )
+    assert message.version == wire.PROTOCOL_VERSION
+
+
+def test_a_key_state_frame_of_the_wrong_length_is_dropped_and_the_next_frame_decodes():
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_KEY_STATE, bytes(5))
+    framed = bytes(writer.written) + _framed_key_state(key_index=2)
+    glyph_reader, reader = _read_all(framed)
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).key_index == 2
+
+
+def test_a_key_state_frame_of_another_version_raises_and_the_next_frame_decodes():
+    framed = _framed_key_state(version=wire.PROTOCOL_VERSION + 1) + _framed_key_state(key_index=4)
+    glyph_reader, reader = _read_all(framed)
+
+    with pytest.raises(wire.UnsupportedVersionError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).key_index == 4
+
+
+def test_a_key_state_behind_a_glyph_on_core_1_leaves_after_it():
+    core1 = FakeGlyphcore(polls_before_done=2)
+    stream = zlib.compress(_patterned_pixels(), 9)
+    framed = _framed_compressed(1, stream) + _framed_key_state(key_index=1)
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    kinds = []
+    for _ in range(30):
+        message = glyph_reader.feed(reader)
+        if message is not None:
+            kinds.append(type(message).__name__)
+
+    assert kinds == ["CustomGlyph", "KeyState"]

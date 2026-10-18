@@ -831,11 +831,38 @@ build adds 6 KB of flash (885,112 of 1,044,480 bytes used) and 10 KB of RAM.
 
 ### Measured figures
 
-Not measured yet. `make glyphcore-spike` prints the time of one inflate on
-core 1, what a compose costs core 0 with and without a job on core 1, the time of
-`gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy
-into a slot (`tools/glyphcore_spike.py`). The figures of `blinksend
---scenario=icons` come after it.
+Measured on 2026-10-18 on a Pico Plus 2 with the custom build (the UF2 of this
+branch, `make glyphcore-spike`, three runs, and `make blink-trace
+SCENARIO=icons` and `SCENARIO=batch`). The glyph is the icon of `assets/` that
+compresses worst: a stream of 3,823 bytes.
+
+| What | Figure |
+|---|---|
+| One inflate, `zlib.decompress` on core 0 | 45.9 ms |
+| One inflate on core 1 (`glyphcore.last_us()`) | 12.7 to 12.9 ms |
+| `submit` call on core 0 (copy of the stream) | 0.8 ms |
+| One compose on core 0, alone | 43.9 to 44.1 ms |
+| The same compose while core 1 inflates | 49.7 to 50.0 ms (6 ms slower) |
+| A 32 KB copy of a frame into a slot | 5.9 ms |
+| `gc.collect()` with 128 slots in module memory | 2.62, 2.72, 2.72 ms (three runs) |
+
+The pixels from core 1 equal those of `zlib.decompress` in every trial. The
+probe line for DoD-8: `gc.collect() with 128 slots in module memory 2716 us
+(median; limit 10000)`. On the heap the same pool took 115 to 150 ms.
+
+`blinksend --scenario=icons`, three runs: `six keys in 0.80 s`, `0.79 s`, and
+`0.81 s`. The 0.65 s of the spec was not met, and this is not a firmware
+limit: the run sends a glyph and then a Key state for each key, and the driver
+waits 150 ms (`minReportGap`) between two HID reports. Five gaps and the last
+key take 0.75 s or more whatever the board does, and the run was already at
+that floor after task 0058. The traces show `compose` at 57 to 72 ms for each
+key (from `CUSTOM_GLYPH_DECODED` to `GLYPH_BUILT`), and no `TRACE_DROPPED`
+record. Below 0.75 s a layer change must not wait for one HID report per key:
+`blinksend --scenario=cached` (task 0061, Show frames) and `--scenario=batch`
+(task 0060) draw the six keys within 31 to 35 ms of each other.
+
+`blinksend --scenario=batch`, 15 runs with the 64-slot pool in module memory:
+no `BATCH_TIMED_OUT`, and a push span of 31.0 to 35.0 ms (limit 40) in all 15.
 
 ## Out of scope
 

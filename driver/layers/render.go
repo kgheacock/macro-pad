@@ -20,7 +20,7 @@ const (
 	ColorDone    uint16 = 0x16C9 // green #12D84A
 	ColorError   uint16 = 0xF800 // red
 	ColorWarn    uint16 = 0xFFE0 // yellow
-	ColorNone    uint16 = 0xFFFF // white: no status
+	ColorNone    uint16 = 0x0000 // black: no status
 	// ColorUp is the dark background behind the shift icon.
 	ColorUp uint16 = 0x2104 // #202020
 )

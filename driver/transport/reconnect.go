@@ -275,6 +275,9 @@ func (r *Reconnecting) forward(dev Transport) {
 			// Sending waits for the board, so it must not hold up the reads.
 			go r.handleShowMiss(dev, msg.ShowMiss.Mask)
 		}
+		if msg.Type == MessageTypeBatchIncomplete {
+			go r.handleBatchIncomplete(dev, msg.BatchIncomplete)
+		}
 		select {
 		case r.queue <- msg:
 		case <-r.ctx.Done():
@@ -570,6 +573,69 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 	}
 	if err := dev.ShowFrames(slots); err != nil {
 		r.logf("frames: show again: %v", err)
+	}
+}
+
+// handleBatchIncomplete answers a Batch incomplete: an open batch on the board
+// still waits for some glyphs and key states, usually because a loop pass was
+// longer than the gap between two HID reports and the board lost one (task
+// 0044). It sends the glyph and the key state that it holds for each key the
+// board names, a glyph first as a replay does. A key it does not know, or a
+// glyph it no longer holds, is skipped. The 2 s time-out on the board stays as
+// the last resort (task 0063).
+func (r *Reconnecting) handleBatchIncomplete(dev Transport, bi BatchIncomplete) {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	type item struct {
+		key      byte
+		pixels   []byte
+		state    KeyState
+		hasPix   bool
+		hasState bool
+	}
+	r.mu.Lock()
+	if r.dev != dev {
+		r.mu.Unlock()
+		return
+	}
+	var items []item
+	for key := byte(0); key < 8; key++ {
+		wantGlyph := bi.GlyphMask&(1<<key) != 0
+		wantState := bi.StateMask&(1<<key) != 0
+		if !wantGlyph && !wantState {
+			continue
+		}
+		it := item{key: key}
+		if g, ok := r.glyphs[key]; ok && wantGlyph {
+			it.pixels, it.hasPix = g.pixels, true
+		}
+		if ks, ok := r.keys[key]; ok && wantState {
+			it.state, it.hasState = ks, true
+		}
+		if it.hasPix || it.hasState {
+			items = append(items, it)
+		}
+	}
+	r.mu.Unlock()
+
+	if len(items) == 0 {
+		return
+	}
+	r.logf("batch: the board lacks glyphs %#02x and key states %#02x, sending them again", bi.GlyphMask, bi.StateMask)
+	for _, it := range items {
+		if it.hasPix {
+			if err := dev.SendCustomGlyph(it.key, it.pixels); err != nil {
+				r.logf("batch: glyph %d again: %v", it.key, err)
+				return
+			}
+		}
+		if it.hasState {
+			if err := dev.SendKeyState(it.state); err != nil {
+				r.logf("batch: key state %d again: %v", it.key, err)
+				return
+			}
+		}
 	}
 }
 

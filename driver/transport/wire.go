@@ -42,16 +42,21 @@ const (
 	// that named an empty slot. See "Show miss" in docs/wire-protocol.md
 	// (task 0061).
 	MessageTypeShowMiss MessageType = 10
+	// MessageTypeBatchIncomplete is a device→host frame: the glyphs and key
+	// states that an open batch still waits for. See "Batch incomplete" in
+	// docs/wire-protocol.md (task 0063).
+	MessageTypeBatchIncomplete MessageType = 11
 )
 
 const (
-	keyStateSize       = 6
-	eventSize          = 10
-	pongSize           = 1
-	beginBatchSize     = 2
-	traceRecordSize    = 12
-	frameHeaderSize    = 3                         // type + payload length, little-endian uint16
-	customGlyphPayload = 1 + CustomGlyphPixelsSize // key index + pixels
+	keyStateSize        = 6
+	eventSize           = 10
+	pongSize            = 1
+	beginBatchSize      = 2
+	batchIncompleteSize = 2
+	traceRecordSize     = 12
+	frameHeaderSize     = 3                         // type + payload length, little-endian uint16
+	customGlyphPayload  = 1 + CustomGlyphPixelsSize // key index + pixels
 )
 
 func encodeKeyState(w io.Writer, ks KeyState) error {
@@ -159,6 +164,12 @@ func decodeMessage(t MessageType, payload []byte) (msg Message, ok bool, err err
 			return Message{}, false, err
 		}
 		return Message{Type: t, ShowMiss: ShowMiss{Mask: mask}}, true, nil
+	case MessageTypeBatchIncomplete:
+		bi, err := decodeBatchIncomplete(payload)
+		if err != nil {
+			return Message{}, false, err
+		}
+		return Message{Type: t, BatchIncomplete: bi}, true, nil
 	default:
 		return Message{}, false, nil
 	}

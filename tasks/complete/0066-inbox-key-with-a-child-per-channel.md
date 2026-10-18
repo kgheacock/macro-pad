@@ -1,7 +1,7 @@
 ---
 id: "0066"
 title: "An Inbox key with the unread count, and one child key per channel"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -194,15 +194,15 @@ is ticked.
 - [x] **DoD-6** — A second plan with no change sends nothing. **Proof:** `node --test --test-name-pattern=TestNoChangeSendsNothing test/render.test.js`
 - [x] **DoD-7** — The channel image for `macro-pad.driver` is 128x128, and
   its pixels match a golden PNG in `inbox/test/fixtures`. **Proof:** `node --test --test-name-pattern=TestChannelImage test/render.test.js`
-- [ ] **DoD-8** — On the pad, with `macropadd` and `inbox daemon` running,
+- [x] **DoD-8** — On the pad, with `macropadd` and `inbox daemon` running,
   `inbox send demo hi` shows a count on the Inbox key; a press shows a
   `demo` key with count 1 on key 0, and the shift arrow on key 3. **Proof:**
   Keith's check on the board, recorded in Notes
 - [x] **DoD-9** — `driver/README.md` records `removeLayerKey`. **Proof:** `driver/README.md`, "Protocol"
-- [ ] **DoD-10** — `cd driver && go build ./... && go vet ./...` exits 0 on
+- [x] **DoD-10** — `cd driver && go build ./... && go vet ./...` exits 0 on
   go 1.22.0, and `cd inbox && npm test` passes on Node 22.13. **Proof:** the
   exit codes
-  - Not confirmed as written: `driver/go.mod` now says `go 1.25.0` (the
+  - Accepted by Keith on go1.25.0: `driver/go.mod` now says `go 1.25.0` (the
     `golang.org/x/image` bump, 9519c7a), so go 1.22.0 cannot build it. On
     go1.25.0 with `GOWORK=off`, `go build ./... && go vet ./...` and
     `go test ./...` exit 0. `npm test` passes on Node 22.22.3, not 22.13.
@@ -263,3 +263,5 @@ LaunchAgent, on an empty store:
   went, and the key stayed.
 - Not checked: the key positions, the press on the shift arrow, and the
   Inbox key at count 0.
+- Keith reported on 2026-10-18 that the rest of the board check works, so
+  DoD-8 is ticked. He accepted DoD-10 on go1.25.0.

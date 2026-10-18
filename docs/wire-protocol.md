@@ -19,6 +19,7 @@ little-endian, matching the RP2350's native byte order.
 | Store frame | Host → Device | CDC serial | 3 + up to 32,766 bytes |
 | Show frames | Host → Device | CDC serial | 1 to 32 bytes |
 | Show miss | Device → Host | CDC serial | 1 byte |
+| Batch incomplete | Device → Host | CDC serial | 2 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
 | Audio chunk | Device → Host | CDC serial | 2 + N bytes |
 | Pong | Device → Host | CDC serial | 1 byte |
@@ -62,6 +63,7 @@ bytes arrive is a truncated message, not a partial value.
 | 8 | Store frame | Host → Device |
 | 9 | Show frames | Host → Device |
 | 10 | Show miss | Device → Host |
+| 11 | Batch incomplete | Device → Host |
 
 The host→device key-state message is not framed this way. It rides on
 HID, where a report ID and a fixed transfer size already identify it.
@@ -199,8 +201,10 @@ The two channels have no common order. A Key state message can reach the
 board before or after the glyphs that follow the Begin batch, and the masks
 make that order unimportant.
 
-The board releases a batch that is not complete 2 s after the Begin batch
-arrived. It draws the keys it has, and records `BATCH_TIMED_OUT` (see the
+While a batch is open and no new glyph or Key state has arrived for 500 ms,
+the board asks the host for what it lacks with a [Batch incomplete](#batch-incomplete-cdc-device--host)
+frame, at most three times. The board releases a batch that is not complete 2 s
+after the Begin batch arrived. It draws the keys it has, and records `BATCH_TIMED_OUT` (see the
 [trace code registry](#trace-code-registry)). A new Begin batch that arrives
 while one is open releases the open one first. A Begin batch with a payload
 that is not 2 bytes is dropped, and the frame is consumed by its `Length`.
@@ -212,6 +216,33 @@ key. Update the firmware before the driver. See [task
 0060](../tasks/complete/0060-draw-a-layer-update-all-at-once.md) for the
 design decision.
 
+### Batch incomplete (CDC, device → host)
+
+Sent by a board with an open batch that lacks data. Framed per
+[Framing](#framing) as type `11`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Glyph mask | Bit `k` is `1` when key `k` still waits for its Set custom glyph |
+| 1 | 1 | State mask | Bit `k` is `1` when key `k` still waits for its Key state |
+
+The board holds one HID report. A loop pass longer than the gap between two
+reports lets the next report overwrite an unread one, and that Key state is
+lost (task 0044). A garbage collection of 115 to 150 ms with 128 slots in use
+did this in 2 of 9 batch runs. The board sends the frame after 500 ms with no
+new data for the batch, and again every 500 ms, at most three times in all. It
+records `BATCH_INCOMPLETE` (see the [trace code registry](#trace-code-registry))
+each time.
+
+The host sends again the Set custom glyph and the Key state that it holds for
+each key the frame names, a glyph first. It sends nothing for a key it never
+sent, and a key that the frame does not name is left alone. The 2 s time-out
+stays as the last resort. A resend for a plain Key state outside a batch does
+not exist: the board cannot tell that it lost one. Firmware that does not
+send the frame leaves the host as it was. See [task
+0063](../tasks/ongoing/0063-resend-lost-batch-state-and-cap-the-pool-at-64.md)
+for the design decision.
+
 ### Store frame (CDC, host → device)
 
 Composes one picture over one color into a slot of the board's frame cache. It
@@ -219,11 +250,11 @@ draws nothing. Framed per [Framing](#framing) as type `8`.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| 0 | 1 | Slot | `0` to `127` |
+| 0 | 1 | Slot | `0` to `63` |
 | 1 | 2 | Color | Background color, RGB565, little-endian |
 | 3 | 0 to 32,766 | Stream | A zlib stream (RFC 1950) that inflates to exactly 32,768 bytes, the Pixels field of Set custom glyph. An empty stream is a frame of the color alone, with no glyph |
 
-The board keeps a fixed pool of 128 slots in RAM, one frame in each: the
+The board keeps a fixed pool of 64 slots in RAM, one frame in each: the
 picture, with a transparent pixel (`0x0000`) showing the color, as a Set custom
 glyph and a Key state would draw the key. A Store frame replaces the frame in
 its slot. The board allocates the pool when it starts, before its loop, and
@@ -231,8 +262,8 @@ never frees, grows, or shrinks it, and never writes it to flash. A board that
 resets has an empty cache.
 
 The host owns the slot numbers. It picks a slot for each frame, and when all
-128 are in use it overwrites the least recently used one. The board is only an
-array. A Store frame for a slot above `127`, or with a stream that does not
+64 are in use it overwrites the least recently used one. The board is only an
+array. A Store frame for a slot above `63`, or with a stream that does not
 inflate to exactly 32,768 bytes, is dropped, and the frame is consumed by its
 `Length`: the slot keeps what it held.
 
@@ -256,7 +287,7 @@ Names a slot for each key. The board draws the named keys together. Framed per
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| `k` | 1 | Slot of key `k` | `0` to `127`, or `255` for "unchanged" |
+| `k` | 1 | Slot of key `k` | `0` to `63`, or `255` for "unchanged" |
 
 The payload has one byte for each key, key `0` first, and at least one byte. The
 board ignores the bytes of keys it does not have. A key whose byte is `255`
@@ -272,7 +303,7 @@ glyph, and no blink. A later Key state that names the same color keeps the
 frame. A later Key state with another color, or a built-in Emoji ID, builds a
 plain color frame.
 
-A key that names an empty slot, or a slot above `127`, keeps the image it had.
+A key that names an empty slot, or a slot above `63`, keeps the image it had.
 The board draws the other keys, and answers with a Show miss. The board records
 `FRAMES_SHOWN` (see the [trace code registry](#trace-code-registry)) for the
 keys it drew.
@@ -405,6 +436,7 @@ for the design decision.
 | 9 | `PUSH_STARTED` | `0`, unused. The start of a push to the panel, task 0045 |
 | 10 | `BATCH_TIMED_OUT` | The pending masks of a batch that the board released after 2 s, task 0060: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
 | 11 | `FRAMES_SHOWN` | The keys a Show frames drew, task 0061: bit `k` for key `k`. The Key field is `0xFF`. The board records it as it queues the pushes, so the `PUSH_STARTED` records of the keys follow it |
+| 12 | `BATCH_INCOMPLETE` | The pending masks of a batch that asked the host for more, task 0063: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last

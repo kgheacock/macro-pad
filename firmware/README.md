@@ -662,8 +662,8 @@ A layer switch used to send every image again: 140 ms for each key, so about
 0.8 s for six. The board now keeps composed frames in a fixed pool, and a
 switch sends slot numbers.
 
-- **The pool.** `frame_cache.FrameCache` allocates `SLOT_COUNT = 128` slots of
-  32 KB (128×128 pixels, 16 bits each), 4 MB, when `MacroPad` is built, before
+- **The pool.** `frame_cache.FrameCache` allocates `SLOT_COUNT = 64` slots of
+  32 KB (128×128 pixels, 16 bits each), 2 MB, when `MacroPad` is built, before
   the loop. It never frees a slot, and it does not grow or shrink, so the heap
   does not fragment and the free heap is the same for the whole run. The
   cache is RAM only: the firmware writes no file and no `nvm` byte for it.
@@ -688,14 +688,14 @@ switch sends slot numbers.
   cached frame and black.
 
 `make slot-probe` measures the pool (`tools/slot_probe.py`): the time to
-allocate 128 slots, the free heap after, and the time of a 32 KB copy. It calls
+allocate the slots, the free heap after, and the time of a 32 KB copy. It calls
 `gc.mem_free()` once before and once after the allocation, never inside a timed
 section, because it walks the heap and costs about 20 ms. The task stops if
 fewer than 2 MB are free after the pool: the firmware does not shrink the pool
 by itself.
 
-Probe figures (`make slot-probe`, 2026-10-18, Pico Plus 2, CircuitPython
-10.2.1). The probe builds a `FrameCache` and nothing else, so the figures do
+Probe figures with 128 slots, before task 0063 cut the pool to 64 (`make slot-probe`,
+2026-10-18, Pico Plus 2, CircuitPython 10.2.1). The probe builds a `FrameCache` and nothing else, so the figures do
 not include the heap that the panels and the reader take:
 
 | Figure | Value |
@@ -730,11 +730,34 @@ the wire for 26 ms at 10 MHz, so a 48 ms group means the DMA read the slot
 frames at half speed. The cause is not found: the next step is to time a group
 from slot frames and from fresh frames on the board, one slot at a time.
 
-The pool also slowed the older paths. `--scenario=batch` on the same firmware
-took 1.07 s for six keys (0.82 s before; the glyph write of key 5 took 404
-ms), and the board released the batch after its 2 s time-out. A likely cause is the
-garbage collector, which scans the 4 MB of live bitmaps on each pass. This is
-not measured yet either.
+The pool also slowed the older paths, and the cause is the garbage collector
+(task 0063). It scans every live heap block, about 1 ms for each 32 KB, whether
+the block is a `Bitmap` or a `bytearray`. Time of one `gc.collect()` on the board
+(2026-10-18, a probe that prints over `usb_cdc.data`):
+
+| Live pool | `gc.collect()` |
+|---|---|
+| none | 0.7 ms |
+| 8 slots | 5.5 ms |
+| 16 slots | 11 ms |
+| 32 slots | 22 ms |
+| 64 slots | 42 ms |
+| 128 slots | 115 to 150 ms |
+
+A collection that lands in a loop pass makes the pass longer than the 150 ms gap
+between HID reports. The board holds one report, so the next one overwrites an
+unread one and a Key state is lost (task 0044). `--scenario=batch` runs that ended
+with `BATCH_TIMED_OUT`: 0 of 9 with no pool, 1 of 12 with 32 slots, 2 of 9 with
+128 slots. The pool is 64 slots, and an open batch that lacks data now asks the
+host for it:
+
+- After 500 ms with no new glyph or Key state, the board sends Batch incomplete
+  with the pending masks, and records trace code `BATCH_INCOMPLETE` (12). It asks
+  again every 500 ms, at most three times, and the 2 s time-out stays.
+- `transport.Reconnecting` sends again the glyph and the Key state it holds for
+  each named key. `blinksend --scenario=batchloss` drops the Key state of key 2
+  on purpose, and `tools/blink_trace.py report --scenario=batchloss` prints how
+  long after the last report the batch released (limit 1,000 ms).
 
 ## Out of scope
 

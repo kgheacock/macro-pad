@@ -260,3 +260,49 @@ def test_batch_run_missing_a_key_fails():
     records = blink_trace.load_trace(_batch_run([1_000_000 + 1000 * key for key in range(5)]))
 
     assert blink_trace.report(records, "batch", io.StringIO()) is False
+
+
+def _batchloss_run(ask=True, timed_out=False, release_after_last_report_us=650_000):
+    """Six glyphs and five key states arrive, key 2's state is lost. The board
+    asks 500 ms later, the host sends it again, and the board releases."""
+    lines = [json.dumps({"offset_us": 0, "samples": 1, "estimator": "x"})]
+    for key in range(6):
+        lines.append(_trace_line(blink_trace.CUSTOM_GLYPH_DECODED, key, 100_000 * key))
+    last_report = 0
+    for key in (0, 1, 3, 4, 5):
+        last_report = 150_000 * key + 50_000
+        lines.append(_trace_line(blink_trace.HOST_MESSAGE_DECODED, key, last_report))
+    if ask:
+        lines.append(_trace_line(blink_trace.BATCH_INCOMPLETE, 0xFF, last_report + 500_000))
+    if timed_out:
+        lines.append(_trace_line(blink_trace.BATCH_TIMED_OUT, 0xFF, last_report + 1_300_000))
+    release = last_report + release_after_last_report_us
+    for key in range(6):
+        lines.append(_trace_line(blink_trace.PUSH_STARTED, key, release + key * 1_000))
+    return lines
+
+
+def test_batchloss_run_where_the_board_asks_and_releases_in_time_passes():
+    records = blink_trace.load_trace(_batchloss_run())
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "batchloss", out) is True
+    assert "batch incomplete 1, released 650 ms after the last report" in out.getvalue()
+
+
+def test_batchloss_run_where_the_board_never_asks_fails():
+    records = blink_trace.load_trace(_batchloss_run(ask=False))
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "batchloss", out) is False
+    assert "never asked" in out.getvalue()
+
+
+def test_batchloss_run_released_after_the_time_out_fails():
+    records = blink_trace.load_trace(
+        _batchloss_run(timed_out=True, release_after_last_report_us=2_000_000)
+    )
+    out = io.StringIO()
+
+    assert blink_trace.report(records, "batchloss", out) is False
+    assert "time-out" in out.getvalue()

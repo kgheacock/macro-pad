@@ -66,6 +66,12 @@ func assetPath(dir, ref string) (string, error) {
 	return realFull, nil
 }
 
+// RenderGlyph is renderGlyph for a tool that stores frames itself, as
+// `blinksend --scenario=pips` does: the same picture a layer shows.
+func RenderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, error) {
+	return renderGlyph(assetsDir, ref, count, keyColor)
+}
+
 // renderGlyph builds the 128x128 PNG for one key: the icon at ref under
 // assetsDir, if ref is not empty, on a white round, and a count pip when count
 // is above zero. Transparent pixels show the key color behind them. keyColor is

@@ -123,26 +123,42 @@ def report(text, out=sys.stdout):
     return ok
 
 
+# How long `read_board` listens to one port before it tries the next. The board
+# repeats the block every 2 s.
+PORT_LISTEN_S = 6
+
+
 def read_board(timeout_s=60):
-    """Read the board's CDC data port until it has sent one full block."""
+    """Read the board's CDC data port until it has sent one full block.
+
+    The board has two ports, the console and the data port, and macOS numbers
+    them in no fixed order. The probe writes to the data port only, so this
+    listens to each port for `PORT_LISTEN_S` and keeps the one that sends the
+    block.
+    """
     deadline = time.time() + timeout_s
     fd = None
     buf = b""
+    index = 0
+    listening_since = 0.0
     while time.time() < deadline:
+        ports = sorted(glob.glob("/dev/cu.usbmodem*"))
         if fd is None:
-            ports = glob.glob("/dev/cu.usbmodem*")
             if not ports:
                 time.sleep(0.2)
                 continue
             try:
-                fd = os.open(ports[0], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+                fd = os.open(ports[index % len(ports)], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
                 attrs = termios.tcgetattr(fd)
                 attrs[0] = attrs[1] = attrs[3] = 0
                 termios.tcsetattr(fd, termios.TCSANOW, attrs)
             except OSError:
                 fd = None
+                index += 1
                 time.sleep(0.2)
                 continue
+            buf = b""
+            listening_since = time.time()
         try:
             chunk = os.read(fd, 4096)
         except BlockingIOError:
@@ -150,6 +166,7 @@ def read_board(timeout_s=60):
         except OSError:
             os.close(fd)
             fd = None
+            index += 1
             continue
         if chunk:
             buf += chunk
@@ -159,6 +176,11 @@ def read_board(timeout_s=60):
                 break
         else:
             time.sleep(0.05)
+        if b"DONE\n" not in buf and time.time() - listening_since > PORT_LISTEN_S:
+            # The console port, or a port that has nothing: try the next.
+            os.close(fd)
+            fd = None
+            index += 1
     blocks = buf.decode(errors="replace").split("DONE\n")
     return max(blocks, key=len)
 

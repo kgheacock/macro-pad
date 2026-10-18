@@ -795,8 +795,30 @@ checks the pixel positions, so a change to one side that the other does not
 follow fails a test.
 
 `make blink-trace SCENARIO=pips` stores the sheet and six frames, and shows them
-six times with a count on every key. Its figures are not recorded here yet: the
-board check of task 0062 (DoD-9 and DoD-10) is the owner's.
+six times with a count on every key. Figures of 2026-10-18, on a Pico Plus 2 with
+the glyphcore build (`glyphcore=True`):
+
+| Figure | Value |
+|---|---|
+| Free heap after the pool and the sheet (`make slot-probe`) | 5,523,168 bytes (limit 2,097,152) |
+| One stamp, `FrameCache.stamp` alone (copy into the buffer, a second 32 KB copy, blits) | 15.4 ms: 2 × 5.6 ms of copies and 3.8 ms for the blits of `42` (2.2 ms for `7`) |
+| `set_sheet`, once | 21 ms |
+| Show of six keys with counts, `six keys in` | 212.2 and 212.9 ms in two runs (limit 150) |
+| Of it: the six stamps, `SHOW_WITH_PIPS_STARTED` to the first `PUSH_STARTED` and `FRAMES_SHOWN` | about 100 ms |
+| Of it: the two push groups, first `PUSH_STARTED` to the last `REFRESH_DONE` | about 105 ms, 45 to 50 ms for each group (task 0061's 48 ms; the ideal is 26) |
+| `push span` | 59.9 and 60.0 ms |
+
+The limit of 150 ms is not met: a Show of six keys with a pip is a Show of six
+keys (108 ms in task 0061) and six stamps (about 100 ms). Two changes were tried
+and dropped, on the same board:
+
+- **Stamp through a 44×44 bitmap** instead of a second 32 KB copy: the 44 row
+  copies cost 2.3 ms in each direction, so the stamp took 18.0 ms, not 15.4.
+- **Start the first group before the last three stamps**: the stamps of keys 3 to
+  5 and the DMA of the first group share the PSRAM, and both slowed down. The first
+  group took 100 ms on the wire, and `six keys in` was 215 to 224 ms.
+
+The `probe` used for the stamp figures is a one-off `code.py`, not in the repo.
 
 ## The second core: the `glyphcore` module (task 0059)
 

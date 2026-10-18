@@ -3,7 +3,7 @@ id: "0061"
 title: "Cache composed glyph frames on the board, so a layer switch sends slot numbers"
 status: "ongoing"
 created: "2026-10-17"
-updated: "2026-10-17"
+updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -105,16 +105,17 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — The board allocates 128 slots at start-up, and at least 2 MB of heap stays free. The probe also records the allocation time and the time of a 32 KB copy. **Proof:** the three figures in `firmware/README.md`.
+- [x] **DoD-1** — The board allocates 128 slots at start-up, and at least 2 MB of heap stays free. The probe also records the allocation time and the time of a 32 KB copy. **Proof:** the three figures in `firmware/README.md`.
 - [ ] **DoD-2** — On the board, a Show of six stored frames takes at most 150 ms, and the six `PUSH_STARTED` records are at most 40 ms apart. **Proof:** the lines `six keys in N ms` and `push span N ms` of `blinksend --scenario=cached`, in three runs.
-- [ ] **DoD-3** — After the preload, a layer switch sends a Show and no Store. **Proof:** `cd driver && go test ./layers -run Preload` passes.
-- [ ] **DoD-4** — A Show that names an empty slot draws the other keys, keeps the old image on that key, and sends a Show miss. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for it.
-- [ ] **DoD-5** — After a reconnect, the host stores every frame again, and the next switch draws. **Proof:** `cd driver && go test ./transport -run Reconnect` passes, with a test for it.
-- [ ] **DoD-6** — A key that blinks is not cached, and blinks as before. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for it.
-- [ ] **DoD-7** — The firmware writes no file and no `nvm` byte at run time. **Proof:** `git grep -nE "open\(|nvm|storage\." firmware/*.py` lists no write.
-- [ ] **DoD-8** — Six layer switches write no glyph file after the first, and write `keys.json` only when a key state changed. **Proof:** `cd driver && go test ./transport -run StateWrites` passes, with a counting store.
-- [ ] **DoD-9** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` record the messages, the pool, and the state files. **Proof:** those three files.
-- [ ] **DoD-10** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
+  Missing: `push span` is 58.1 to 58.2 ms in three runs, over the limit of 40 ms. `six keys in` is 108.6 to 108.7 ms, inside 150 ms. A group of three pushes took 48 ms, not 26 ms; the cause is not found (see `firmware/README.md`, "Caching composed frames").
+- [x] **DoD-3** — After the preload, a layer switch sends a Show and no Store. **Proof:** `cd driver && go test ./layers -run Preload` passes.
+- [x] **DoD-4** — A Show that names an empty slot draws the other keys, keeps the old image on that key, and sends a Show miss. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for it.
+- [x] **DoD-5** — After a reconnect, the host stores every frame again, and the next switch draws. **Proof:** `cd driver && go test ./transport -run Reconnect` passes, with a test for it.
+- [x] **DoD-6** — A key that blinks is not cached, and blinks as before. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for it.
+- [x] **DoD-7** — The firmware writes no file and no `nvm` byte at run time. **Proof:** `git grep -nE "open\(|nvm|storage\." firmware/*.py` lists no write.
+- [x] **DoD-8** — Six layer switches write no glyph file after the first, and write `keys.json` only when a key state changed. **Proof:** `cd driver && go test ./transport -run StateWrites` passes, with a counting store.
+- [x] **DoD-9** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` record the messages, the pool, and the state files. **Proof:** those three files.
+- [x] **DoD-10** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
@@ -126,7 +127,7 @@ ticked.
 
 ## Open questions
 
-- [ ] Does composing into a reused bitmap cost less than the 75 ms of today? — the probe answers it.
+- [x] Does composing into a reused bitmap cost less than the 75 ms of today? — Partly answered on 2026-10-18: 12 Store frames, each an inflate and a compose, took 1.13 to 1.31 s, so 94 to 109 ms each, against about 140 ms for a Set custom glyph.
 
 ## Notes
 

@@ -18,7 +18,7 @@ tags: ["inbox", "layers", "input"]
 ## Problem
 
 Task 0066 shows a key per channel with its unseen count. Nothing on the pad
-lowers a count. A person must type `inbox seen -c CHANNEL` in a terminal,
+lowers a count. A person must type `inbox seen CHANNEL` in a terminal,
 which is the work the pad should save.
 
 Keith wants a press on a channel key to mark that channel's messages seen.
@@ -137,7 +137,7 @@ is ticked.
 - [ ] **DoD-4** — After a press, the server receives the new child count
   and Inbox total within 1 s, with `--poll 10s`. **Proof:** `go test ./daemon -run TestMarkSendsAtOnce`
 - [ ] **DoD-5** — On the pad, a press on a channel key with count 2 shows
-  count 0, and the Inbox key's count drops by 2. `inbox list -c` that
+  count 0, and the Inbox key's count drops by 2. `inbox list` for that
   channel prints nothing. **Proof:** Keith's check on the board, recorded in Notes
 - [ ] **DoD-6** — `inbox/README.md` "Daemon" says what a press on a channel
   key does. **Proof:** `inbox/README.md`
@@ -146,7 +146,7 @@ is ticked.
 ## Risks
 
 - A person presses a channel key to open it, expecting to read, and loses
-  the unread marks → `inbox list --seen -c CHANNEL` still shows the
+  the unread marks → `inbox list --seen CHANNEL` still shows the
   messages. The README says a press means "I've seen these".
 - `macropadd` changes to handle the layer press before it broadcasts the
   event → DoD-2 then fails, and the daemon must record the layer at each

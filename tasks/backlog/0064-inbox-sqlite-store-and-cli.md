@@ -38,11 +38,13 @@ it on the pad. This task builds the store and the command line.
 - Under the source root (`~/source` by default), the channel comes from the
   working directory: the path below the root, joined by dots.
   `~/source/macro-pad/driver` gives `macro-pad.driver`.
-- Outside the source root, `-c CHANNEL` is required. A missing channel is an
-  error with exit code 2.
-- `-c` always wins over the inferred channel.
-- Piped input is a first-class way to send: each input line is one message.
-  `make 2>&1 | inbox` works with no subcommand.
+- The channel is the first argument: `inbox send debug "my message"` and
+  `my_cmd 2>&1 | inbox pipe debug`. A channel given this way always wins over
+  the inferred one.
+- Outside the source root, the channel argument is required. A missing
+  channel is an error with exit code 2.
+- Piped input is a first-class way to send: `inbox pipe` turns each input
+  line into one message.
 - Messages from a long-running pipe show up while the pipe is still open.
 - A person can list, count, and mark messages seen from the command line.
 - Several writers and one reader (task 0065's daemon) use the file at once.
@@ -154,26 +156,35 @@ The source root is `$INBOX_SOURCE_ROOT`, or `~/source`. Inference:
 3. Otherwise the channel is the path components below the root, joined by
    dots. `~/source/macro-pad/driver/layers` gives `macro-pad.driver.layers`.
 4. A component that is not a valid segment, such as `my.repo` or `a b`, is an
-   error that names the component and says to pass `-c`.
+   error that names the component and says to pass the channel as an
+   argument.
 
-`-c CHANNEL` (or `--channel`) skips inference. With no `-c` and no inferred
+A channel argument skips inference. With no channel argument and no inferred
 channel, a command that needs a channel prints
-`inbox: not under <root>; pass -c CHANNEL` and exits with code 2.
+`inbox: not under <root>; pass the channel, as in: inbox send CHANNEL MESSAGE`
+and exits with code 2.
 
 ### Commands
 
 | Command | Meaning |
 |---|---|
-| `inbox send [-c CH] [TEXT...]` | With `TEXT`, sends one message: the words joined by spaces. With no `TEXT`, reads standard input, one message per line. |
-| `inbox` (no subcommand, stdin is a pipe or file) | Same as `inbox send` with no `TEXT`. |
-| `inbox list [-c CH \| --all-channels] [--seen] [--json] [-n N]` | Lists unseen messages, oldest first. `--seen` includes seen ones. Default: the inferred channel, else every channel. |
-| `inbox count [-c CH \| --all-channels]` | Prints the unseen count. |
+| `inbox send CHANNEL MESSAGE` | Sends one message to `CHANNEL`. |
+| `inbox send MESSAGE` | Sends one message to the inferred channel. |
+| `inbox pipe [CHANNEL]` | Reads standard input, one message per line, into `CHANNEL` or the inferred channel. |
+| `inbox list [CHANNEL \| --all-channels] [--seen] [--json] [-n N]` | Lists unseen messages, oldest first. `--seen` includes seen ones. Default: the inferred channel, else every channel. |
+| `inbox count [CHANNEL \| --all-channels]` | Prints the unseen count. |
 | `inbox channels [--json]` | Prints each channel with unseen messages, its count, and its newest message time. |
-| `inbox seen [-c CH \| --all-channels]` | Marks unseen messages seen. Prints how many. |
+| `inbox seen [CHANNEL \| --all-channels]` | Marks unseen messages seen. Prints how many. |
 | `inbox daemon` | Task 0065. |
 
-`inbox` with no subcommand and a terminal on standard input prints usage and
-exits with code 2. `--db PATH` on any command overrides `$INBOX_DB`.
+`inbox send` takes one or two arguments. With two, the first is the channel.
+With one, it is the message. With three or more, it exits with code 2 and
+says to quote the message, so `inbox send debug build done` is never split
+by a guess. `inbox send` does not read standard input; `inbox pipe` does.
+`inbox pipe` with a terminal on standard input exits with code 2.
+
+`inbox` with no subcommand prints usage and exits with code 2. `--db PATH` on
+any command overrides `$INBOX_DB`.
 
 Exit codes: 0 success, 1 a store error, 2 a usage error (including a missing
 channel).
@@ -186,7 +197,7 @@ channel).
   run to standard error.
 - Lines are inserted in a transaction that commits every 200 ms or every 500
   lines, whichever comes first, and at end of input. So `tail -f build.log |
-  inbox -c build` shows each line within 200 ms, and a burst of 10 000 lines
+  inbox pipe build` shows each line within 200 ms, and a burst of 10 000 lines
   takes a few transactions, not 10 000.
 - SIGINT and SIGTERM commit the lines already read, then exit 0.
 - The channel is resolved once, before the first line is read. A missing
@@ -213,29 +224,33 @@ is ticked.
   `R` itself and a directory outside `R` infer nothing; a symbolic link into
   `R` infers the target's channel; `R/my.repo` is an error naming
   `my.repo`. **Proof:** `cd inbox && go test ./channel -run TestInfer`
-- [ ] **DoD-3** — Outside the root with no `-c`, `inbox send hi` and
-  `echo hi | inbox` exit 2, print the root, and write no row. With `-c x`
-  both succeed. **Proof:** `go test ./cmd/inbox -run TestChannelRequiredOutsideRoot`
-- [ ] **DoD-4** — `printf 'a\n\n  \nb\r\nc' | inbox -c x` stores three
+- [ ] **DoD-3** — Outside the root, `inbox send hi` and `echo hi | inbox
+  pipe` exit 2, print the root, and write no row. `inbox send debug hi` and
+  `echo hi | inbox pipe debug` both store `hi` in `debug`. Under the root,
+  `inbox send debug hi` still uses `debug`. **Proof:** `go test ./cmd/inbox -run TestChannelArgument`
+- [ ] **DoD-4** — `printf 'a\n\n  \nb\r\nc' | inbox pipe x` stores three
   messages, `a`, `b`, `c`, in order. **Proof:** `go test ./cmd/inbox -run TestPipedLines`
-- [ ] **DoD-5** — While a pipe stays open, a line written to it is readable
+- [ ] **DoD-5** — `inbox send a b c` exits 2, says to quote the message, and
+  writes no row. **Proof:** `go test ./cmd/inbox -run TestSendTooManyArgs`
+- [ ] **DoD-6** — While a pipe stays open, a line written to it is readable
   by another connection within 500 ms. **Proof:** `go test ./cmd/inbox -run TestPipeCommitsWhileOpen`
-- [ ] **DoD-6** — 10 000 piped lines store 10 000 rows in under 2 s on the
+- [ ] **DoD-7** — 10 000 piped lines store 10 000 rows in under 2 s on the
   reviewer's machine. **Proof:** `go test ./cmd/inbox -run TestPipeBurst -v` prints the time
-- [ ] **DoD-7** — Eight processes that each pipe 1 000 lines at once store
+- [ ] **DoD-8** — Eight processes that each pipe 1 000 lines at once store
   8 000 rows, with no "database is locked" error. **Proof:** `go test ./store -run TestConcurrentWriters`
-- [ ] **DoD-8** — `MarkSeen(ch, id)` marks only rows of `ch` with an id at
+- [ ] **DoD-9** — `MarkSeen(ch, id)` marks only rows of `ch` with an id at
   or below `id`; a later row stays unseen. `Unseen()` returns the right count
   and newest id per channel. **Proof:** `go test ./store -run 'TestMarkSeenUpTo|TestUnseen'`
-- [ ] **DoD-9** — `list`, `count`, `channels`, and `seen` give the results
-  in the table above, with and without `-c`, `--all-channels`, and `--json`.
+- [ ] **DoD-10** — `list`, `count`, `channels`, and `seen` give the results
+  in the table above, with and without a channel, `--all-channels`, and
+  `--json`.
   **Proof:** `go test ./cmd/inbox -run TestCommands`
-- [ ] **DoD-10** — A file with a newer `user_version` is refused with an
+- [ ] **DoD-11** — A file with a newer `user_version` is refused with an
   error naming both versions, and the file is not changed. **Proof:** `go test ./store -run TestNewerSchemaRefused`
-- [ ] **DoD-11** — `inbox/README.md` records the commands, the channel
+- [ ] **DoD-12** — `inbox/README.md` records the commands, the channel
   rules, the schema, `$INBOX_DB`, `$INBOX_SOURCE_ROOT`, and the exit codes.
   **Proof:** `inbox/README.md`
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [ ] **DoD-13** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 
@@ -243,7 +258,8 @@ is ticked.
   check the release's `go` line before `go get`, and pin an older release if
   needed.
 - A directory name with a dot, such as `my.repo`, cannot map to a channel
-  without making `a.b` ambiguous → it is an error that says to pass `-c`.
+  without making `a.b` ambiguous → it is an error that says to pass the
+  channel as an argument.
   A later task can add an escape if this bites.
 - The store grows forever → acceptable for text messages at human rates.
   `inbox prune` is a later task.
@@ -263,3 +279,6 @@ Keith asked for this on 2026-10-18 in the project thread. Task 0057 (in
 `tasks/complete/`) is the layer tree the daemon draws on. An earlier draft
 also numbered 0057, "Claude Code inbox plugin", was closed unmerged; this
 inbox does not build on it.
+
+On 2026-10-18 Keith set the command shape: `my_cmd 2>&1 | inbox pipe debug`
+and `inbox send debug my_message`, with the channel as the first argument.

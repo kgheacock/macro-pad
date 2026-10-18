@@ -1,13 +1,13 @@
 ---
 id: "0063"
 title: "Resend a batch key state that the board lost, and cap the frame pool at 64 slots"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/74"
 branch: "0063-resend-lost-batch-state-and-cap-the-pool-at-64"
 related: ["0044", "0059", "0060", "0061"]
 tags: ["firmware", "driver", "wire-protocol", "reliability", "memory"]
@@ -100,7 +100,7 @@ ticked.
 - [x] **DoD-6** — On the board, 15 runs of `blinksend --scenario=batch` end with no `BATCH_TIMED_OUT` record. **Proof:** the 15 trace files. All 15 ended with no `BATCH_TIMED_OUT`, and the board did not need to ask in any of them.
 - [x] **DoD-7** — `docs/wire-protocol.md` lists type 11, trace code 12, and 64 slots. **Proof:** `docs/wire-protocol.md`.
 - [x] **DoD-8** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. The first reports 294 passed.
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
 

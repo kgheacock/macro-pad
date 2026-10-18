@@ -1,0 +1,10 @@
+[Unit]
+Description=Inbox daemon: show unseen inbox messages on the macro pad
+
+[Service]
+ExecStart=@EXEC@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,7 +1,7 @@
 # inbox
 
 Leave short messages per channel in one SQLite file, and read them later.
-Scripts, builds, and agents send; a person (or the daemon in task 0065)
+Scripts, builds, and agents send; a person (or the daemon, see "Daemon")
 reads. No process must run for a message to be saved.
 
 It is a Node package with no npm dependencies. It uses Node's built-in
@@ -28,7 +28,7 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 
 `-h` and `--help` work on `inbox` and on every subcommand, before or after
 other arguments. `--db PATH` on any command overrides `$INBOX_DB`.
-`inbox daemon` is reserved for task 0065.
+`inbox daemon` is described under "Daemon", below.
 
 ```
 inbox send debug "build done"
@@ -144,3 +144,86 @@ For code that reads the store (`src/store.js`):
 
 Every error is a line on standard error that starts with `inbox:`. A usage
 error adds `run 'inbox COMMAND -h' for help`.
+
+## Daemon
+
+`inbox daemon` watches the store and shows the unseen messages on the macro
+pad. It is a client of `macropadd`: it sends `setLayerKey` messages over the
+plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
+and `event` from it. Today it draws one `inbox` key with the total unseen
+count. Task 0066 adds a key per channel, and task 0067 marks messages seen on
+a press.
+
+```
+inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500ms]
+```
+
+| Flag | Meaning |
+|---|---|
+| `--port N` | `macropadd`'s port on 127.0.0.1. Default 8765. |
+| `--assets-dir DIR` | The directory `macropadd` uses for pictures. Must be absolute, and the same as `macropadd --assets-dir`. Default: the `assets/` folder of this checkout. |
+| `--slot N` | Put the Inbox key in slot N, 0 to 5. Default: the first free slot. |
+| `--poll DURATION` | How often to look for a change, such as `500ms` or `2s`. Default `500ms`. |
+| `--db PATH` | The store, as for every command. |
+
+How it behaves:
+
+- It looks for a change every `--poll` with `PRAGMA data_version`, and reads
+  the table only when that value changes (and once every 30 s as a guard). A
+  new message reaches the pad within about one poll.
+- It starts with or without `macropadd`. It dials with backoff from 250 ms to
+  5 s, and logs once when the link goes down and once when it comes back. On
+  every connect it waits for the first `layerChanged` (at most 1 s), then sends
+  the full state, then only changes.
+- While `macropadd` is down it keeps reading the store, and sends only the
+  newest state on reconnect.
+- One daemon runs per store. It makes `<db>.daemon.pid`. A second daemon
+  exits with code 3 and `inbox: a daemon already runs for <db> (pid N)`. A pid
+  file whose process is gone is replaced.
+- `SIGINT` and `SIGTERM` close the WebSocket and exit 0. The keys stay on the
+  pad: `macropadd` keeps them in `layers.json`, and the next daemon start
+  corrects them.
+- Log lines go to standard error, each starting with `inbox:`.
+
+Start `macropadd` with the same `--assets-dir`, for example from the repo
+root:
+
+```
+go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 --assets-dir "$PWD/assets"
+inbox daemon --assets-dir "$PWD/assets"
+```
+
+### Install at login
+
+```
+inbox/scripts/install.sh [--assets-dir DIR] [--port N] [--slot N] [--dry-run]
+inbox/scripts/uninstall.sh [--purge] [--dry-run]
+```
+
+`install.sh` needs Node 22.13 or newer. It records the absolute path of the
+`node` it finds, because launchd and systemd do not see your shell's `PATH`
+(nvm, Homebrew). It then:
+
+1. writes `$PREFIX/bin/inbox` (`PREFIX` defaults to `~/.local`), a wrapper that
+   runs `inbox/bin/inbox.js` of this checkout with that `node`;
+2. writes the service and starts it;
+3. prints where the command, the service file, the log, and the store are, and
+   whether the daemon runs.
+
+| | macOS | Linux |
+|---|---|---|
+| Service file | `~/Library/LaunchAgents/com.kgheacock.macropad.inbox.plist` | `~/.config/systemd/user/inbox-daemon.service` |
+| Log | `~/Library/Logs/inbox-daemon.log` | `journalctl --user -u inbox-daemon` |
+| Restart | `KeepAlive`, 5 s throttle | `Restart=always`, `RestartSec=5` |
+
+Run `install.sh` again to upgrade: it rewrites the files and restarts the
+daemon. Keep the checkout where it is; run the script again after you move it
+or change the Node version. `install.sh` does not start `macropadd`.
+
+`uninstall.sh` stops the daemon, removes the service and the wrapper, and
+keeps the store. `--purge` also removes the store, its `-wal` and `-shm`
+files, and the pid file. With nothing installed it says so and exits 0. Both
+scripts take `--dry-run` (print each step, change nothing) and `-h`.
+
+Exit codes of `inbox daemon`: 0 after a signal, 1 store error, 2 usage error,
+3 a daemon already runs.

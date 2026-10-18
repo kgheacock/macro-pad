@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
@@ -331,4 +331,102 @@ test('TestDottedDirectoryChannel', (t) => {
   const dir = subdir(sc, 'github.com', 'me', 'app');
   assert.equal(run(['send', 'hi'], { sc, cwd: dir }).status, 0);
   assert.equal(rows(sc)[0].channel, 'github.com.me.app');
+});
+
+// Waits until the child writes `text` to standard error.
+function stderrHas(child, text, ms = 5000) {
+  return new Promise((resolve, reject) => {
+    let seen = '';
+    const timer = setTimeout(() => reject(new Error(`no "${text}" in: ${seen}`)), ms);
+    child.stderr.on('data', (d) => {
+      seen += d;
+      if (seen.includes(text)) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+}
+
+test('TestSecondDaemonRefused', async (t) => {
+  const sc = scratch(t);
+  const first = start(['daemon', '--port', '1'], { sc });
+  t.after(() => first.child.kill('SIGKILL'));
+  await stderrHas(first.child, 'daemon started');
+
+  const second = run(['daemon', '--port', '1'], { sc });
+  assert.equal(second.status, 3);
+  assert.equal(
+    second.stderr,
+    `inbox: a daemon already runs for ${sc.db} (pid ${first.child.pid})\n`,
+  );
+
+  // After the first one stops, a new daemon can start.
+  first.child.kill('SIGTERM');
+  assert.equal((await first.exited).status, 0);
+  const third = start(['daemon', '--port', '1'], { sc });
+  t.after(() => third.child.kill('SIGKILL'));
+  await stderrHas(third.child, 'daemon started');
+  third.child.kill('SIGTERM');
+  assert.equal((await third.exited).status, 0);
+});
+
+test('TestStalePidFileIsReplaced', async (t) => {
+  const sc = scratch(t);
+  mkdirSync(path.dirname(sc.db), { recursive: true });
+  writeFileSync(`${sc.db}.daemon.pid`, '2147483646\n');
+  const d = start(['daemon', '--port', '1'], { sc });
+  t.after(() => d.child.kill('SIGKILL'));
+  await stderrHas(d.child, 'daemon started');
+  d.child.kill('SIGTERM');
+  const { status, stderr } = await d.exited;
+  assert.equal(status, 0);
+  assert.ok(stderr.includes('stale pid file'), stderr);
+});
+
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  test(`TestDaemonSignal ${signal}`, async (t) => {
+    const sc = scratch(t);
+    const d = start(['daemon', '--port', '1'], { sc });
+    t.after(() => d.child.kill('SIGKILL'));
+    await stderrHas(d.child, 'daemon started');
+    const sent = Date.now();
+    d.child.kill(signal);
+    const { status } = await d.exited;
+    assert.equal(status, 0);
+    assert.ok(Date.now() - sent < 1000, `took ${Date.now() - sent} ms`);
+    assert.equal(existsSync(`${sc.db}.daemon.pid`), false);
+  });
+}
+
+test('TestDaemonHelp', () => {
+  const sc = scratch();
+  for (const flag of ['-h', '--help']) {
+    const r = run(['daemon', flag], { sc });
+    assert.equal(r.status, 0);
+    assert.ok(r.stdout.startsWith('Usage: inbox daemon '), r.stdout);
+    for (const word of ['--port', '--assets-dir', '--slot', '--poll', '--db', '8765', '500ms']) {
+      assert.ok(r.stdout.includes(word), `${flag} lacks ${word}`);
+    }
+  }
+});
+
+test('TestDaemonBadFlags', () => {
+  const sc = scratch();
+  const cases = [
+    [['--slot', '7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
+    [['--port', 'x'], 'inbox: --port x is out of range; use 1 to 65535\n'],
+    [['--poll', '5'], 'inbox: --poll 5 is not a duration; use a number and a unit, such as 500ms or 2s\n'],
+    [
+      ['--assets-dir', 'assets'],
+      'inbox: assets dir "assets" is relative; pass an absolute path, as macropadd sees it\n',
+    ],
+  ];
+  for (const [flags, message] of cases) {
+    const r = run(['daemon', ...flags], { sc });
+    assert.equal(r.status, 2, flags.join(' '));
+    assert.equal(r.stderr, message);
+  }
+  const extra = run(['daemon', 'now'], { sc });
+  assert.equal(extra.status, 2);
 });

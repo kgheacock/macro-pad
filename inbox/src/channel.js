@@ -4,6 +4,9 @@ import path from 'node:path';
 import { UsageError } from './errors.js';
 
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
+// A directory name may hold dots between valid segments, as in github.com.
+// The dot is kept, so ~/source/github.com/me/app gives github.com.me.app.
+const DIRECTORY = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/;
 
 export function tildify(p, home = os.homedir()) {
   if (p === home) return '~';
@@ -50,7 +53,7 @@ export function inferChannel(cwd, root) {
   }
   const parts = rel.split(path.sep);
   for (const part of parts) {
-    if (!SEGMENT.test(part)) {
+    if (!DIRECTORY.test(part)) {
       throw new UsageError(
         `cannot use directory "${part}" in ${tildify(dir)} as a channel segment; pass the channel first`,
       );

@@ -34,7 +34,9 @@ it on the pad. This task builds the store and the command line.
 - A new top-level folder, `inbox/`, holds all inbox code. It is a Node
   package, written in JavaScript, with no npm dependencies.
 - One command, `inbox`, writes and reads one SQLite file.
-- Each message belongs to one channel.
+- Each message belongs to one channel, and has a status (default `info`).
+  `--status S` on `send` and `pipe` sets it, so `my_cmd 2> >(inbox pipe
+  --status error debug) | inbox pipe debug` keeps standard error apart.
 - Under the source root (`~/source` by default), the channel comes from the
   working directory: the path below the root, joined by dots.
   `~/source/macro-pad/driver` gives `macro-pad.driver`.
@@ -53,7 +55,7 @@ it on the pad. This task builds the store and the command line.
 
 - The daemon and the pad. Tasks 0065, 0066, and 0067 own them.
 - Deleting or expiring old messages. A later task can add `inbox prune`.
-- Priority, severity, or a status per message. Every message is plain text.
+- Priority or severity. A message has plain text and one free-form status.
 - Sync across machines, or a network API.
 - Windows.
 
@@ -133,12 +135,14 @@ CREATE TABLE messages (
   body       TEXT    NOT NULL,
   created_at INTEGER NOT NULL,  -- Unix milliseconds
   seen_at    INTEGER,           -- NULL while unseen
-  cwd        TEXT    NOT NULL   -- the sender's working directory
+  cwd        TEXT    NOT NULL,  -- the sender's working directory
+  status     TEXT    NOT NULL DEFAULT 'info'  -- schema 2
 );
 CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
 ```
 
-- `PRAGMA user_version` holds the schema version, starting at 1. `openStore`
+- `PRAGMA user_version` holds the schema version. Version 1 had no `status`;
+  version 2 adds it with `ALTER TABLE`. `openStore`
   migrates an older file in one transaction, and refuses a newer one with an
   error that names both versions.
 - Every connection sets `journal_mode=WAL` and `busy_timeout=5000`.
@@ -161,9 +165,11 @@ The source root is `$INBOX_SOURCE_ROOT`, or `~/source`. Inference:
    inferred channel.
 3. Otherwise the channel is the path components below the root, joined by
    dots. `~/source/macro-pad/driver/layers` gives `macro-pad.driver.layers`.
-4. A component that is not a valid segment, such as `my.repo` or `a b`, is an
-   error that names the component and says to pass the channel as an
-   argument.
+4. A component may hold dots between valid segments, as in `github.com`. The
+   dot is kept: `~/source/github.com/me/app` gives `github.com.me.app`. A
+   component with any other character, such as `a b`, or one that starts or
+   ends with a dot, is an error that names the component and says to pass the
+   channel as an argument.
 
 A channel argument skips inference. With no channel argument and no inferred
 channel, a command that needs a channel prints
@@ -174,10 +180,10 @@ and exits with code 2.
 
 | Command | Meaning |
 |---|---|
-| `inbox send CHANNEL MESSAGE` | Sends one message to `CHANNEL`. |
-| `inbox send MESSAGE` | Sends one message to the inferred channel. |
-| `inbox pipe [CHANNEL]` | Reads standard input, one message per line, into `CHANNEL` or the inferred channel. |
-| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | Lists messages, oldest first, seen and unseen. `--unseen` lists only unseen ones. Default: the inferred channel, else every channel. |
+| `inbox send [--status S] CHANNEL MESSAGE` | Sends one message to `CHANNEL`. |
+| `inbox send [--status S] MESSAGE` | Sends one message to the inferred channel. |
+| `inbox pipe [--status S] [CHANNEL]` | Reads standard input, one message per line, into `CHANNEL` or the inferred channel. |
+| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | Lists messages, oldest first, seen and unseen. `--unseen` lists only unseen ones. Each line is: time, status, then the channel (when several channels show), then the message. Default: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Prints the unseen count. |
 | `inbox channels [--json]` | Prints each channel with unseen messages, its count, and its newest message time. |
 | `inbox seen [CHANNEL \| --all-channels]` | Marks unseen messages seen. Prints how many. |
@@ -217,7 +223,8 @@ channel).
 | Unknown subcommand | `inbox: unknown command "sned"; did you mean "send"? Run 'inbox -h' for the list.` (the hint names the closest command, when one is close) |
 | No channel outside the root | `inbox: no channel: /tmp/x is not under ~/source. Pass it first, as in: inbox send CHANNEL MESSAGE` |
 | Bad channel | `inbox: bad channel "my repo": a channel segment may hold only letters, digits, - and _` |
-| Directory that cannot be a channel | `inbox: cannot use directory "my.repo" in ~/source/my.repo as a channel segment; pass the channel first` |
+| Directory that cannot be a channel | `inbox: cannot use directory "my repo" in ~/source/my repo as a channel segment; pass the channel first` |
+| Bad status | `inbox: bad status "not ok": a status may hold only letters, digits, - and _` |
 | `send` with three or more arguments | `inbox: send takes CHANNEL and MESSAGE; quote a message with spaces, as in: inbox send debug "build done"` |
 | `send` with no arguments | `inbox: send needs a message, as in: inbox send debug "build done"` |
 | `pipe` on a terminal | `inbox: pipe reads lines from a pipe or file, as in: my_cmd 2>&1 \| inbox pipe debug` |
@@ -259,8 +266,8 @@ is ticked.
     to tick this box.
 - [x] **DoD-2** — Under root `R`, the directory `R/a/b/c` infers `a.b.c`;
   `R` itself and a directory outside `R` infer nothing; a symbolic link into
-  `R` infers the target's channel; `R/my.repo` is an error naming
-  `my.repo`. **Proof:** `cd inbox && node --test --test-name-pattern=TestInfer test/channel.test.js`
+  `R` infers the target's channel; `R/github.com/me/my.repo` infers
+  `github.com.me.my.repo`; `R/a b` is an error naming `a b`. **Proof:** `cd inbox && node --test --test-name-pattern=TestInfer test/channel.test.js`
 - [x] **DoD-3** — Outside the root, `inbox send hi` and `echo hi | inbox
   pipe` exit 2, print the root, and write no row. `inbox send debug hi` and
   `echo hi | inbox pipe debug` both store `hi` in `debug`. Under the root,
@@ -294,6 +301,10 @@ is ticked.
   gives one line on standard error that starts with `inbox:` and matches the
   table, with the stated exit code. **Proof:** `node --test --test-name-pattern=TestErrorMessages test/cli.test.js`
 - [x] **DoD-15** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-16** — Each message has a status, default `info`. `--status S` on
+  `send` and `pipe` stores it; `list` shows it and `--json` includes it; a
+  bad status exits 2; a schema 1 file migrates to 2 with old rows set to
+  `info`. **Proof:** `node --test --test-name-pattern='TestStatus|TestMigrateV1ToV2'`
 
 ## Risks
 
@@ -303,10 +314,9 @@ is ticked.
 - A Mac's default Node may be older than 22.13 → the CLI checks
   `process.versions.node` first and prints `inbox: needs Node 22.13 or newer;
   this is Node X`.
-- A directory name with a dot, such as `my.repo`, cannot map to a channel
-  without making `a.b` ambiguous → it is an error that says to pass the
-  channel as an argument.
-  A later task can add an escape if this bites.
+- A directory name with a dot, such as `github.com`, makes `a.b` ambiguous
+  (the directory `a.b` or `a/b`) → accepted: the dot is kept. The channel for
+  `~/source/github.com/me/app` is long; `INBOX_SOURCE_ROOT` gives a short one.
 - The store grows forever → acceptable for text messages at human rates.
   `inbox prune` is a later task.
 - A pipe that writes one huge line with no newline holds up to 64 KiB in
@@ -314,8 +324,9 @@ is ticked.
 
 ## Open questions
 
-- [ ] Is `~/source` the right default root, or should it be another path? —
-  kgheacock
+- [x] Is `~/source` the right default root, or should it be another path? —
+  kgheacock: keep `~/source`; a dotted directory such as `github.com` is not an
+  error, its dot is kept.
 - [x] Should `inbox list` print seen messages too by default? — kgheacock:
   yes, seen messages are shown; `--unseen` limits the list to unseen ones.
 

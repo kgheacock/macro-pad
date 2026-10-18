@@ -4,7 +4,7 @@
 import { parseArgs } from 'node:util';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { StoreError, UsageError } from './errors.js';
-import { defaultDbPath, openStore } from './store.js';
+import { DEFAULT_STATUS, defaultDbPath, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
 const FLUSH_MS = 200;
@@ -17,6 +17,7 @@ const CHANNEL_RULES = `How the channel is chosen:
   macro-pad.driver. Outside the root, pass the channel.`;
 
 const DB_OPTION = `  --db PATH   use this SQLite file instead of $INBOX_DB`;
+const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
 
 const HELP = {
   inbox: `inbox - leave short messages per channel, and read them later
@@ -39,21 +40,23 @@ Examples:
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error.`,
 
-  send: `Usage: inbox send [CHANNEL] MESSAGE
+  send: `Usage: inbox send [--status STATUS] [CHANNEL] MESSAGE
 
 Send one message.
 
   CHANNEL   where the message goes, such as "debug" or "macro-pad.driver"
   MESSAGE   the text; quote it when it has spaces
+${STATUS_OPTION}
 ${DB_OPTION}
 
 ${CHANNEL_RULES}
 
 Examples:
   inbox send debug "build done"
+  inbox send --status error debug "build failed"
   inbox send "tests passed"        (in ~/source/macro-pad: channel macro-pad)`,
 
-  pipe: `Usage: inbox pipe [CHANNEL]
+  pipe: `Usage: inbox pipe [--status STATUS] [CHANNEL]
 
 Read standard input and send each line as one message. Empty lines are
 skipped. A line longer than 64 KiB is cut. Messages are saved while the pipe
@@ -61,9 +64,14 @@ is still open, within 200 ms. SIGINT and SIGTERM save what was read, then
 exit 0.
 
   CHANNEL   where the messages go
+${STATUS_OPTION}
 ${DB_OPTION}
 
 ${CHANNEL_RULES}
+
+After 2>&1 the two streams share one pipe, and inbox cannot tell them apart.
+To keep them apart, give each stream its own pipe and status (bash, zsh):
+  my_cmd 2> >(inbox pipe --status error debug) | inbox pipe debug
 
 Examples:
   my_cmd 2>&1 | inbox pipe debug
@@ -72,12 +80,14 @@ Examples:
   list: `Usage: inbox list [CHANNEL | --all-channels] [--unseen] [--json] [-n N]
 
 List messages, oldest first. A leading "*" marks the ones not seen yet.
+Each line is: time, status, then the channel (with --all-channels), then the
+message.
 
   CHANNEL         list this channel
   --all-channels  list every channel
   --unseen        list only the messages that are not seen yet
   --json          print a JSON array of {id, channel, body, created_at,
-                  seen_at, cwd}
+                  seen_at, cwd, status}
   -n N            keep only the newest N messages
 ${DB_OPTION}
 
@@ -133,8 +143,8 @@ const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const OPTIONS = {
-  send: {},
-  pipe: {},
+  send: { status: { type: 'string' } },
+  pipe: { status: { type: 'string' } },
   list: {
     'all-channels': { type: 'boolean' },
     unseen: { type: 'boolean' },
@@ -202,6 +212,16 @@ function formatTime(ms) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+function parseStatus(status) {
+  if (status === undefined) return DEFAULT_STATUS;
+  if (!/^[A-Za-z0-9_-]+$/.test(status)) {
+    throw new UsageError(
+      `bad status "${status}": a status may hold only letters, digits, - and _`,
+    );
+  }
+  return status;
+}
+
 // An explicit channel wins; otherwise infer one, or fail with exit code 2.
 function requireChannel(io, explicit, example) {
   if (explicit !== undefined) return validateChannel(explicit);
@@ -258,7 +278,8 @@ function runSend(io, { values, positionals }) {
   }
   const explicit = positionals.length === 2 ? positionals[0] : undefined;
   const channel = requireChannel(io, explicit, 'inbox send CHANNEL MESSAGE');
-  withStore(io, values, (store) => store.insert(channel, message, io.cwd()));
+  const status = parseStatus(values.status);
+  withStore(io, values, (store) => store.insert(channel, message, io.cwd(), { status }));
   return 0;
 }
 
@@ -273,7 +294,7 @@ function cutLine(line, warnCut) {
 
 // Reads lines until end of input or a signal. Saves in batches so a long
 // pipe shows its lines within FLUSH_MS and a burst costs a few transactions.
-function pipeLines(io, store, channel) {
+function pipeLines(io, store, channel, status) {
   const cwd = io.cwd();
   let pending = [];
   let timer = null;
@@ -294,7 +315,7 @@ function pipeLines(io, store, channel) {
     if (pending.length === 0) return;
     const batch = pending;
     pending = [];
-    store.insertMany(channel, batch, cwd);
+    store.insertMany(channel, batch, cwd, { status });
   };
 
   const addLine = (raw) => {
@@ -368,6 +389,7 @@ async function runPipe(io, { values, positionals }) {
     throw new UsageError('pipe takes at most one argument, the CHANNEL, as in: my_cmd 2>&1 | inbox pipe debug');
   }
   const channel = requireChannel(io, positionals[0], 'inbox pipe CHANNEL');
+  const status = parseStatus(values.status);
   if (io.stdin.isTTY) {
     throw new UsageError(
       'pipe reads lines from a pipe or file, as in: my_cmd 2>&1 | inbox pipe debug',
@@ -375,7 +397,7 @@ async function runPipe(io, { values, positionals }) {
   }
   const store = openStore(values.db ?? defaultDbPath(io.env), io.env);
   try {
-    return await pipeLines(io, store, channel);
+    return await pipeLines(io, store, channel, status);
   } finally {
     store.close();
   }
@@ -397,10 +419,11 @@ function runList(io, { values, positionals }) {
     out(io, JSON.stringify(messages));
     return 0;
   }
+  const width = Math.max(0, ...messages.map((m) => m.status.length));
   for (const m of messages) {
     const mark = m.seen_at === null ? '* ' : '  ';
     const where = channel === null ? `${m.channel}  ` : '';
-    out(io, `${mark}${formatTime(m.created_at)}  ${where}${m.body}`);
+    out(io, `${mark}${formatTime(m.created_at)}  ${m.status.padEnd(width)}  ${where}${m.body}`);
   }
   return 0;
 }

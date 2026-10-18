@@ -36,20 +36,23 @@ test('TestInferSymlink', (t) => {
 
 test('TestInferDottedDirectory', (t) => {
   const { root } = scratch(t);
-  mkdirSync(path.join(root, 'my.repo'));
-  assert.throws(
-    () => inferChannel(path.join(root, 'my.repo'), root),
-    (e) =>
-      e instanceof UsageError &&
-      e.message.includes('"my.repo"') &&
-      e.message.includes('pass the channel first'),
-  );
+  mkdirSync(path.join(root, 'github.com', 'me', 'my.repo'), { recursive: true });
+  // The dot inside a directory name is kept as an ordinary separator.
+  assert.equal(inferChannel(path.join(root, 'github.com'), root), 'github.com');
+  assert.equal(inferChannel(path.join(root, 'github.com', 'me', 'my.repo'), root), 'github.com.me.my.repo');
 });
 
 test('TestInferBadSegment', (t) => {
   const { root } = scratch(t);
   mkdirSync(path.join(root, 'a b'));
-  assert.throws(() => inferChannel(path.join(root, 'a b'), root), /"a b"/);
+  assert.throws(
+    () => inferChannel(path.join(root, 'a b'), root),
+    (e) => e instanceof UsageError && e.message.includes('"a b"') && e.message.includes('pass the channel first'),
+  );
+  for (const name of ['.git', 'a..b', 'trail.']) {
+    mkdirSync(path.join(root, name));
+    assert.throws(() => inferChannel(path.join(root, name), root), UsageError, name);
+  }
 });
 
 test('TestValidateChannel', () => {

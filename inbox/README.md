@@ -17,10 +17,10 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 
 | Command | Meaning |
 |---|---|
-| `inbox send CHANNEL MESSAGE` | Send one message to `CHANNEL`. |
-| `inbox send MESSAGE` | Send one message to the channel of the working directory. |
-| `inbox pipe [CHANNEL]` | Send each line of standard input as one message. |
-| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | List messages, oldest first, seen and unseen (a leading `*` marks the unseen). `--unseen` lists only the unseen. `-n N` keeps the newest N. Default scope: the inferred channel, else every channel. |
+| `inbox send [--status S] CHANNEL MESSAGE` | Send one message to `CHANNEL`. |
+| `inbox send [--status S] MESSAGE` | Send one message to the channel of the working directory. |
+| `inbox pipe [--status S] [CHANNEL]` | Send each line of standard input as one message. |
+| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | List messages, oldest first, seen and unseen (a leading `*` marks the unseen). `--unseen` lists only the unseen. `-n N` keeps the newest N. Each line is: time, status, the channel (with `--all-channels` or outside the root), then the message. Default scope: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Print the unseen count. Same default scope as `list`. |
 | `inbox channels [--json]` | Print each channel with unseen messages, its count, and the time of its newest message. |
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |
@@ -35,6 +35,26 @@ inbox send debug "build done"
 my_cmd 2>&1 | inbox pipe debug
 tail -f build.log | inbox pipe build
 ```
+
+### Status
+
+Every message has a status: letters, digits, `-` and `_`. The default is
+`info`. `--status S` on `send` and `pipe` sets it, and `list` shows it as a
+column (and as `status` in `--json`).
+
+### Standard output and standard error
+
+After `2>&1`, both streams share one pipe, so `inbox` cannot tell a standard
+error line from a standard output line. To keep them apart, give each stream
+its own `inbox pipe` and a status (bash and zsh):
+
+```
+my_cmd 2> >(inbox pipe --status error debug) | inbox pipe debug
+```
+
+The two pipes run as separate processes, so their lines are saved in the order
+each process commits them (within 200 ms), not in the order `my_cmd` wrote them.
+Use `2>&1` when the order matters more than the stream.
 
 `inbox send` takes one or two arguments. With two, the first is the channel.
 With three or more it exits with code 2 and says to quote the message.
@@ -66,8 +86,12 @@ gives `macro-pad.driver`. Symbolic links are resolved in both paths first.
 
 - The root itself, or a directory outside it, has no inferred channel. A
   command that needs one exits with code 2.
-- A directory name that is not a valid segment (`my.repo`, `a b`) is an
-  error that says to pass the channel as an argument.
+- A dot inside a directory name is kept, so `~/source/github.com/me/app`
+  gives `github.com.me.app`. (`a.b` can then mean the directory `a.b` or
+  `a/b`; that is accepted.) Set `INBOX_SOURCE_ROOT=~/source/github.com/me` for
+  the short name `app`.
+- A directory name with any other character (`a b`, or a name that starts or
+  ends with a dot) is an error that says to pass the channel as an argument.
 
 ## Store
 
@@ -83,12 +107,13 @@ CREATE TABLE messages (
   body       TEXT    NOT NULL,
   created_at INTEGER NOT NULL,  -- Unix milliseconds
   seen_at    INTEGER,           -- NULL while unseen
-  cwd        TEXT    NOT NULL   -- the sender's working directory
+  cwd        TEXT    NOT NULL,  -- the sender's working directory
+  status     TEXT    NOT NULL DEFAULT 'info'  -- added in schema 2
 );
 CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
 ```
 
-`PRAGMA user_version` is the schema version (now 1). An older file is
+`PRAGMA user_version` is the schema version (now 2; version 2 added `status`). An older file is
 migrated in one transaction. A newer file is refused and left unchanged.
 
 For code that reads the store (`src/store.js`):

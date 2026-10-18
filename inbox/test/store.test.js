@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from '../src/errors.js';
@@ -36,9 +37,9 @@ test('TestMarkSeenUpTo', (t) => {
 test('TestUnseen', (t) => {
   const { db } = scratch(t);
   const store = openStore(db);
-  store.insert('a', 'one', '/x', 1000);
-  const a2 = store.insert('a', 'two', '/x', 2000);
-  const b1 = store.insert('b', 'three', '/x', 3000);
+  store.insert('a', 'one', '/x', { now: 1000 });
+  const a2 = store.insert('a', 'two', '/x', { now: 2000 });
+  const b1 = store.insert('b', 'three', '/x', { now: 3000 });
   assert.deepEqual(store.unseen(), [
     { channel: 'a', count: 2, newestId: a2, createdAt: 2000 },
     { channel: 'b', count: 1, newestId: b1, createdAt: 3000 },
@@ -88,4 +89,35 @@ test('TestNewerSchemaRefused', (t) => {
   );
   const after = createHash('sha256').update(readFileSync(db)).digest('hex');
   assert.equal(after, before);
+});
+
+test('TestStatusStoredAndDefaulted', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db);
+  store.insert('a', 'plain', '/x');
+  store.insert('a', 'bad', '/x', { status: 'error' });
+  store.insertMany('a', ['m1', 'm2'], '/x', { status: 'warn' });
+  assert.deepEqual(store.list().map((m) => [m.body, m.status]), [
+    ['plain', 'info'], ['bad', 'error'], ['m1', 'warn'], ['m2', 'warn'],
+  ]);
+  store.close();
+});
+
+test('TestMigrateV1ToV2', (t) => {
+  const { db } = scratch(t);
+  mkdirSync(path.dirname(db), { recursive: true });
+  const raw = new DatabaseSync(db);
+  raw.exec(`CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, body TEXT NOT NULL,
+    created_at INTEGER NOT NULL, seen_at INTEGER, cwd TEXT NOT NULL);
+    CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
+    INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x');
+    PRAGMA user_version = 1;`);
+  raw.close();
+  const store = openStore(db);
+  assert.deepEqual(store.list().map((m) => [m.body, m.status]), [['old', 'info']]);
+  store.close();
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  check.close();
 });

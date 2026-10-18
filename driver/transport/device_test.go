@@ -391,3 +391,31 @@ func TestDevice_BeginBatchWritesAFrameOfTwoMasks(t *testing.T) {
 		t.Fatalf("CDC write = % x, want % x", serialConn.written, want)
 	}
 }
+
+// A key state for which DropKeyState returns true is not written, and the
+// next one is (task 0063's fault injection for hardware tests).
+func TestDevice_DropKeyStateSkipsTheWrite(t *testing.T) {
+	hid := &captureWriteCloser{}
+	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+	defer d.Close()
+	dropped := false
+	d.dropKeyState = func(ks KeyState) bool {
+		if ks.KeyIndex == 2 && !dropped {
+			dropped = true
+			return true
+		}
+		return false
+	}
+
+	d.SendKeyState(KeyState{KeyIndex: 1, Version: ProtocolVersion, Color: 0x001F})
+	d.SendKeyState(KeyState{KeyIndex: 2, Version: ProtocolVersion, Color: 0x07E0})
+	afterDrop := len(hid.written)
+	d.SendKeyState(KeyState{KeyIndex: 2, Version: ProtocolVersion, Color: 0x07E0})
+
+	if afterDrop != 1+keyStateSize {
+		t.Fatalf("after the dropped report %d bytes were written, want only key 1's report of %d", afterDrop, 1+keyStateSize)
+	}
+	if len(hid.written) != 2*(1+keyStateSize) {
+		t.Fatalf("%d bytes written in all, want two reports of %d", len(hid.written), 1+keyStateSize)
+	}
+}

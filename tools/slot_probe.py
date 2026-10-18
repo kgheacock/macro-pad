@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the frame cache's pool on the board: the time to allocate 128 slots,
+"""Measure the frame cache's pool on the board: the time to allocate the slots,
 the free heap after, and the time of a 32 KB copy.
 
 `make slot-probe` runs `install`, then `read`. See
@@ -30,7 +30,7 @@ import termios
 import time
 from pathlib import Path
 
-# DoD-1: free heap after the pool of 128 slots is allocated, in bytes.
+# DoD-1: free heap after the pool is allocated, in bytes.
 MIN_FREE_HEAP_BYTES = 2 * 1024 * 1024
 
 # What the probe sends: one `pool` line, then one `copy` line for each trial.

@@ -73,7 +73,7 @@ func TestStoreFrameRefusesAGlyphThatDoesNotCompress(t *testing.T) {
 }
 
 func TestShowFramesNamesASlotOrUnchangedForEachKey(t *testing.T) {
-	slots := []byte{0, 127, SlotUnchanged, 5, SlotUnchanged, 64}
+	slots := []byte{0, 63, SlotUnchanged, 5, SlotUnchanged, 40}
 	payload, err := encodeShowFrames(slots)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +82,8 @@ func TestShowFramesNamesASlotOrUnchangedForEachKey(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, slots) {
 		t.Fatalf("decoded %v, err %v; want %v", got, err, slots)
 	}
-	if _, err := encodeShowFrames([]byte{0, 128}); !errors.Is(err, ErrInvalidSlot) {
-		t.Fatalf("slot 128: err %v, want ErrInvalidSlot", err)
+	if _, err := encodeShowFrames([]byte{0, 64}); !errors.Is(err, ErrInvalidSlot) {
+		t.Fatalf("slot 64: err %v, want ErrInvalidSlot", err)
 	}
 	if _, err := encodeShowFrames(nil); !errors.Is(err, ErrInvalidSlot) {
 		t.Fatalf("no key: err %v, want ErrInvalidSlot", err)
@@ -140,5 +140,36 @@ func TestShowMissReachesReadMessage(t *testing.T) {
 	}
 	if msg.Type != MessageTypeShowMiss || msg.ShowMiss.Mask != 0b101 {
 		t.Fatalf("message = %+v, want a Show miss of keys 0 and 2", msg)
+	}
+}
+
+func TestBatchIncompleteReachesReadMessage(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+
+	if err := e.InjectBatchIncomplete(0b0100, 0b0110); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := e.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Type != MessageTypeBatchIncomplete || msg.BatchIncomplete != (BatchIncomplete{GlyphMask: 0b0100, StateMask: 0b0110}) {
+		t.Fatalf("message = %+v, want a Batch incomplete with glyph mask 0b0100 and state mask 0b0110", msg)
+	}
+}
+
+func TestDecodeBatchIncompleteRejectsAWrongLength(t *testing.T) {
+	if _, err := decodeBatchIncomplete([]byte{1}); err == nil {
+		t.Fatal("decodeBatchIncomplete with a 1-byte payload returned no error")
+	}
+	if _, err := decodeBatchIncomplete([]byte{1, 2, 3}); err == nil {
+		t.Fatal("decodeBatchIncomplete with a 3-byte payload returned no error")
+	}
+}
+
+func TestSlotCountIs64(t *testing.T) {
+	if SlotCount != 64 {
+		t.Fatalf("SlotCount = %d, want 64 (task 0063)", SlotCount)
 	}
 }

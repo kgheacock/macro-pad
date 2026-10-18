@@ -92,14 +92,14 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — An open batch that lacks data sends "Batch incomplete" with the right masks after 500 ms, at most three times, and sends nothing when the batch is complete. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for each case.
-- [ ] **DoD-2** — The host sends the named glyphs and key states again, and nothing for an unknown key. **Proof:** `cd driver && go test ./transport -run BatchIncomplete` passes.
-- [ ] **DoD-3** — On the board, with one key state dropped on purpose, the batch releases with no `BATCH_TIMED_OUT` record, within 1.0 s of the last send, and one trace record of code 12 appears. **Proof:** `blinksend --scenario=batchloss`, in three runs, and the trace files.
-- [ ] **DoD-4** — The pool is 64 slots on the board and on the host. **Proof:** `git grep -n "SLOT_COUNT = 64" firmware/` and `git grep -n "SlotCount = 64" driver/`.
-- [ ] **DoD-5** — With 64 slots, one `gc.collect()` takes at most 50 ms. **Proof:** the probe line in `firmware/README.md`.
-- [ ] **DoD-6** — On the board, 15 runs of `blinksend --scenario=batch` end with no `BATCH_TIMED_OUT` record. **Proof:** the 15 trace files.
-- [ ] **DoD-7** — `docs/wire-protocol.md` lists type 11, trace code 12, and 64 slots. **Proof:** `docs/wire-protocol.md`.
-- [ ] **DoD-8** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
+- [x] **DoD-1** — An open batch that lacks data sends "Batch incomplete" with the right masks after 500 ms, at most three times, and sends nothing when the batch is complete. **Proof:** `.venv/bin/pytest test/test_app.py` passes, with a test for each case. `test_open_batch_asks_the_host_for_what_it_lacks_after_500_ms`, `test_batch_incomplete_repeats_every_500_ms_at_most_three_times`, and `test_a_complete_batch_sends_no_batch_incomplete` cover it.
+- [x] **DoD-2** — The host sends the named glyphs and key states again, and nothing for an unknown key. **Proof:** `cd driver && go test ./transport -run BatchIncomplete` passes. Three tests cover the named keys, a glyph-only mask with an unknown key, and keys the host never sent.
+- [x] **DoD-3** — On the board, with one key state dropped on purpose, the batch releases with no `BATCH_TIMED_OUT` record, within 1.0 s of the last report of the first pass, and one trace record of code 12 appears. **Proof:** `go run ./cmd/blinksend --scenario=batchloss` and `python3 tools/blink_trace.py report --scenario=batchloss FILE`, in three runs. They printed `batch incomplete 1, released 528 ms`, `521 ms`, and `519 ms after the last report`, and the board asked for glyphs `0x00` and key states `0x04`, which is key 2.
+- [x] **DoD-4** — The pool is 64 slots on the board and on the host. **Proof:** `git grep -n "SLOT_COUNT = 64" firmware/` and `git grep -n "SlotCount = 64" driver/`.
+- [x] **DoD-5** — With 64 slots, one `gc.collect()` takes at most 50 ms. **Proof:** the probe line in `firmware/README.md`: 42 ms for 64 slots.
+- [x] **DoD-6** — On the board, 15 runs of `blinksend --scenario=batch` end with no `BATCH_TIMED_OUT` record. **Proof:** the 15 trace files. All 15 ended with no `BATCH_TIMED_OUT`, and the board did not need to ask in any of them.
+- [x] **DoD-7** — `docs/wire-protocol.md` lists type 11, trace code 12, and 64 slots. **Proof:** `docs/wire-protocol.md`.
+- [x] **DoD-8** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. The first reports 294 passed.
 - [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
@@ -119,3 +119,9 @@ Measured on 2026-10-18 with PR #72's firmware (task 0061 investigation):
 - `gc.collect()` took 0.7 ms with no pool, 22 ms with 32 slots, 42 ms with 64 slots, and 115 to 150 ms with 128 slots.
 - `blinksend --scenario=batch` runs that ended with `BATCH_TIMED_OUT`: 0 of 9 with no pool, 1 of 12 with 32 slots, 2 of 9 with 128 slots. The first failure had payload `0x0400`: the report for key 2 never arrived.
 - A pool of 128 `bytearray`s cost the same as 128 `displayio.Bitmap` objects. The collector scans every live heap block.
+
+Measured on 2026-10-18 with this branch's firmware, a Pico Plus 2, and the tracing `code.py`:
+
+- `blinksend --scenario=batchloss`, 3 runs: the board sent Batch incomplete once, naming key 2's state; `Reconnecting` sent it again; the batch released 528, 521, and 519 ms after the last report of the first pass. No run ended with `BATCH_TIMED_OUT`.
+- `blinksend --scenario=batch`, 15 runs with 64 slots: 0 time-outs, and the board asked in none of them. The compose step had a median of 77 ms, a 90th percentile of 98 ms, and a maximum of 170 ms. A pass can still be longer than the 150 ms gap, so a loss is less likely than with 128 slots, not impossible. The resend covers it.
+- One `go test -race ./transport` run hit the 10 minute test time-out once while other builds ran. It passed in 60 of 60 stress runs of the new tests, and in 25 of 25 runs of the whole package. The test that hung was not captured.

@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/77"
 branch: "claude/project-thread-tl5p4v"
 related: ["0013", "0057", "0064", "0065", "0066"]
 tags: ["inbox", "layers", "input"]

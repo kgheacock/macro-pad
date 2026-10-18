@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
+pr: "https://github.com/kgheacock/macro-pad/pull/81"
 branch: "0066-inbox-key-with-a-child-per-channel"
 related: ["0057", "0062", "0064", "0065", "0067"]
 tags: ["inbox", "layers", "driver", "protocol"]
@@ -206,7 +206,7 @@ is ticked.
     `golang.org/x/image` bump, 9519c7a), so go 1.22.0 cannot build it. On
     go1.25.0 with `GOWORK=off`, `go build ./... && go vet ./...` and
     `go test ./...` exit 0. `npm test` passes on Node 22.22.3, not 22.13.
-- [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

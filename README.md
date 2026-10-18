@@ -9,6 +9,7 @@ See [`tasks/`](tasks/) for the task backlog.
 ```
 firmware/  CircuitPython firmware — contents copy to CIRCUITPY
 driver/    Host-side driver / controller code
+inbox/     Per-channel message inbox: SQLite store and `inbox` CLI (Node)
 hardware/  PCB, wiring, and enclosure design files
 test/      Test suites
 docs/      Requirements and hardware notes

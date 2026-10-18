@@ -11,10 +11,12 @@ def _be(value):
     return bytes((value >> 8, value & 0xFF))
 
 
-def test_the_pool_has_64_slots_of_32_kb():
+def test_the_pool_has_64_buffers_of_32_kb_and_the_host_numbers_52():
     cache = frame_cache.FrameCache()
 
-    assert frame_cache.SLOT_COUNT == cache.slot_count == 64
+    assert frame_cache.POOL_SIZE == 64
+    assert frame_cache.SLOT_COUNT == cache.slot_count == 52
+    assert frame_cache.PIP_BUFFERS == cache.pip_buffers == 12
     assert len(cache.view(0)) == 32768
     assert len(cache.view(63)) == 32768
 
@@ -100,7 +102,8 @@ def test_with_the_module_the_slots_are_in_its_memory_not_bitmaps():
 
     cache = frame_cache.FrameCache(slot_count=8, core=core)
 
-    assert len(core.slots) == 8
+    # The slots, and the pip buffers after them.
+    assert len(core.slots) == 8 + frame_cache.PIP_BUFFERS
     assert cache.view(3).obj is core.slots[3]
     assert cache._bitmaps is None
 

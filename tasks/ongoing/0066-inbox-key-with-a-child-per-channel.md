@@ -177,31 +177,35 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — `RemoveKey` removes a child, removes a top-level key with
+- [x] **DoD-1** — `RemoveKey` removes a child, removes a top-level key with
   its children, ignores an unknown id, and returns `active` to `null` when
   it empties the open layer. **Proof:** `cd driver && go test ./layers -run TestRemoveKey`
-- [ ] **DoD-2** — A `removeLayerKey` message removes the node and redraws only
+- [x] **DoD-2** — A `removeLayerKey` message removes the node and redraws only
   the keys that changed. **Proof:** `go test ./plugin -run TestRemoveLayerKey`
-- [ ] **DoD-3** — Unseen counts `{a:2, b:1}` give an `inbox` key with count
+- [x] **DoD-3** — Unseen counts `{a:2, b:1}` give an `inbox` key with count
   3 and status `WARN`, and children `a` and `b` with counts 2 and 1, newest
   first. No unseen messages give an `inbox` key with count 0, no status, and
   no children. **Proof:** `cd inbox && node --test --test-name-pattern=TestPlan test/render.test.js`
-- [ ] **DoD-4** — Seven channels with news give five children, the five
+- [x] **DoD-4** — Seven channels with news give five children, the five
   newest; the Inbox count includes all seven. **Proof:** `node --test --test-name-pattern=TestFiveNewest test/render.test.js`
-- [ ] **DoD-5** — While `active` is `inbox`, a channel at zero keeps its
+- [x] **DoD-5** — While `active` is `inbox`, a channel at zero keeps its
   position with count 0, and no child moves. After `layerChanged` to the top,
   the zero channel is removed and the rest reorder. **Proof:** `node --test --test-name-pattern=TestStableWhileOpen test/render.test.js`
-- [ ] **DoD-6** — A second plan with no change sends nothing. **Proof:** `node --test --test-name-pattern=TestNoChangeSendsNothing test/render.test.js`
-- [ ] **DoD-7** — The channel image for `macro-pad.driver` is 128x128, and
+- [x] **DoD-6** — A second plan with no change sends nothing. **Proof:** `node --test --test-name-pattern=TestNoChangeSendsNothing test/render.test.js`
+- [x] **DoD-7** — The channel image for `macro-pad.driver` is 128x128, and
   its pixels match a golden PNG in `inbox/test/fixtures`. **Proof:** `node --test --test-name-pattern=TestChannelImage test/render.test.js`
 - [ ] **DoD-8** — On the pad, with `macropadd` and `inbox daemon` running,
   `inbox send demo hi` shows a count on the Inbox key; a press shows a
   `demo` key with count 1 on key 0, and the shift arrow on key 3. **Proof:**
   Keith's check on the board, recorded in Notes
-- [ ] **DoD-9** — `driver/README.md` records `removeLayerKey`. **Proof:** `driver/README.md`, "Protocol"
+- [x] **DoD-9** — `driver/README.md` records `removeLayerKey`. **Proof:** `driver/README.md`, "Protocol"
 - [ ] **DoD-10** — `cd driver && go build ./... && go vet ./...` exits 0 on
   go 1.22.0, and `cd inbox && npm test` passes on Node 22.13. **Proof:** the
   exit codes
+  - Not confirmed as written: `driver/go.mod` now says `go 1.25.0` (the
+    `golang.org/x/image` bump, 9519c7a), so go 1.22.0 cannot build it. On
+    go1.25.0 with `GOWORK=off`, `go build ./... && go vet ./...` and
+    `go test ./...` exit 0. `npm test` passes on Node 22.22.3, not 22.13.
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
@@ -227,3 +231,24 @@ is ticked.
 
 Keith asked for "Inbox" as the top-level icon and the channels as its
 children on 2026-10-18.
+
+Implementation notes, 2026-10-18:
+
+- `driver/go.mod` says `go 1.25.0` and the root `go.work` says `go 1.22.0`, so
+  `go` in `driver/` fails with "module . listed in go.work file requires go >=
+  1.25.0". The Go tests ran with `GOTOOLCHAIN=go1.25.0 GOWORK=off`. `go.work`
+  is not changed here.
+- The Inbox key keeps `gmail.png`, the picture that task 0065's last commit
+  chose, so no `assets/inbox.png` is added. The key now has status `WARN` when
+  the count is above 0, as this spec says.
+- `inbox/src/summary.js` is replaced by `inbox/src/render.js`. `plan()` now
+  returns whole messages, so it can return `removeLayerKey` too.
+- On every connect the renderer removes every channel the store holds from the
+  `inbox` layer before it sends the full state (`Store.channels()`). Without
+  that, a child that an earlier daemon left in `layers.json` would never go.
+- `.generated/` under `assets/` is in `.gitignore`.
+- `driver/layers/inbox_image_test.go` and `TestInboxProtocolFixtures` in
+  `driver/plugin` read the files under `inbox/test/fixtures`, so the Go side
+  accepts the PNG and the `removeLayerKey` examples that the inbox tests use.
+- The `pr` field named the spec's own PR (#77, merged). Step 7 sets it to the
+  PR for this work.

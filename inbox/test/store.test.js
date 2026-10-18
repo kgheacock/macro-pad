@@ -56,6 +56,19 @@ test('TestUnseen', (t) => {
   store.close();
 });
 
+test('TestChannels', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db);
+  t.after(() => store.close());
+  assert.deepEqual(store.channels(), []);
+  store.insert('b', 'one', '/x');
+  const a = store.insert('a', 'one', '/x');
+  store.insert('b', 'two', '/x');
+  store.markSeen('a', a);
+  // A channel with every message seen is still listed.
+  assert.deepEqual(store.channels(), ['a', 'b']);
+});
+
 test('TestConcurrentWriters', async (t) => {
   const sc = scratch(t);
   const lines = Array.from({ length: 1000 }, (_, i) => `line ${i}`).join('\n');

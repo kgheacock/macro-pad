@@ -150,9 +150,9 @@ error adds `run 'inbox COMMAND -h' for help`.
 `inbox daemon` watches the store and shows the unseen messages on the macro
 pad. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
-and `event` from it. Today it draws one `inbox` key with the total unseen
-count. Task 0066 adds a key per channel, and task 0067 marks messages seen on
-a press.
+and `event` from it. It draws one `inbox` key with the total unseen count,
+and one child key per channel with unseen messages. Task 0067 marks messages
+seen on a press.
 
 ```
 inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500ms]
@@ -165,6 +165,30 @@ inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500
 | `--slot N` | Put the Inbox key in slot N, 0 to 5. Default: the first free slot. |
 | `--poll DURATION` | How often to look for a change, such as `500ms` or `2s`. Default `500ms`. |
 | `--db PATH` | The store, as for every command. |
+
+The keys:
+
+- The `inbox` key shows the total unseen count in every channel, on the Gmail
+  envelope. It is yellow (`WARN`) when the count is above 0, and black when it
+  is 0. It stays on the pad at 0.
+- A press on `inbox` opens a layer with one key per channel that has unseen
+  messages, each with its own count. The key shows the channel's last name
+  segment in large letters, and the segment before it in small letters above.
+  There are at most five, the channels with the newest unseen messages. A
+  channel past the fifth counts in the `inbox` total, and `inbox channels`
+  lists it.
+- A channel with no unseen messages leaves the layer, but not while the layer
+  is open, so keys do not move under a finger. It stays with count 0 until you
+  leave the layer. A new channel takes a free position if one is left, and
+  otherwise waits. When the layer closes, the daemon removes channels at zero,
+  adds the waiting ones, and orders the keys by newest unseen message.
+- The daemon draws the pictures. It writes one 128x128 PNG per channel to
+  `<assets-dir>/.generated/inbox/<channel>.png`, only when the file does not
+  exist. Delete a file to draw it again. If the daemon cannot write there, it
+  logs the error and the key shows only its count.
+- The daemon sends a key only when its values changed. On every connect it
+  removes every channel it knows from the `inbox` layer and sends the full
+  state, so a child that an earlier daemon left on the pad does not stay.
 
 How it behaves:
 

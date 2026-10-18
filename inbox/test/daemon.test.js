@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { acquirePidFile, startDaemon } from '../src/daemon.js';
@@ -14,6 +14,7 @@ function launch(t, sc, server, extra = {}) {
   const daemon = startDaemon({
     file: sc.db,
     port: server.port,
+    assetsDir: path.join(sc.dir, 'assets'),
     pollMs: 20,
     log: (line) => logs.push(line),
     ...extra,
@@ -48,9 +49,50 @@ test('TestChangeReachesPad', async (t) => {
   writer.insert('debug', 'hello', sc.root);
   await waitFor(() => inboxCounts(server).includes(1), 1000, 'the new count');
   assert.ok(Date.now() - started < 1000);
-  const last = server.received.at(-1).setLayerKey;
-  assert.equal(last.status, '');
+  const last = server.received.findLast((m) => m.setLayerKey?.id === 'inbox').setLayerKey;
+  assert.equal(last.status, 'WARN');
   assert.equal(last.iconRef, 'gmail.png');
+  // The channel arrives as a child, with a picture drawn under the assets dir.
+  const child = server.received.find((m) => m.setLayerKey?.id === 'debug').setLayerKey;
+  assert.deepEqual(child, {
+    id: 'debug',
+    parent: 'inbox',
+    status: 'WARN',
+    count: 1,
+    iconRef: '.generated/inbox/debug.png',
+  });
+  assert.ok(existsSync(path.join(sc.dir, 'assets', '.generated', 'inbox', 'debug.png')));
+});
+
+test('TestChildrenFollowLayer', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  const first = writer.insert('a', 'one', sc.root);
+  writer.insert('b', 'two', sc.root);
+  launch(t, sc, server);
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'both children');
+
+  // The layer opens; channel a is seen. Nothing is removed while it is open.
+  const openedAt = server.received.length;
+  server.layerChanged('inbox');
+  writer.markSeen('a', first);
+  await waitFor(() => inboxCounts(server).at(-1) === 1, 1000, 'the new total');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.ok(!server.received.slice(openedAt).some((m) => m.kind === 'removeLayerKey'));
+  const zero = server.received.findLast((m) => m.setLayerKey?.id === 'a').setLayerKey;
+  assert.equal(zero.count, 0);
+  assert.equal(zero.status, '');
+
+  // It closes: a is removed.
+  const closedAt = server.received.length;
+  server.layerChanged(null);
+  await waitFor(
+    () => server.received.slice(closedAt).some((m) => m.kind === 'removeLayerKey' && m.removeLayerKey.id === 'a'),
+    1000,
+    'the removal',
+  );
 });
 
 test('TestIdlePollIsCheap', async (t) => {

@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -317,4 +319,31 @@ func TestRemoveLayerKeyWithoutLayersIsLogged(t *testing.T) {
 
 	conn.send(t, Message{Kind: KindRemoveLayerKey, RemoveLayerKey: &RemoveLayerKeyPayload{ID: "x"}})
 	waitForCondition(t, time.Second, func() bool { return logs.has("removeLayerKey dropped") })
+}
+
+// The inbox daemon's tests check its messages against this file, so the Go
+// structs must read the same examples (task 0066).
+func TestInboxProtocolFixtures(t *testing.T) {
+	data, err := os.ReadFile("../../inbox/test/fixtures/protocol.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures struct {
+		RemoveLayerKey []Message `json:"removeLayerKey"`
+		SetLayerKey    []Message `json:"setLayerKey"`
+	}
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures.RemoveLayerKey) != 2 || len(fixtures.SetLayerKey) == 0 {
+		t.Fatalf("fixtures hold %d removeLayerKey and %d setLayerKey messages", len(fixtures.RemoveLayerKey), len(fixtures.SetLayerKey))
+	}
+	for _, m := range fixtures.RemoveLayerKey {
+		if m.Kind != KindRemoveLayerKey || m.RemoveLayerKey == nil || m.RemoveLayerKey.ID == "" {
+			t.Errorf("fixture %+v is not a removeLayerKey message", m)
+		}
+	}
+	if p := fixtures.RemoveLayerKey[0].RemoveLayerKey; p.ID != "build" || p.Parent != "github" {
+		t.Errorf("first fixture is %+v, want build under github", p)
+	}
 }

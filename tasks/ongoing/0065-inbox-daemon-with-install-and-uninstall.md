@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
+pr: "https://github.com/kgheacock/macro-pad/pull/80"
 branch: "0065-inbox-daemon-with-install-and-uninstall"
 related: ["0055", "0057", "0064", "0066", "0067"]
 tags: ["inbox", "daemon", "launchd", "systemd"]
@@ -262,7 +262,7 @@ is ticked.
   (and `--help`) print usage and exit 0. An unknown option exits 2 with a
   message that names it. **Proof:** `node --test --test-name-pattern=TestDaemonHelp test/cli.test.js`
   and running the scripts
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

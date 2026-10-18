@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
+pr: "https://github.com/kgheacock/macro-pad/pull/82"
 branch: "0067-press-a-channel-key-to-mark-it-seen"
 related: ["0013", "0057", "0064", "0065", "0066"]
 tags: ["inbox", "layers", "input"]
@@ -144,7 +144,7 @@ is ticked.
   Not confirmed: the press logic is covered by the daemon tests only. Nobody has pressed a channel key on the board.
 - [x] **DoD-6** — `inbox/README.md` "Daemon" says what a press on a channel
   key does. **Proof:** `inbox/README.md`
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** PR body
 - [x] **DoD-8** — Added with the request to put zsh completions in the same
   effort. `install.sh` links `inbox/completions/_inbox` into the oh-my-zsh
   completions directory, `uninstall.sh` removes it, and the README

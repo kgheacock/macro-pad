@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/79"
 branch: "0064-inbox-sqlite-store-and-cli"
 related: ["0057", "0065", "0066", "0067"]
 tags: ["inbox", "cli", "sqlite"]
@@ -293,7 +293,7 @@ is ticked.
 - [x] **DoD-14** — Each situation in the "Help and error messages" table
   gives one line on standard error that starts with `inbox:` and matches the
   table, with the stated exit code. **Proof:** `node --test --test-name-pattern=TestErrorMessages test/cli.test.js`
-- [ ] **DoD-15** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-15** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

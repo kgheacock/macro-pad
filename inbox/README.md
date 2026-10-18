@@ -151,8 +151,8 @@ error adds `run 'inbox COMMAND -h' for help`.
 pad. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
 and `event` from it. It draws one `inbox` key with the total unseen count,
-and one child key per channel with unseen messages. Task 0067 marks messages
-seen on a press.
+and one child key per channel with unseen messages. A press on a child key
+marks that channel's messages seen.
 
 ```
 inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500ms]
@@ -182,6 +182,14 @@ The keys:
   leave the layer. A new channel takes a free position if one is left, and
   otherwise waits. When the layer closes, the daemon removes channels at zero,
   adds the waiting ones, and orders the keys by newest unseen message.
+- A press on a channel key marks that channel's unseen messages seen. It
+  marks the messages the key showed, so one that lands during the press stays
+  unseen. The count on the key, and the total on `inbox`, drop within 1 s. The
+  key stays at 0 until you leave the layer. The press that opens the layer, and
+  the up key (key 3), mark nothing. A press means "I have seen these":
+  `inbox list CHANNEL` still shows the messages, and a failed mark is logged
+  and tried again on the next press. A double or long press on a channel key
+  marks it too, on its first press-down.
 - The daemon draws the pictures. It writes one 128x128 PNG per channel to
   `<assets-dir>/.generated/inbox/<channel>.png`, only when the file does not
   exist. Delete a file to draw it again. If the daemon cannot write there, it

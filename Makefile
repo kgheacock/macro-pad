@@ -168,6 +168,10 @@ glyphcore-spike: check-circuitpy
 macropadd:
 	cd driver && go run ./cmd/macropadd --vendor-id=$(PINGPONG_VENDOR_ID) --product-id=$(PINGPONG_PRODUCT_ID)
 
+.PHONY: test
+test:
+	cd inbox && npm test
+
 .PHONY: e2e
 e2e: flash
 	cd driver && MACROPAD_VENDOR_ID=$(PINGPONG_VENDOR_ID) MACROPAD_PRODUCT_ID=$(PINGPONG_PRODUCT_ID) \

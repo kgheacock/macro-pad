@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/76"
 branch: "0062-red-circle-count-pip-with-a-real-font"
 related: ["0057", "0059", "0061", "0063", "0041"]
 tags: ["driver", "firmware", "wire-protocol", "layers", "rendering", "ui"]
@@ -105,7 +105,7 @@ ticked.
 - [ ] **DoD-11** — On the board, counts 1, 12, and 100 show a red circle and a legible number on a red key and a white key, and every icon shows on its round. **Proof:** the owner's check, recorded in this spec.
   Missing: the owner's check of the panel is not done.
 - [x] **DoD-12** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
-- [ ] **DoD-13** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` describe the pip. The PR in the `pr` field links to this spec. **Proof:** those three files and the PR body.
+- [x] **DoD-13** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` describe the pip. The PR in the `pr` field links to this spec. **Proof:** those three files and the PR body.
 
 ## Risks
 

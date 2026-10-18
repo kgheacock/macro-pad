@@ -1,9 +1,12 @@
 // Subcommands, help text, and error messages. main() takes an io object so
 // a test can run the CLI in process; bin/inbox.js passes the real streams.
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
-import { StoreError, UsageError } from './errors.js';
+import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
+import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { DEFAULT_STATUS, defaultDbPath, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
@@ -19,6 +22,9 @@ const CHANNEL_RULES = `How the channel is chosen:
 const DB_OPTION = `  --db PATH   use this SQLite file instead of $INBOX_DB`;
 const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
 
+// macropadd run from the repo root reads its pictures from here.
+const REPO_ASSETS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
+
 const HELP = {
   inbox: `inbox - leave short messages per channel, and read them later
 
@@ -31,6 +37,7 @@ Commands:
   count      print how many messages are not seen yet
   channels   list channels that have unseen messages
   seen       mark messages as seen
+  daemon     watch the inbox and show it on the macro pad
   help       show help for a command
 
 Examples:
@@ -38,7 +45,7 @@ Examples:
   my_cmd 2>&1 | inbox pipe debug
 
 Run 'inbox COMMAND -h' for the details of one command.
-Exit codes: 0 success, 1 store error, 2 usage error.`,
+Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
 
   send: `Usage: inbox send [--status STATUS] [CHANNEL] MESSAGE
 
@@ -137,9 +144,30 @@ ${CHANNEL_RULES}
 Examples:
   inbox seen debug
   inbox seen --all-channels`,
+
+  daemon: `Usage: inbox daemon [--port N] [--assets-dir DIR] [--slot N] [--poll DURATION]
+
+Run until stopped. Watch the store, and send the unseen counts to macropadd
+over its WebSocket. It starts with or without macropadd, and sends the full
+state again each time it connects. Log lines go to standard error.
+
+  --port N          macropadd's port on 127.0.0.1 (default: ${DEFAULT_PORT})
+  --assets-dir DIR  the directory macropadd uses for pictures; an absolute
+                    path (default: ${REPO_ASSETS})
+  --slot N          put the Inbox key in slot N, 0 to 5 (default: the first free slot)
+  --poll DURATION   how often to look for a change, such as 500ms or 2s
+                    (default: ${DEFAULT_POLL_MS}ms)
+${DB_OPTION}
+
+Only one daemon runs per store. A second one exits with code 3.
+SIGINT and SIGTERM stop it with exit code 0. The keys stay on the pad.
+To run it at login, use inbox/scripts/install.sh.
+
+Example:
+  inbox daemon --assets-dir ~/source/macro-pad/assets`,
 };
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'daemon'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const OPTIONS = {
@@ -154,6 +182,12 @@ const OPTIONS = {
   count: { 'all-channels': { type: 'boolean' } },
   channels: { json: { type: 'boolean' } },
   seen: { 'all-channels': { type: 'boolean' } },
+  daemon: {
+    port: { type: 'string' },
+    'assets-dir': { type: 'string' },
+    slot: { type: 'string' },
+    poll: { type: 'string' },
+  },
 };
 
 function distance(a, b) {
@@ -470,6 +504,71 @@ function runSeen(io, { values, positionals }) {
   return 0;
 }
 
+function parseWhole(flag, text, low, high, hint) {
+  if (!/^\d+$/.test(text) || Number(text) < low || Number(text) > high) {
+    throw new UsageError(`${flag} ${text} is out of range; ${hint}`, { help: false });
+  }
+  return Number(text);
+}
+
+function parsePoll(text) {
+  const match = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(text);
+  if (!match) {
+    throw new UsageError(`--poll ${text} is not a duration; use a number and a unit, such as 500ms or 2s`, {
+      help: false,
+    });
+  }
+  const ms = Number(match[1]) * (match[2] === 's' ? 1000 : 1);
+  if (ms < 10) throw new UsageError(`--poll ${text} is too short; use 10ms or more`, { help: false });
+  return ms;
+}
+
+function daemonSettings(io, values) {
+  const assetsDir = values['assets-dir'] ?? REPO_ASSETS;
+  if (!path.isAbsolute(assetsDir)) {
+    throw new UsageError(
+      `assets dir "${assetsDir}" is relative; pass an absolute path, as macropadd sees it`,
+      { help: false },
+    );
+  }
+  return {
+    file: values.db ?? defaultDbPath(io.env),
+    port:
+      values.port === undefined ? DEFAULT_PORT : parseWhole('--port', values.port, 1, 65535, 'use 1 to 65535'),
+    slot: values.slot === undefined ? undefined : parseWhole('--slot', values.slot, 0, 5, 'use 0 to 5'),
+    pollMs: values.poll === undefined ? DEFAULT_POLL_MS : parsePoll(values.poll),
+    assetsDir,
+  };
+}
+
+async function runDaemon(io, { values, positionals }) {
+  if (positionals.length) throw new UsageError('daemon takes no arguments');
+  const settings = daemonSettings(io, values);
+  const log = (text) => io.stderr.write(`inbox: ${text}\n`);
+  const release = acquirePidFile(settings.file, { log });
+  let daemon;
+  try {
+    daemon = startDaemon({ ...settings, env: io.env, log });
+  } catch (e) {
+    release();
+    throw e;
+  }
+  log(`daemon started for ${settings.file} (pid ${process.pid})`);
+  await new Promise((resolve) => {
+    const onSignal = () => {
+      io.process.off('SIGINT', onSignal);
+      io.process.off('SIGTERM', onSignal);
+      resolve();
+    };
+    io.process.on('SIGINT', onSignal);
+    io.process.on('SIGTERM', onSignal);
+  });
+  await daemon.stop();
+  release();
+  log('daemon stopped');
+  return 0;
+}
+
 const RUNNERS = {
   send: runSend,
   pipe: runPipe,
@@ -477,6 +576,7 @@ const RUNNERS = {
   count: runCount,
   channels: runChannels,
   seen: runSeen,
+  daemon: runDaemon,
 };
 
 function wantsHelp(argv) {
@@ -525,6 +625,10 @@ function report(e, io) {
     if (e.help && e.command) text += `run 'inbox ${e.command} -h' for help\n`;
     io.stderr.write(text);
     return 2;
+  }
+  if (e instanceof DaemonRunningError) {
+    io.stderr.write(`inbox: ${e.message}\n`);
+    return 3;
   }
   if (e instanceof StoreError) {
     io.stderr.write(`inbox: ${e.message}\n`);

@@ -223,6 +223,12 @@ export class Store {
     });
   }
 
+  // Changes when another connection commits to the file. Cheaper than a read
+  // of the table, so a watcher polls this and reads the table on a change.
+  dataVersion() {
+    return this.#guard(() => this.#db.prepare('PRAGMA data_version').get().data_version);
+  }
+
   count(channel = null) {
     return this.unseen(channel).reduce((sum, row) => sum + row.count, 0);
   }

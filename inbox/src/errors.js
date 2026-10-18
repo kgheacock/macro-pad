@@ -1,5 +1,6 @@
 // A UsageError is the caller's mistake: exit code 2. A StoreError is a
-// problem with the SQLite file: exit code 1.
+// problem with the SQLite file: exit code 1. A DaemonRunningError means
+// another daemon holds the store: exit code 3.
 
 export class UsageError extends Error {
   constructor(message, { help = true } = {}) {
@@ -16,5 +17,12 @@ export class StoreError extends Error {
   constructor(message) {
     super(message);
     this.name = 'StoreError';
+  }
+}
+
+export class DaemonRunningError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DaemonRunningError';
   }
 }

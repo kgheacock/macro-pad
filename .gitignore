@@ -14,6 +14,8 @@ boot_out.txt
 
 # Generated emoji bitmaps — rebuild with tools/
 assets/generated/
+# Channel pictures the inbox daemon draws
+assets/.generated/
 
 # Downloaded CircuitPython UF2 — rebuild with `make firmware-uf2`
 firmware/modules/

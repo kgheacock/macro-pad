@@ -52,6 +52,10 @@ const (
 	// values, or reserves a key slot. A message the tree rejects is
 	// logged and dropped. See task 0057.
 	KindSetLayerKey MessageKind = "setLayerKey"
+	// KindRemoveLayerKey is a client→server message that removes one key or
+	// child from the layer tree, and frees its slot. An unknown id changes
+	// nothing. See task 0066.
+	KindRemoveLayerKey MessageKind = "removeLayerKey"
 	// KindLayerChanged is a server→client message that names the active
 	// layer. The server sends it to every client when the layer changes,
 	// and to one client when it connects. See task 0057.
@@ -81,6 +85,7 @@ type Message struct {
 	SetCustomGlyph *SetCustomGlyphPayload `json:"setCustomGlyph,omitempty"`
 	Signal         *SignalPayload         `json:"signal,omitempty"`
 	SetLayerKey    *SetLayerKeyPayload    `json:"setLayerKey,omitempty"`
+	RemoveLayerKey *RemoveLayerKeyPayload `json:"removeLayerKey,omitempty"`
 	LayerChanged   *LayerChangedPayload   `json:"layerChanged,omitempty"`
 }
 
@@ -147,6 +152,14 @@ type SetLayerKeyPayload struct {
 	Status  string `json:"status"`
 	Count   int    `json:"count"`
 	IconRef string `json:"iconRef"`
+}
+
+// RemoveLayerKeyPayload names the node to remove. With Parent, it is that
+// child of Parent. Without, it is the top-level key with this id, and its
+// children go with it. See task 0066.
+type RemoveLayerKeyPayload struct {
+	ID     string `json:"id"`
+	Parent string `json:"parent,omitempty"`
 }
 
 // LayerChangedPayload names the active layer: the id of the key whose

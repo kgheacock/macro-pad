@@ -262,7 +262,8 @@ logged.
 
 ### `setLayerKey` and `layerChanged`
 
-A client changes the object with `setLayerKey` (see "Protocol," below). The
+A client changes the object with `setLayerKey`, and removes a key or child
+with `removeLayerKey` (see "Protocol," below). The
 daemon runs all updates one at a time, so any number of clients can write.
 The daemon sends `layerChanged` to every client when the layer changes, and
 to a client when it connects, so a plugin that draws its own keys knows when
@@ -418,6 +419,19 @@ Every message on the connection is JSON, shaped by
   {"kind": "setLayerKey", "setLayerKey": {"id": "github", "status": "ERROR", "count": 1, "iconRef": "github.png"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
+  ```
+
+- **`removeLayerKey`** — client to server. Removes one key or child from the
+  layer tree. With `parent`, it removes that child, and the children after it
+  move up one position. Without, it removes the key with this `id` and its
+  children, and frees its slot. An unknown `id` changes nothing and sends
+  nothing. If the removal empties the open layer (the open key, or its last
+  child), the pad returns to the top layer and the daemon sends
+  `layerChanged`. The daemon redraws only the keys that changed.
+
+  ```json
+  {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}}
+  {"kind": "removeLayerKey", "removeLayerKey": {"id": "github"}}
   ```
 
 - **`layerChanged`** — server to client. Names the active layer: the `id` of

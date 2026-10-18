@@ -96,6 +96,8 @@ type Injector interface {
 type LayerController interface {
 	// SetKey applies one setLayerKey message.
 	SetKey(layers.Update) error
+	// RemoveKey applies one removeLayerKey message.
+	RemoveKey(id, parent string) error
 	// Press handles a debounced press-down on a key.
 	Press(keyIndex byte)
 	// Active is the id of the open key, or nil for the top layer.
@@ -506,6 +508,16 @@ func (s *Server) readPump(c *client) {
 			})
 			if err != nil {
 				s.logf("setLayerKey id=%q dropped: %v", p.ID, err)
+			}
+		case KindRemoveLayerKey:
+			l := s.layerController()
+			if l == nil || msg.RemoveLayerKey == nil {
+				s.logf("removeLayerKey dropped: no layer tree or no payload")
+				continue
+			}
+			p := msg.RemoveLayerKey
+			if err := l.RemoveKey(p.ID, p.Parent); err != nil {
+				s.logf("removeLayerKey id=%q dropped: %v", p.ID, err)
 			}
 		case KindInjectEvent:
 			if s.injector == nil {

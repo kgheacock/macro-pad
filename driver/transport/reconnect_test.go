@@ -66,6 +66,16 @@ func (b *fakeBoard) ShowFrames(slots []byte) error {
 	return nil
 }
 
+func (b *fakeBoard) StorePipSheet(colors []uint16, pixels []byte) error {
+	b.record("sheet %d colors %d bytes", len(colors), len(pixels))
+	return nil
+}
+
+func (b *fakeBoard) ShowFramesWithPips(slots, counts []byte) error {
+	b.record("show %v pips %v", slots, counts)
+	return nil
+}
+
 func (b *fakeBoard) ReadMessage() (Message, error) {
 	msg, ok := <-b.in
 	if !ok {

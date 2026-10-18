@@ -21,6 +21,13 @@ const defaultSettleDelay = time.Second
 // for a reason other than the board being absent.
 const reconnectRetryDelay = time.Second
 
+// pipSheetRec is the pip sheet that Reconnecting sends to each board it
+// connects.
+type pipSheetRec struct {
+	colors []uint16
+	pixels []byte
+}
+
 // frameRec is one frame in the board's cache: a color, and a glyph when the
 // frame has one.
 type frameRec struct {
@@ -84,6 +91,11 @@ type Reconnecting struct {
 	// shown is the slot each key last showed by a Show frames, until a key
 	// state or a glyph replaces it.
 	shown map[byte]byte
+	// pips is the count each key in shown last showed with, when above 0 (task
+	// 0062). sheet is the pip sheet the board must hold before it can draw one,
+	// sent again at every connect.
+	pips  map[byte]byte
+	sheet *pipSheetRec
 	// gen counts the connections. A frame whose gen is not the current one is
 	// not on the board.
 	gen int
@@ -130,6 +142,7 @@ func newReconnecting(open func(context.Context) (Transport, error), settle time.
 		glyphs: make(map[byte]glyphRec),
 		frames: make(map[byte]*frameRec),
 		shown:  make(map[byte]byte),
+		pips:   make(map[byte]byte),
 	}
 	if stateDir != "" {
 		r.store = &stateStore{dir: stateDir}
@@ -230,6 +243,15 @@ func (r *Reconnecting) connect(dev Transport) bool {
 	defer r.sendMu.Unlock()
 
 	r.mu.Lock()
+	sheet := r.sheet
+	r.mu.Unlock()
+	if sheet != nil {
+		if err := dev.StorePipSheet(sheet.colors, sheet.pixels); err != nil {
+			r.logf("pips: send the pip sheet: %v", err)
+		}
+	}
+
+	r.mu.Lock()
 	keys := make([]int, 0, len(r.keys))
 	states := make(map[byte]KeyState, len(r.keys))
 	glyphs := make(map[byte]glyphRec, len(r.glyphs))
@@ -305,6 +327,7 @@ func (r *Reconnecting) SendKeyState(ks KeyState) error {
 	}
 	r.saveKeysLocked(r.recordKeyLocked(ks, glyph))
 	delete(r.shown, ks.KeyIndex)
+	delete(r.pips, ks.KeyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -367,6 +390,7 @@ func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	ks.EmojiID = CustomGlyphSentinelEmojiID
 	r.saveKeysLocked(r.recordKeyLocked(ks, &g))
 	delete(r.shown, keyIndex)
+	delete(r.pips, keyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -408,6 +432,42 @@ func (r *Reconnecting) StoreFrame(slot byte, color uint16, pixels []byte) error 
 // state changed. A slot the board does not hold yet, as after a reconnect, is
 // stored first.
 func (r *Reconnecting) ShowFrames(slots []byte) error {
+	return r.show(slots, nil)
+}
+
+// StorePipSheet implements Transport. It remembers the sheet, and sends it when
+// a device is connected and again at every connect (task 0062).
+func (r *Reconnecting) StorePipSheet(colors []uint16, pixels []byte) error {
+	if _, err := encodeStorePipSheet(colors, pixels); err != nil {
+		return err
+	}
+	rec := &pipSheetRec{colors: append([]uint16(nil), colors...), pixels: append([]byte(nil), pixels...)}
+
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	r.sheet = rec
+	dev := r.dev
+	r.mu.Unlock()
+	if dev == nil {
+		return nil
+	}
+	return dev.StorePipSheet(rec.colors, rec.pixels)
+}
+
+// ShowFramesWithPips implements Transport. It is ShowFrames with a count for
+// each key, which Reconnecting remembers with the slot, so that a reconnect
+// stamps the pip again (task 0062).
+func (r *Reconnecting) ShowFramesWithPips(slots, counts []byte) error {
+	if _, err := encodeShowFramesPips(slots, counts); err != nil {
+		return err
+	}
+	return r.show(slots, counts)
+}
+
+// show is ShowFrames and ShowFramesWithPips. counts is nil for the first.
+func (r *Reconnecting) show(slots, counts []byte) error {
 	if _, err := encodeShowFrames(slots); err != nil {
 		return err
 	}
@@ -436,6 +496,11 @@ func (r *Reconnecting) ShowFrames(slots []byte) error {
 			changed = true
 		}
 		r.shown[byte(key)] = slot
+		if counts != nil && counts[key] > 0 {
+			r.pips[byte(key)] = counts[key]
+		} else {
+			delete(r.pips, byte(key))
+		}
 	}
 	r.saveKeysLocked(changed)
 	dev, gen := r.dev, r.gen
@@ -461,6 +526,9 @@ func (r *Reconnecting) ShowFrames(slots []byte) error {
 		if err := r.storeLocked(dev, gen, slot); err != nil {
 			return err
 		}
+	}
+	if counts != nil {
+		return dev.ShowFramesWithPips(slots, counts)
 	}
 	return dev.ShowFrames(slots)
 }
@@ -528,6 +596,42 @@ func (r *Reconnecting) restoreFrames(dev Transport, gen int) {
 	if restored > 0 {
 		r.logf("frames: stored %d frames again", restored)
 	}
+	r.showPipsAgain(dev, gen)
+}
+
+// showPipsAgain stamps the pips of the keys that showed one, on a board that
+// just got its frames again. The replay of the key states draws the frames
+// with no pip.
+func (r *Reconnecting) showPipsAgain(dev Transport, gen int) {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	r.mu.Lock()
+	if r.dev != dev || r.gen != gen || r.sheet == nil || len(r.pips) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	slots, counts := r.pipShowLocked()
+	r.mu.Unlock()
+	if err := dev.ShowFramesWithPips(slots, counts); err != nil {
+		r.logf("pips: show again: %v", err)
+	}
+}
+
+// pipShowLocked builds a Show frames with pips payload for the keys that show
+// a pip, and leaves the others unchanged. The caller holds mu.
+func (r *Reconnecting) pipShowLocked() (slots, counts []byte) {
+	slots = make([]byte, 8)
+	counts = make([]byte, 8)
+	for i := range slots {
+		slots[i] = SlotUnchanged
+	}
+	for key, count := range r.pips {
+		if slot, ok := r.shown[key]; ok && key < 8 && r.frames[slot] != nil {
+			slots[key], counts[key] = slot, count
+		}
+	}
+	return slots, counts
 }
 
 // handleShowMiss answers a Show miss: the board named some keys whose slot it
@@ -548,6 +652,7 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 		slots[i] = SlotUnchanged
 	}
 	var again []byte
+	var counts []byte
 	for key := byte(0); key < 8; key++ {
 		if mask&(1<<key) == 0 {
 			continue
@@ -557,6 +662,12 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 			continue
 		}
 		slots[key] = slot
+		if r.sheet != nil {
+			if counts == nil {
+				counts = make([]byte, 8)
+			}
+			counts[key] = r.pips[key]
+		}
 		r.frames[slot].gen = 0
 		again = append(again, slot)
 	}
@@ -571,7 +682,13 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 			return
 		}
 	}
-	if err := dev.ShowFrames(slots); err != nil {
+	var err error
+	if counts != nil {
+		err = dev.ShowFramesWithPips(slots, counts)
+	} else {
+		err = dev.ShowFrames(slots)
+	}
+	if err != nil {
 		r.logf("frames: show again: %v", err)
 	}
 }

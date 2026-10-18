@@ -14,9 +14,14 @@ type FrameOut interface {
 	// StoreFrame composes png over color into the board's slot, and draws
 	// nothing. A nil png is a frame of the color alone.
 	StoreFrame(slot byte, color uint16, png []byte) error
-	// ShowFrames draws, for each key k, the frame in slots[k], or leaves the
-	// key alone for transport.SlotUnchanged. The panels change together.
-	ShowFrames(slots []byte) error
+	// ShowFramesWithPips draws, for each key k, the frame in slots[k] with a
+	// count pip of counts[k] stamped on it, or leaves the key alone for
+	// transport.SlotUnchanged. A count of 0 draws the frame as it is. The panels
+	// change together (task 0062).
+	ShowFramesWithPips(slots, counts []byte) error
+	// StorePipSheet sends the sprites of the count pip. colors is the key
+	// color each disc of the sheet is blended against.
+	StorePipSheet(colors []uint16, pixels []byte) error
 }
 
 // DefaultPreloadIdle is how long the pad must go without a press before the
@@ -27,10 +32,10 @@ const noSlot = transport.SlotUnchanged
 
 // frameKey is what one frame on the board shows: one picture over one color.
 // A glyph is the icon at ref under the assets directory, if ref is not empty,
-// with a count badge when count is above zero.
+// on a white round. The count pip is not part of it: the board stamps the pip
+// on a copy of the frame (task 0062).
 type frameKey struct {
 	ref   string
-	count int
 	color uint16
 }
 
@@ -40,11 +45,11 @@ func frameKeyOf(w view) frameKey {
 	if w.kind == kindBlank || w.kind == kindUnknown {
 		return frameKey{}
 	}
-	return frameKey{ref: w.iconRef, count: w.count, color: w.color}
+	return frameKey{ref: w.iconRef, color: w.color}
 }
 
 // hasGlyph reports whether the frame has a picture over its color.
-func (k frameKey) hasGlyph() bool { return k.ref != "" || k.count > 0 }
+func (k frameKey) hasGlyph() bool { return k.ref != "" }
 
 // frameTable is the host's record of the board's slots: which frame each one
 // holds, and how recently it was used. The host owns the slot numbers, and the
@@ -143,7 +148,7 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	var png []byte
 	if k.hasGlyph() {
 		var err error
-		png, err = renderGlyph(c.assetsDir, k.ref, k.count)
+		png, err = renderGlyph(c.assetsDir, k.ref, 0, k.color)
 		if err != nil {
 			// A glyph that cannot be drawn leaves the color alone, rather than
 			// nothing.
@@ -157,8 +162,20 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 		c.logf("layers: store frame %q in slot %d: %v", k.ref, slot, err)
 		return 0, false
 	}
-	c.logf("layers: stored frame %q count %d in slot %d in %s", k.ref, k.count, slot, time.Since(start).Round(time.Millisecond))
+	c.logf("layers: stored frame %q in slot %d in %s", k.ref, slot, time.Since(start).Round(time.Millisecond))
 	return slot, true
+}
+
+// storePipSheet sends the pip sprites to the board. A board that does not get
+// them draws a frame with no pip. The caller holds sendMu.
+func (c *Controller) storePipSheet() {
+	sheet, err := BuildPipSheet()
+	if err == nil {
+		err = c.frameOut.StorePipSheet(sheet.Colors, sheet.Pixels)
+	}
+	if err != nil {
+		c.logf("layers: pip sheet: %v", err)
+	}
 }
 
 // flushFrames is flush for a board with a frame cache: every key whose frame
@@ -170,6 +187,7 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 func (c *Controller) flushFrames(want [KeyCount]view) {
 	start := time.Now()
 	slots := make([]byte, KeyCount)
+	counts := make([]byte, KeyCount)
 	for i := range slots {
 		slots[i] = transport.SlotUnchanged
 	}
@@ -179,8 +197,9 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 		if w == have || (w.kind == kindBlank && have.kind == kindUnknown) {
 			continue
 		}
-		if have.kind != kindUnknown && c.slotShown[i] != noSlot && frameKeyOf(w) == frameKeyOf(have) {
-			// The same picture on the same color: nothing to redraw.
+		if have.kind != kindUnknown && c.slotShown[i] != noSlot && frameKeyOf(w) == frameKeyOf(have) && w.count == have.count {
+			// The same picture on the same color with the same pip: nothing to
+			// redraw.
 			c.shown[i] = w
 			continue
 		}
@@ -197,11 +216,12 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 			continue
 		}
 		slots[i] = slot
+		counts[i] = byte(min(want[i].count, 255))
 	}
 
 	shown := 0
 	if len(fallback) < len(changed) {
-		err := c.frameOut.ShowFrames(slots)
+		err := c.frameOut.ShowFramesWithPips(slots, counts)
 		for _, i := range changed {
 			if slots[i] == transport.SlotUnchanged {
 				continue

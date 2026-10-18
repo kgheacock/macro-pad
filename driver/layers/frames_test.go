@@ -17,6 +17,10 @@ type fakeFrameOut struct {
 	slots map[byte]fakeFrame
 	// storeErr, when set, is what every StoreFrame returns.
 	storeErr error
+	// counts is the counts of each Show frames with pips, and sheets is how
+	// many pip sheets arrived.
+	counts [][]byte
+	sheets int
 }
 
 type fakeFrame struct {
@@ -39,10 +43,18 @@ func (f *fakeFrameOut) StoreFrame(slot byte, color uint16, png []byte) error {
 	return nil
 }
 
-func (f *fakeFrameOut) ShowFrames(slots []byte) error {
+func (f *fakeFrameOut) ShowFramesWithPips(slots, counts []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf("show %v", slots))
+	f.counts = append(f.counts, append([]byte(nil), counts...))
+	return nil
+}
+
+func (f *fakeFrameOut) StorePipSheet(colors []uint16, pixels []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sheets++
 	return nil
 }
 
@@ -186,21 +198,21 @@ func TestFrameTable_EvictsTheLeastRecentlyUsedFrameThatNoKeyShows(t *testing.T) 
 	table := newFrameTable()
 	pinned := func(slot byte) bool { return slot == 0 }
 	for i := 0; i < transport.SlotCount; i++ {
-		slot, ok := table.claim(frameKey{count: i + 1}, true, pinned)
+		slot, ok := table.claim(frameKey{color: uint16(i + 1)}, true, pinned)
 		if !ok || int(slot) != i {
 			t.Fatalf("claim %d = slot %d, %v; want the lowest free slot", i, slot, ok)
 		}
 	}
 	// Slot 1 was used longest ago among the unpinned, until it is looked up.
-	table.lookup(frameKey{count: 2})
-	slot, ok := table.claim(frameKey{count: 1000}, true, pinned)
+	table.lookup(frameKey{color: 2})
+	slot, ok := table.claim(frameKey{color: 1000}, true, pinned)
 	if !ok || slot != 2 {
 		t.Fatalf("a full table gave slot %d, %v; want slot 2, the least recently used that is not pinned (slot 0 is pinned, slot 1 was used)", slot, ok)
 	}
-	if table.has(frameKey{count: 3}) {
+	if table.has(frameKey{color: 3}) {
 		t.Fatal("the evicted frame is still in the table")
 	}
-	if _, ok := table.claim(frameKey{count: 1001}, false, pinned); ok {
+	if _, ok := table.claim(frameKey{color: 1001}, false, pinned); ok {
 		t.Fatal("a claim with no eviction took a slot of a full table")
 	}
 }
@@ -208,9 +220,50 @@ func TestFrameTable_EvictsTheLeastRecentlyUsedFrameThatNoKeyShows(t *testing.T) 
 func TestFrameTable_NeverNamesASlotAbove127(t *testing.T) {
 	table := newFrameTable()
 	for i := 0; i < 3*transport.SlotCount; i++ {
-		slot, ok := table.claim(frameKey{count: i + 1}, true, func(byte) bool { return false })
+		slot, ok := table.claim(frameKey{color: uint16(i + 1)}, true, func(byte) bool { return false })
 		if !ok || slot >= transport.SlotCount {
 			t.Fatalf("claim %d = slot %d, %v", i, slot, ok)
 		}
+	}
+}
+
+// TestPipNoStore is task 0062's DoD-6: counts 1 to 99 on one icon and color use
+// one slot, and a count change sends a Show frames with pips and no Store frame.
+func TestPipNoStore(t *testing.T) {
+	out := newFakeFrameOut()
+	c := openFrames(t, out, time.Millisecond)
+	if out.sheets != 1 {
+		t.Fatalf("the board got %d pip sheets, want 1 before the first Show", out.sheets)
+	}
+	if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !c.WaitPreload(10 * time.Second) {
+		t.Fatal("the preload did not finish")
+	}
+	out.takeCalls()
+
+	for count := 2; count <= 99; count++ {
+		if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: count}); err != nil {
+			t.Fatal(err)
+		}
+		calls, _ := out.takeCalls()
+		if len(calls) != 1 || !strings.HasPrefix(calls[0], "show ") {
+			t.Fatalf("count %d: calls = %q, want one Show frames with pips and no Store", count, calls)
+		}
+		out.mu.Lock()
+		got := out.counts[len(out.counts)-1][0]
+		out.mu.Unlock()
+		if int(got) != count {
+			t.Fatalf("count %d: the Show named count %d for key 0", count, got)
+		}
+	}
+	// A count of 0 shows the frame as it is: the pip goes, with no Store.
+	if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: 0}); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := out.takeCalls()
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], "show ") {
+		t.Fatalf("count 0: calls = %q, want one Show frames with pips", calls)
 	}
 }

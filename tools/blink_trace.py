@@ -6,7 +6,7 @@
 wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst|busyburst|sync|batch|batchloss|cached TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst|sync|batch|batchloss|cached|icons|glyphs TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -26,6 +26,9 @@ CUSTOM_GLYPH_DECODED = 5
 PUSH_STARTED = 9
 REFRESH_DONE = 8
 BATCH_TIMED_OUT = 10
+# A record that says the board lost trace records (firmware/tracer.py).
+TRACE_DROPPED = 0
+GLYPH_BUILT = 7
 # Task 0063: an open batch asked the host for what it lacks.
 BATCH_INCOMPLETE = 12
 # The most ms between the last report of the first pass and the release, when a
@@ -250,6 +253,9 @@ def report(records, scenario, out):
     if scenario == "cached":
         return report_cached(records, out)
 
+    if scenario in ("icons", "glyphs"):
+        return report_icons(records, out)
+
     gaps = blink_gaps_ms(records)
     if not gaps:
         print("no blink gaps in the trace", file=out)
@@ -298,6 +304,28 @@ def report_batch(records, out):
     if timed_out:
         print("the board released the batch after its time-out", file=out)
     return span <= MAX_PUSH_SPAN_LIMIT_MS and not timed_out
+
+
+def report_icons(records, out):
+    """Print the `icons` run's figures (task 0059): for each key, the time from
+    the decoded glyph to the built frame, and the trace records the board lost.
+    Return True when all six keys decoded and built a glyph and no trace record
+    was dropped. The `six keys in` line is `blinksend`'s own.
+    """
+    decoded = {}
+    built = {}
+    for code, key, _, device_us in records:
+        if code == CUSTOM_GLYPH_DECODED:
+            decoded.setdefault(key, device_us)
+        elif code == GLYPH_BUILT:
+            built.setdefault(key, device_us)
+    dropped = sum(1 for code, _, _, _ in records if code == TRACE_DROPPED)
+    keys = sorted(set(decoded) & set(built))
+    for key in keys:
+        print("key {} compose {:.1f} ms".format(key, (built[key] - decoded[key]) / 1000), file=out)
+    print("keys with a glyph {}/{}".format(len(keys), len(BATCH_KEYS)), file=out)
+    print("TRACE_DROPPED records {}".format(dropped), file=out)
+    return len(keys) == len(BATCH_KEYS) and dropped == 0
 
 
 def report_batchloss(records, out):
@@ -426,7 +454,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "batchloss", "cached"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "batchloss", "cached", "icons", "glyphs"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

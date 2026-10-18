@@ -117,23 +117,17 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — The spike inflates one 32 KB glyph on core 1 and returns pixels equal to `zlib.decompress` on core 0. **Proof:** the figures in this spec's Notes, and the build recipe in `firmware/README.md`.
-  - Not confirmed: needs the board. `tools/glyphcore_spike.py` compares the pixels of core 1 with `zlib.decompress`; the host test `test/test_glyphcore_inflate.py` already compares the C inflater with `zlib` on 44 streams.
-- [ ] **DoD-2** — The spike records the time of one inflate on core 1, the time one key costs core 0 with it, the time of `gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy into a slot. **Proof:** this spec's Notes, with the trace file of `blinksend --scenario=icons`.
-  - Not confirmed: needs the board: `make glyphcore-spike`, then `blinksend --scenario=icons`.
+- [x] **DoD-1** — The spike inflates one 32 KB glyph on core 1 and returns pixels equal to `zlib.decompress` on core 0. **Proof:** the figures in this spec's Notes, and the build recipe in `firmware/README.md`. Measured 2026-10-18 with `make glyphcore-spike`: `pixels equal to zlib on core 0: yes` in every trial; the figures are in Notes and the recipe is in `firmware/README.md`.
+- [x] **DoD-2** — The spike records the time of one inflate on core 1, the time one key costs core 0 with it, the time of `gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy into a slot. **Proof:** this spec's Notes, with the trace file of `blinksend --scenario=icons`. Inflate on core 1: 12.7 ms (45.9 ms on core 0). A compose on core 0 takes 44 ms alone and 50 ms while core 1 inflates. `gc.collect()` with 128 slots in module memory: 2.7 ms. A 32 KB copy into a slot: 5.9 ms. Trace files of `blinksend --scenario=icons`: three runs, compose 57 to 72 ms for each key.
 - [ ] **DoD-3** — Six keys with `blinksend --scenario=icons` take at most 0.65 s on the patched build. **Proof:** the line `six keys in N s`, in three runs, each with N at most 0.65.
-  - Not confirmed: needs the board with the custom build.
+  - Not met, and the cause is not the board. Three runs gave `six keys in 0.80 s`, `0.79 s`, `0.81 s`. `blinksend` sends a Key state after each glyph, and the driver waits 150 ms between HID reports (`minReportGap`, a non-goal of this task), so six keys take 0.75 s at least. Task 0058's 0.80 s was already at that floor, so the premise "board work is the bottleneck" was wrong for this scenario. The limit needs a change on the host (a key state over CDC, or `--scenario=cached`) or a different DoD-3.
 - [x] **DoD-4** — When `import glyphcore` fails, the firmware inflates on core 0, and the glyph is the same. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test for each path. `test_without_the_module_the_reader_inflates_on_core_0` and `test_the_glyph_from_core_1_has_the_same_pixels_as_from_core_0` cover the two paths, with `test/fake_glyphcore.py`. 368 tests pass.
 - [x] **DoD-5** — When core 1 does not answer within the set time, the board drops the glyph, the key keeps its image, and the loop goes on. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a fake module that never answers. `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_reader_goes_on` (`test/test_wire.py`) and `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_key_keeps_its_image` (`test/test_app.py`) use a fake module that never answers.
-- [ ] **DoD-6** — Three runs of `blinksend --scenario=icons` in a row report no `TRACE_DROPPED` record and no error. **Proof:** the three JSONL trace files.
-  - Not confirmed: needs the board with the custom build.
-- [ ] **DoD-7** — `firmware/README.md` records the build recipe, the flash steps, and the figures of DoD-2 and DoD-3. **Proof:** `firmware/README.md`.
-  - Not confirmed: `firmware/README.md` has the recipe and the flash steps; the figures of DoD-2 and DoD-3 are not measured yet.
-- [ ] **DoD-8** — With the 128-slot pool in module memory, `gc.collect()` takes at most 10 ms. **Proof:** the probe line in `firmware/README.md`, in three runs.
-  - Not confirmed: needs the board: `make glyphcore-spike` prints the median collection with 128 slots in module memory.
+- [x] **DoD-6** — Three runs of `blinksend --scenario=icons` in a row report no `TRACE_DROPPED` record and no error. **Proof:** the three JSONL trace files. Three runs of `make blink-trace SCENARIO=icons`: `python3 tools/blink_trace.py report --scenario=icons` printed `TRACE_DROPPED records 0` and `keys with a glyph 6/6` for each, and `blinksend` reported no error.
+- [x] **DoD-7** — `firmware/README.md` records the build recipe, the flash steps, and the figures of DoD-2 and DoD-3. **Proof:** `firmware/README.md`. `firmware/README.md`, section "The second core": the recipe, the flash steps, and the figures, including the `icons` result that missed 0.65 s.
+- [x] **DoD-8** — With the 128-slot pool in module memory, `gc.collect()` takes at most 10 ms. **Proof:** the probe line in `firmware/README.md`, in three runs. Three runs of `make glyphcore-spike`: 2.62, 2.72, and 2.72 ms. The probe line is in `firmware/README.md`.
 - [x] **DoD-9** — When a batch lacks a key state, the board sends "Batch incomplete" with the right mask, and the host sends that state again. **Proof:** `.venv/bin/pytest test/test_app.py` and `cd driver && go test ./layers -run Resend` pass, each with a test that drops one report. Task 0063 built the resend, so the proof names changed: `.venv/bin/pytest test/test_app.py -k batch_incomplete` (4 tests) and `cd driver && go test ./transport -run BatchIncomplete` pass. `go test ./layers -run Resend` finds no test, because the code is in `transport`.
-- [ ] **DoD-10** — On the board, 15 runs of `blinksend --scenario=batch` with the 128-slot or 64-slot pool of task 0061 end with no `BATCH_TIMED_OUT` record, and each completes within 1.0 s of its last send. **Proof:** the 15 JSONL trace files.
-  - Not confirmed: needs the board. It also needs the module pool in use, and the host `SlotCount` is still 64.
+- [x] **DoD-10** — On the board, 15 runs of `blinksend --scenario=batch` with the 128-slot or 64-slot pool of task 0061 end with no `BATCH_TIMED_OUT` record, and each completes within 1.0 s of its last send. **Proof:** the 15 JSONL trace files. 15 runs of `make blink-trace SCENARIO=batch` on the board with the 64-slot pool in module memory: no `BATCH_TIMED_OUT`, push span 31.0 to 35.0 ms in all 15, and the board never had to ask for a resend. The report does not time the "1.0 s of the last send" directly; the batch released with the pushes 31 to 35 ms apart and no time-out (2 s).
 - [x] **DoD-11** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. `.venv/bin/pytest test/ -q`: 368 passed. `cd driver && go test ./...`: all packages ok.
 - [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
@@ -149,8 +143,8 @@ ticked.
 ## Open questions
 
 - [x] Does the `rp2` port of CircuitPython 10.2.1 already use core 1? — No for this board. Only `common-hal/picodvi/Framebuffer_RP2040.c` (RP2040 only) and `common-hal/usb_host/Port.c` (off by default) call `multicore_launch_core1`. `pico_multicore` is already compiled in (`LIB_PICO_MULTICORE=1`), so the module needs no change to the port.
-- [ ] How long does one 32 KB inflate take on core 1, with core 0 busy in PSRAM? — DoD-2.
-- [ ] Does module memory outside the heap escape the garbage collector scan, and can the DMA push read it directly? — the spike, DoD-2 and DoD-8.
+- [x] How long does one 32 KB inflate take on core 1, with core 0 busy in PSRAM? — DoD-2: 12.7 ms with core 0 polling. The probe timed the inflate with core 0 polling and the compose with core 1 inflating (50 ms against 44 ms), not the inflate during a compose.
+- [ ] Does module memory outside the heap escape the garbage collector scan, and can the DMA push read it directly? — Yes for the scan (2.7 ms for 128 slots). Open for the DMA: run `blinksend --scenario=cached` on the module pool and look at the panels.
 
 ## Notes
 
@@ -174,3 +168,12 @@ Built by task 0059 on 2026-10-18 (the board was not attached; the measurements a
 - `objdump` of `firmware.elf`: `core1_main`, the inflater, and the flash wrappers are in RAM. The only call that leaves them is `memset`, also in RAM. Every caller of `flash_range_erase` and `flash_range_program` in the port goes through the wrapper.
 - The pool uses `SLOT_COUNT = 64` on the board and on the host, as task 0063 set. `glyphcore.alloc(128)` works, and the spike measures `gc.collect()` with 128 slots. A pool of 128 in use needs a host `SlotCount` of 128 and a way for the host to learn the size, which this task does not add.
 - Design choice: the stream is copied into the module (one 32 KB buffer), so the reader frees its frame buffer at once and reads the next frame while core 1 inflates. Each key has two glyph buffers that alternate, and `glyph_view` returns a new `memoryview` on each call, because `display_render` rebuilds a key's frames only when `key_state.pixels` is a different object.
+
+Measured by task 0059 on 2026-10-18, on a Pico Plus 2 with the glyphcore build (stream of 3,823 bytes, the icon that compresses worst):
+
+- One inflate: 45.9 ms on core 0, 12.7 to 12.9 ms on core 1. The `submit` call costs core 0 0.8 ms. A compose on core 0 takes 44 ms alone and 50 ms while core 1 inflates, so the two cores share PSRAM with a 6 ms cost. A 32 KB copy into a slot takes 5.9 ms.
+- `gc.collect()` with 128 slots in module memory: 2.62, 2.72, 2.72 ms, against 115 to 150 ms with 128 slots on the heap. The module memory escapes the scan, as the open question hoped. Not tested: a DMA push that reads a frame from a module slot. The `batch` and `icons` runs push frames from heap `Bitmap`s, and the `cached` scenario was not run with the module pool.
+- `blinksend --scenario=icons`: 0.80, 0.79, 0.81 s. This is the 150 ms HID gap (see DoD-3), not board work. Compose takes 57 to 72 ms for each key in the traces.
+- `blinksend --scenario=batch`, 15 runs: no time-out, push span 31 to 35 ms.
+- Spike decision rule: the inflate saves 33 ms for each key, under the 40 ms of the rule, but the pool outside the heap cuts the collection from 115 to 150 ms to 2.7 ms, so the rule does not stop the task.
+- Bug found on the board: `slot_view` returned a read-only `memoryview`, and the copy into a slot raised `TypeError`. The fake module in the tests did not catch it. Fixed with `MP_OBJ_ARRAY_TYPECODE_FLAG_RW`.

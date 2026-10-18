@@ -89,17 +89,40 @@ names the directory; the default is `macro-pad` under the user's config
 directory, `~/Library/Application Support/macro-pad` on macOS, and an empty
 value keeps the state in memory only. It holds:
 
-- `keys.json`: each key's `key_index`, `color` (RGB565), `emoji_id`, and
-  `blink`, in key order.
-- `glyph-N.bin`: key N's custom glyph as the raw 32,768 bytes the board
-  receives, 128×128 big-endian RGB565. A built-in Emoji ID in a later key
-  state deletes the file.
+- `keys.json`: each key's `key_index`, `color` (RGB565), `emoji_id`, `blink`,
+  and `glyph` (the hash of its custom glyph, when it shows one), in key order.
+- `glyph-<hash>.bin`: a custom glyph as the raw 32,768 bytes the board
+  receives, 128×128 big-endian RGB565. The name is the SHA-256 of the pixels,
+  in hex, so a picture is written once, whichever key shows it, and a return to
+  a layer writes no glyph file. A file stays while the daemon runs. At start,
+  the daemon deletes the glyph files that no key shows. A `glyph-N.bin` of an
+  older daemon, one for each key, is read once, moved to its hashed name, and
+  left alone.
+
+The daemon writes a glyph file when a key first shows its picture, and
+`keys.json` only when a key state changes: the same state sent again writes
+nothing, and a layer switch writes `keys.json` once, for all its keys (task
+0061). Before, every send wrote `glyph-N.bin` and `keys.json`, about 200 KB for
+a six-key switch.
 
 Files are written to a temporary name and renamed, so a crash leaves the old
 file or the new one. A `keys.json` that does not parse is moved to
 `keys.json.bad` and the daemon starts with no state. A key that names a glyph
 whose file is missing or the wrong size keeps its color and blink and shows no
 glyph. Each of these is logged.
+
+**Frames on the board.** `Transport.StoreFrame` and `Transport.ShowFrames`
+(task 0061) work on the board's cache of 128 composed frames: Store frame sends
+one picture over one color, and Show frames names a slot for each key, so a
+layer switch whose frames are stored sends no image. `Reconnecting` remembers
+every frame it stored. After a reconnect it clears its record of what the board
+holds and stores every frame again, in the background, one at a time, so a send
+waits for at most one frame. A Show frames that names a frame the board does
+not hold yet stores it first, and a Show miss from the board stores the frames
+of the missed keys again and shows them. A shown frame is the key's state for
+the replay and the state files above. `StoreFrame` returns
+`ErrFrameTooLarge` for a glyph that does not compress to fit one frame, and the
+layer controller then draws that key with a glyph and a key state.
 
 A glyph takes about 3 s to cross to the board with the daemon's other replay
 (measured once on the real board: 4 keys and one glyph, from start to
@@ -113,6 +136,18 @@ hold up to five children. A press on a key with children opens its
 child layer, and a press on key 3 returns. The daemon draws the active
 layer, saves the object, and shows the same layer after a restart. See task
 0057.
+
+**Frame cache.** When the board keeps a frame cache, the daemon draws a layer
+through it (task 0061). Each distinct picture over each color is a frame, and
+the controller keeps a table of 128 slots with least-recently-used eviction: it
+never overwrites a slot that a key shows. A layer change stores the frames the
+board lacks, then sends one Show frames for all the keys that change. At start,
+and after each change to the tree, a preload stores the frames of every node of
+the layer tree while the pad is idle. A press pauses it until
+`PreloadIdle` (2 s) has passed. The preload fills free slots and evicts none, so
+after it, a switch to any layer sends a Show frames and no image. A key whose
+glyph does not compress to fit one frame is drawn with a glyph and a key state,
+as before.
 
 | Flag | Default | Meaning |
 |---|---|---|

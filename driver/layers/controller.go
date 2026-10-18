@@ -44,6 +44,10 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// SaveInterval overrides the default SaveInterval, for tests.
 	SaveInterval time.Duration
+	// PreloadIdle is how long the pad must go without a press before the
+	// preload stores a frame. Zero means DefaultPreloadIdle. It only matters
+	// when Out implements FrameOut.
+	PreloadIdle time.Duration
 }
 
 // Update is one setLayerKey message: the full values of one key or child.
@@ -98,14 +102,29 @@ type Controller struct {
 	// mu guards doc and dirty. sendMu serializes redraws and guards
 	// shown. A mutation takes sendMu first, so two mutations never send
 	// their keys in an interleaved order, and Active never waits on a send.
-	mu        sync.Mutex
-	doc       Doc
-	dirty     bool
-	sendMu    sync.Mutex
-	shown     [KeyCount]view
-	closeOnce sync.Once
-	stop      chan struct{}
-	done      chan struct{}
+	mu     sync.Mutex
+	doc    Doc
+	dirty  bool
+	sendMu sync.Mutex
+	shown  [KeyCount]view
+	// frameOut is Out as a FrameOut, or nil when the board has no frame cache.
+	// frames, slotShown, and the preload's work all run under sendMu: frames
+	// is the host's record of the board's slots, and slotShown is the slot
+	// each key shows, or noSlot.
+	frameOut  FrameOut
+	frames    *frameTable
+	slotShown [KeyCount]byte
+	// lastPress, kicks, and passes are guarded by mu. The preload pauses until
+	// PreloadIdle after lastPress; a pass that has seen kick number n sets
+	// passes to n.
+	lastPress   time.Time
+	kicks       int
+	passes      int
+	kick        chan struct{}
+	preloadDone chan struct{}
+	closeOnce   sync.Once
+	stop        chan struct{}
+	done        chan struct{}
 }
 
 // Open loads the object from opts.Dir, draws the keys it holds, and starts
@@ -127,6 +146,16 @@ func Open(opts Options) (*Controller, error) {
 		doc:       newDoc(),
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
+		frames:    newFrameTable(),
+		kick:      make(chan struct{}, 1),
+
+		preloadDone: make(chan struct{}),
+	}
+	for i := range c.slotShown {
+		c.slotShown[i] = noSlot
+	}
+	if fo, ok := opts.Out.(FrameOut); ok {
+		c.frameOut = fo
 	}
 	if opts.Dir != "" {
 		c.path = filepath.Join(opts.Dir, FileName)
@@ -143,6 +172,16 @@ func Open(opts Options) (*Controller, error) {
 	c.sendMu.Unlock()
 
 	go c.saveLoop(interval)
+	if c.frameOut != nil {
+		idle := opts.PreloadIdle
+		if idle <= 0 {
+			idle = DefaultPreloadIdle
+		}
+		go c.preloadLoop(idle)
+		c.kickPreload()
+	} else {
+		close(c.preloadDone)
+	}
 	return c, nil
 }
 
@@ -255,6 +294,11 @@ func applyUpdate(d *Doc, u Update) error {
 // children opens its child layer. In a child layer the up key returns to
 // the top layer. Every other press changes nothing and sends nothing.
 func (c *Controller) Press(keyIndex byte) {
+	// A press pauses the preload, so its Store frame messages do not hold up
+	// the switch (task 0061).
+	c.mu.Lock()
+	c.lastPress = time.Now()
+	c.mu.Unlock()
 	err := c.mutate(func(d *Doc) error {
 		if d.Active != nil {
 			if int(keyIndex) != UpKey {
@@ -313,6 +357,7 @@ func (c *Controller) mutate(fn func(d *Doc) error) error {
 	if activeChanged {
 		c.out.LayerChanged(active)
 	}
+	c.kickPreload()
 	return nil
 }
 
@@ -370,6 +415,10 @@ type keyDraw struct {
 // holds the new frames and draws all of them together (task 0060). One key
 // goes out alone, with no wait.
 func (c *Controller) flush(want [KeyCount]view) {
+	if c.frameOut != nil {
+		c.flushFrames(want)
+		return
+	}
 	start := time.Now()
 	var draws []keyDraw
 	for i, w := range want {
@@ -515,6 +564,7 @@ func (c *Controller) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.stop)
 		<-c.done
+		<-c.preloadDone
 		err = c.save()
 	})
 	return err

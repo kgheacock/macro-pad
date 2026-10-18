@@ -329,6 +329,28 @@ func (d *Device) BeginBatch(glyphMask, stateMask byte) error {
 	return writeFrame(d.serial, MessageTypeBeginBatch, encodeBeginBatch(glyphMask, stateMask))
 }
 
+// StoreFrame implements Transport. It writes a framed Store frame message to
+// the device over CDC. The board inflates the stream and composes the frame
+// into its slot, which takes about 140 ms, so the call returns when the bytes
+// have gone out, not when the board has finished.
+func (d *Device) StoreFrame(slot byte, color uint16, pixels []byte) error {
+	payload, err := encodeStoreFrame(slot, color, pixels)
+	if err != nil {
+		return err
+	}
+	return writeFrame(d.serial, MessageTypeStoreFrame, payload)
+}
+
+// ShowFrames implements Transport. It writes a framed Show frames message to
+// the device over CDC.
+func (d *Device) ShowFrames(slots []byte) error {
+	payload, err := encodeShowFrames(slots)
+	if err != nil {
+		return err
+	}
+	return writeFrame(d.serial, MessageTypeShowFrames, payload)
+}
+
 // ReadMessage implements Transport. It decodes one frame from the CDC
 // stream using the same readMessage the emulator uses, so both paths
 // share one framing implementation. ReadMessage does not route by type;

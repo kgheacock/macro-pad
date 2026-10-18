@@ -30,7 +30,8 @@ import tracer as tracer_module
 
 FRAME_WIDTH = 128
 FRAME_HEIGHT = 128
-_FRAME_COLORS = 65536  # a 16-bit bitmap
+FRAME_COLORS = 65536  # a 16-bit bitmap
+_FRAME_COLORS = FRAME_COLORS
 
 # A glyph pixel with this value is transparent: the key's background shows
 # through it. The driver encodes real black as 0x0001. Both byte orders read
@@ -76,6 +77,9 @@ class KeyState:
         # blink on an opaque glyph hides the whole glyph.
         self._transparent_glyph = True
         self._blink_visible = False
+        # True while `_on_frame` is a slot of the frame cache (task 0061),
+        # which `show_cached` set. A frame built by `_build_frames` is not.
+        self._cached = False
 
 
 def _swap16(value: int) -> int:
@@ -107,6 +111,23 @@ def _has_transparent_pixel(pixels: bytes) -> bool:
         start = found + 1
 
 
+def compose_into(frame, scratch, color: int, pixels: bytes) -> None:
+    """Fill `frame` with `color`, then blit `pixels` over it, skipping the
+    transparent value. `pixels` may be `None`, and then `scratch` may be too.
+
+    `frame` and `scratch` are 128x128 16-bit `Bitmap`s that the caller owns.
+    `scratch` takes the glyph before the blit, and holds nothing of value
+    after. This allocates no `Bitmap`: the frame cache (task 0061) composes
+    into its slots with it, 128 frames from one scratch bitmap.
+    """
+    bitmaptools.fill_region(frame, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, _swap16(color))
+    if pixels is not None:
+        bitmaptools.arrayblit(scratch, array.array("H", pixels))
+        bitmaptools.blit(
+            frame, scratch, 0, 0, skip_source_index=TRANSPARENT_PIXEL
+        )
+
+
 def _compose(color: int, pixels: bytes) -> memoryview:
     """Build one frame: fill it with `color`, then blit `pixels` over it,
     skipping the transparent value. `pixels` may be `None`.
@@ -115,15 +136,15 @@ def _compose(color: int, pixels: bytes) -> memoryview:
     the DMA sends. A `Bitmap` of 16-bit pixels has 16-bit items, and the DMA
     would send a pixel as one item in the wrong size and order. The view keeps
     the `Bitmap` alive.
+
+    A key that blinks composes here, a new `Bitmap` for each call (tasks 0044
+    and 0048). A cached frame composes with `compose_into`.
     """
     frame = displayio.Bitmap(FRAME_WIDTH, FRAME_HEIGHT, _FRAME_COLORS)
-    bitmaptools.fill_region(frame, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, _swap16(color))
+    glyph = None
     if pixels is not None:
         glyph = displayio.Bitmap(FRAME_WIDTH, FRAME_HEIGHT, _FRAME_COLORS)
-        bitmaptools.arrayblit(glyph, array.array("H", pixels))
-        bitmaptools.blit(
-            frame, glyph, 0, 0, skip_source_index=TRANSPARENT_PIXEL
-        )
+    compose_into(frame, glyph, color, pixels)
     return memoryview(frame).cast("B")
 
 
@@ -158,6 +179,7 @@ def _build_frames(key_state: KeyState, tracer=None, key_index=None) -> None:
         key_state._off_frame = None
         key_state._frame_color = key_state.color
         key_state._frame_pixels = key_state.pixels
+        key_state._cached = False
 
     if not key_state.blink:
         key_state._off_frame = None
@@ -166,6 +188,43 @@ def _build_frames(key_state: KeyState, tracer=None, key_index=None) -> None:
             key_state._off_frame = _compose(_BLINK_OFF_COLOR, key_state.pixels)
         else:
             key_state._off_frame = _compose(key_state.color, None)
+
+
+def show_cached(
+    panel, key_state: KeyState, frame, color: int, emoji_id: int
+) -> None:
+    """Hand a frame of the frame cache (task 0061) to a key's panel queue.
+
+    `frame` is the byte view of a slot, and `color` the color it was composed
+    over. The key's state becomes what a Set custom glyph and a Key state
+    would have left, so a later Key state that names the same color keeps the
+    frame, and one that names another color builds a plain color frame. The key
+    does not blink: a key that blinks is not cached. The cached frame is never
+    changed here, and `app.MacroPad` does not overwrite a slot while a push
+    that reads it is queued or on the wire.
+    """
+    key_state.color = color
+    key_state.emoji_id = emoji_id
+    key_state.blink = False
+    key_state.pixels = None
+    key_state._on_frame = frame
+    key_state._off_frame = None
+    key_state._frame_color = color
+    key_state._frame_pixels = None
+    key_state._transparent_glyph = True
+    key_state._blink_visible = True
+    key_state._cached = True
+    panel.submit(frame)
+
+
+def drop_cached(key_state: KeyState) -> None:
+    """Forget a cached frame, so the next render builds the key's frame from
+    its color and glyph. `app.MacroPad` calls this when a key state replaces
+    the picture of a key that shows a cached frame.
+    """
+    if key_state._cached:
+        key_state._cached = False
+        key_state._on_frame = None
 
 
 def blink_is_due(key_state: KeyState, blink_on: bool) -> bool:

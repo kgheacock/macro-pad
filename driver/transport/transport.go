@@ -110,13 +110,14 @@ type TraceRecord struct {
 }
 
 // Message is one decoded device→host message read from ReadMessage. Type
-// says which of Event, AudioChunk, Pong, or Trace is populated.
+// says which of Event, AudioChunk, Pong, Trace, or ShowMiss is populated.
 type Message struct {
 	Type       MessageType
 	Event      Event
 	AudioChunk AudioChunk
 	Pong       Pong
 	Trace      TraceRecord
+	ShowMiss   ShowMiss
 }
 
 // Transport is the driver's connection to a device, real or emulated. It
@@ -140,6 +141,23 @@ type Transport interface {
 	// glyph, and bit k of stateMask is key k that gets a key state. See
 	// "Begin batch" in docs/wire-protocol.md (task 0060).
 	BeginBatch(glyphMask, stateMask byte) error
+
+	// StoreFrame writes one Store frame message to the device over CDC
+	// serial: the board inflates pixels, composes them over color into slot,
+	// and keeps the frame in RAM. A nil pixels is a frame of the color alone;
+	// otherwise pixels is CustomGlyphPixelsSize bytes, as for SendCustomGlyph.
+	// It returns ErrFrameTooLarge for a glyph that does not compress enough to
+	// fit one frame. A Store frame draws nothing. See "Store frame" in
+	// docs/wire-protocol.md (task 0061).
+	StoreFrame(slot byte, color uint16, pixels []byte) error
+
+	// ShowFrames writes one Show frames message to the device over CDC
+	// serial: slots[k] is the slot key k shows, or SlotUnchanged to leave key
+	// k alone. The board queues the pushes of every named key in one pass, so
+	// the panels change together. A key that names an empty slot keeps its
+	// image, and the board answers with a Show miss. See "Show frames" in
+	// docs/wire-protocol.md (task 0061).
+	ShowFrames(slots []byte) error
 
 	// ReadMessage blocks until one device→host message arrives over CDC
 	// serial, or the transport is closed. A frame whose type this package

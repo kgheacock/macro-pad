@@ -193,7 +193,7 @@ is ticked.
 - [ ] **DoD-7** — The channel image for `macro-pad.driver` is 128x128, and
   its pixels match a golden PNG in `inbox/render/testdata`. **Proof:** `go test ./render -run TestChannelImage`
 - [ ] **DoD-8** — On the pad, with `macropadd` and `inbox daemon` running,
-  `inbox -c demo send hi` shows a count on the Inbox key; a press shows a
+  `inbox send demo hi` shows a count on the Inbox key; a press shows a
   `demo` key with count 1 on key 0, and the shift arrow on key 3. **Proof:**
   Keith's check on the board, recorded in Notes
 - [ ] **DoD-9** — `driver/README.md` records `removeLayerKey`. **Proof:** `driver/README.md`, "Protocol"

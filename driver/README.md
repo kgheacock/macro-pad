@@ -216,7 +216,7 @@ the poller used is not read any more; delete it.
 | `DONE` | green `#12D84A` | `0x16C9` |
 | `ERROR` | red | `0xF800` |
 | `WARN` | yellow | `0xFFE0` |
-| empty | white | `0xFFFF` |
+| empty | black | `0x0000` |
 
 A file with seven keys, six children, a grandchild, an unknown status, a
 duplicate `id`, or an `active` that names a key with no children is rejected.

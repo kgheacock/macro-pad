@@ -1,14 +1,14 @@
 ---
 id: "0065"
 title: "An inbox daemon that watches the store and feeds macropadd, with install and uninstall scripts"
-status: "backlog"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+pr: "https://github.com/kgheacock/macro-pad/pull/80"
+branch: "0065-inbox-daemon-with-install-and-uninstall"
 related: ["0055", "0057", "0064", "0066", "0067"]
 tags: ["inbox", "daemon", "launchd", "systemd"]
 ---
@@ -227,36 +227,43 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — With a test WebSocket server in place of `macropadd`, a
+- [x] **DoD-1** — With a test WebSocket server in place of `macropadd`, a
   row inserted by another process reaches the server as a message within 1 s.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestChangeReachesPad test/daemon.test.js`
-- [ ] **DoD-2** — A poll with no commit runs no query but `data_version`.
+- [x] **DoD-2** — A poll with no commit runs no query but `data_version`.
   **Proof:** `node --test --test-name-pattern=TestIdlePollIsCheap test/daemon.test.js`
-- [ ] **DoD-3** — Started with no server listening, the daemon connects when
+- [x] **DoD-3** — Started with no server listening, the daemon connects when
   one starts. After the server restarts, it sends its full state again.
   **Proof:** `node --test --test-name-pattern='TestConnectLate|TestResendOnReconnect' test/daemon.test.js`
-- [ ] **DoD-4** — A second daemon on the same store exits with code 3 and
+- [x] **DoD-4** — A second daemon on the same store exits with code 3 and
   the message above. **Proof:** `node --test --test-name-pattern=TestSecondDaemonRefused test/cli.test.js`
-- [ ] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
-- [ ] **DoD-6** — `install.sh --dry-run` and `uninstall.sh --dry-run` print
+- [x] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
+- [x] **DoD-6** — `install.sh --dry-run` and `uninstall.sh --dry-run` print
   the plist path on macOS and the unit path on Linux, and change nothing.
   **Proof:** run both, then `git status` and `ls` the service paths
-- [ ] **DoD-7** — On macOS, `install.sh` leaves
+  - The Linux paths were checked on this Mac with a stub `uname`, not on Linux.
+- [x] **DoD-7** — On macOS, `install.sh` leaves
   `launchctl print gui/$UID/com.kgheacock.macropad.inbox` showing
   `state = running`. A second run still shows it running.
   `uninstall.sh` leaves `launchctl print` failing, and the store in place.
   **Proof:** the reviewer runs the scripts on Keith's Mac
-- [ ] **DoD-8** — `uninstall.sh --purge` also removes the store files.
+  - Confirmed on Keith's Mac on 2026-10-18: install, a second install, and
+    uninstall (`launchctl print` exits 113 after it, the store stays). The first
+    run left the job loaded but never started (`runs = 0`), so `install.sh` now
+    runs `launchctl kickstart -k` after `bootstrap`, and `uninstall.sh` waits
+    until launchd lets go of the job.
+- [x] **DoD-8** — `uninstall.sh --purge` also removes the store files.
   **Proof:** `ls` the store path after the run
-- [ ] **DoD-9** — `shellcheck inbox/scripts/*.sh` exits 0. **Proof:** the exit code
-- [ ] **DoD-10** — `inbox/README.md` "Daemon" records the flags, the
+- [x] **DoD-9** — `shellcheck inbox/scripts/*.sh` exits 0. **Proof:** the exit code
+  - Run with `shellcheck-py` from a scratch venv; shellcheck is not installed on this Mac.
+- [x] **DoD-10** — `inbox/README.md` "Daemon" records the flags, the
   service paths, the log path, and how to install and uninstall. **Proof:**
   `inbox/README.md`
-- [ ] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
+- [x] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
   (and `--help`) print usage and exit 0. An unknown option exits 2 with a
   message that names it. **Proof:** `node --test --test-name-pattern=TestDaemonHelp test/cli.test.js`
   and running the scripts
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

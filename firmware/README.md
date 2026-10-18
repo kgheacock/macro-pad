@@ -759,6 +759,68 @@ host for it:
   on purpose, and `tools/blink_trace.py report --scenario=batchloss` prints how
   long after the last report the batch released (limit 1,000 ms).
 
+## The count pip (task 0062)
+
+A count change used to send a new image: each count of one icon on one color
+was its own frame, and a Store frame costs 94 to 109 ms. The pip is no longer
+part of a frame. The board stamps it on a copy.
+
+- **The pool.** `frame_cache.POOL_SIZE = 64` buffers, as in task 0063. The last
+  `PIP_BUFFERS = 12` are pip buffers, two for each of six keys, so the host
+  numbers `SLOT_COUNT = 52` slots. A Store frame or a Show for a slot from 52
+  up is dropped or answered with a Show miss. The pool is the same 2 MB, and on
+  the heap the garbage collector scans the same number of blocks as before.
+- **Store pip sheet** (type 13). `MacroPad` hands the message to
+  `FrameCache.set_sheet`, which blits the 256×64 sheet into one `Bitmap` that the
+  cache allocates when it is built, so the heap does not change for the run. The
+  sheet inflates on core 0: it arrives once, and it is not worth a job on core 1.
+- **Show frames with pips** (type 14). For a key with a count above 0,
+  `MacroPad._pip_frame` copies the slot into the key's idle pip buffer (a 32 KB
+  copy took 5.9 ms), `display_render.stamp_pip` blits the disc for the slot's
+  color and then the characters, and `show_cached` queues that buffer. The key
+  alternates its two buffers, so a push that still reads the last one is not
+  changed, and `_wait_for_view` holds a stamp that would still change a buffer
+  on the wire. A count of 0 queues the slot's own view, as type 9 does. Before
+  the sheet arrives, a count draws the slot with no pip.
+- **Trace.** `SHOW_WITH_PIPS_STARTED` (code 13) is recorded before the copies,
+  and `FRAMES_SHOWN` after the stamps, so `tools/blink_trace.py report
+  --scenario=pips` prints a `six keys in` that includes the stamps.
+
+The layout of the sheet is in `docs/wire-protocol.md` and `driver/layers/pip.go`
+(`pipSpriteRect`), and `display_render.py` repeats it: a disc of 44×44 for each
+key color at `(44 * i, 0)`, big cells of 14×20 for `0` to `9` and `+` at
+`(14 * index, 44)`, and small cells of 10×14 for the `9` and `+` of `99+` after
+them. `test/test_app.py` builds a sheet with one value for each sprite and
+checks the pixel positions, so a change to one side that the other does not
+follow fails a test.
+
+`make blink-trace SCENARIO=pips` stores the sheet and six frames, and shows them
+six times with a count on every key. Figures of 2026-10-18, on a Pico Plus 2 with
+the glyphcore build (`glyphcore=True`):
+
+| Figure | Value |
+|---|---|
+| Free heap after the pool and the sheet (`make slot-probe`) | 5,523,168 bytes (limit 2,097,152) |
+| One stamp, `FrameCache.stamp` alone (copy into the buffer, a second 32 KB copy, blits) | 15.4 ms: 2 × 5.6 ms of copies and 3.8 ms for the blits of `42` (2.2 ms for `7`) |
+| `set_sheet`, once | 21 ms |
+| Show of six keys with counts, `six keys in` | 212.2, 212.9, and 206.5 ms in three runs (limit 215, accepted by the owner) |
+| Of it: the six stamps, `SHOW_WITH_PIPS_STARTED` to the first `PUSH_STARTED` and `FRAMES_SHOWN` | about 100 ms |
+| Of it: the two push groups, first `PUSH_STARTED` to the last `REFRESH_DONE` | about 105 ms, 45 to 50 ms for each group (task 0061's 48 ms; the ideal is 26) |
+| `push span` | 59.9, 60.0, and 56.4 ms |
+
+The limit of task 0061's Show, 150 ms, is not met, and the owner accepted 215 ms:
+a Show of six keys with a pip is a Show of six keys (108 ms in task 0061) and
+six stamps (about 100 ms). Two changes were tried
+and dropped, on the same board:
+
+- **Stamp through a 44×44 bitmap** instead of a second 32 KB copy: the 44 row
+  copies cost 2.3 ms in each direction, so the stamp took 18.0 ms, not 15.4.
+- **Start the first group before the last three stamps**: the stamps of keys 3 to
+  5 and the DMA of the first group share the PSRAM, and both slowed down. The first
+  group took 100 ms on the wire, and `six keys in` was 215 to 224 ms.
+
+The `probe` used for the stamp figures is a one-off `code.py`, not in the repo.
+
 ## The second core: the `glyphcore` module (task 0059)
 
 Stock CircuitPython 10.2.1 cannot reach the second core of the RP2350. The

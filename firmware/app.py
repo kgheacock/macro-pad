@@ -210,6 +210,8 @@ class MacroPad:
         self.resyncs = 0
         # The open Begin batch, or `None`.
         self._batch = None
+        # Which of a key's two pip buffers the next stamp writes (task 0062).
+        self._pip_next = [0] * len(switches)
 
     def step(self, now_us):
         """Run one iteration of the loop."""
@@ -422,6 +424,12 @@ class MacroPad:
         if isinstance(glyph, wire.ShowFrames):
             self._show_frames(glyph, now_us)
             return True
+        if isinstance(glyph, wire.PipSheet):
+            self._frame_cache.set_sheet(glyph.colors, glyph.pixels)
+            return True
+        if isinstance(glyph, wire.ShowFramesPips):
+            self._show_frames(glyph, now_us)
+            return True
 
         if self._tracer is not None:
             self._tracer.record(
@@ -464,11 +472,35 @@ class MacroPad:
         slot = message.slot
         if slot >= self._frame_cache.slot_count:
             return
-        view = self._frame_cache.view(slot)
+        self._wait_for_view(self._frame_cache.view(slot))
+        self._frame_cache.store(slot, message.color, message.pixels)
+
+    def _wait_for_view(self, view):
+        """Service the pushes until none reads `view`, for at most
+        `SLOT_WAIT_NS`."""
         start = time.monotonic_ns()
         while self._slot_in_use(view) and time.monotonic_ns() - start < SLOT_WAIT_NS:
             self._service_pushes()
-        self._frame_cache.store(slot, message.color, message.pixels)
+
+    def _pip_frame(self, key_index, slot, count):
+        """The byte view of a copy of `slot` with a pip of `count` stamped on
+        it, in one of the key's two pip buffers (task 0062). The buffer that the
+        key's last stamp did not use goes first, so a push that still reads the
+        last one is not disturbed. Returns `None` when there is no sheet yet, or
+        no pip buffer for the key; the caller then shows the slot as it is.
+        """
+        cache = self._frame_cache
+        if not cache.has_sheet():
+            return None
+        which = self._pip_next[key_index]
+        buffer = cache.pip_buffer(key_index, which)
+        if buffer is None:
+            return None
+        view = cache.view(buffer)
+        self._wait_for_view(view)
+        cache.stamp(buffer, slot, count)
+        self._pip_next[key_index] = 1 - which
+        return view
 
     def _show_frames(self, message, now_us):
         """Queue the push of every key that a Show frames message names, in
@@ -476,6 +508,14 @@ class MacroPad:
         keeps its image, and the board answers with a Show miss for those keys.
         An open batch is released first, like a new Begin batch does.
         """
+        # A Show frames with pips has a count for each key; a plain one has none.
+        counts = getattr(message, "counts", None)
+        if counts is not None:
+            named = 0
+            for key_index in range(min(len(message.slots), len(self.key_states))):
+                if message.slots[key_index] != wire.SLOT_UNCHANGED:
+                    named |= 1 << key_index
+            self._record_trace(tracer_module.SHOW_WITH_PIPS_STARTED, _NO_KEY, named)
         if self._batch is not None:
             self._release_batch(now_us)
         cache = self._frame_cache
@@ -488,15 +528,23 @@ class MacroPad:
             if not cache.filled(slot):
                 missed |= 1 << key_index
                 continue
+            has_glyph = cache.has_glyph(slot)
+            frame = None
+            if counts is not None and counts[key_index] > 0:
+                frame = self._pip_frame(key_index, slot, counts[key_index])
+                # A frame with a pip has a picture, whatever the slot holds.
+                has_glyph = has_glyph or frame is not None
+            if frame is None:
+                frame = cache.view(slot)
             emoji_id = (
                 wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
-                if cache.has_glyph(slot)
+                if has_glyph
                 else DEFAULT_EMOJI_ID
             )
             display_render.show_cached(
                 self._ports[key_index],
                 self.key_states[key_index],
-                cache.view(slot),
+                frame,
                 cache.color(slot),
                 emoji_id,
             )

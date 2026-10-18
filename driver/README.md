@@ -146,8 +146,9 @@ layer, saves the object, and shows the same layer after a restart. See task
 
 **Frame cache.** When the board keeps a frame cache, the daemon draws a layer
 through it (task 0061). Each distinct picture over each color is a frame, and
-the controller keeps a table of 64 slots with least-recently-used eviction: it
-never overwrites a slot that a key shows. A layer change stores the frames the
+the controller keeps a table of 52 slots with least-recently-used eviction: it
+never overwrites a slot that a key shows. The board's pool is 64 buffers, and 12
+of them are pip buffers (task 0062). A layer change stores the frames the
 board lacks, then sends one Show frames for all the keys that change. At start,
 and after each change to the tree, a preload stores the frames of every node of
 the layer tree while the pad is idle. A press pauses it until
@@ -155,6 +156,18 @@ the layer tree while the pad is idle. A press pauses it until
 after it, a switch to any layer sends a Show frames and no image. A key whose
 glyph does not compress to fit one frame is drawn with a glyph and a key state,
 as before.
+
+**Count pip.** A key with a count shows a pip in the bottom-right corner: a red
+disc (`#E02020`) of 44 pixels with a 2 pixel white ring and a white number, drawn
+with Go Bold. The count is not part of a frame, so one icon on one color is one
+slot, whatever its count. The daemon draws the pip sprites once, at start-up
+(`layers.BuildPipSheet`), and sends them in a Store pip sheet message, again at
+every reconnect. A count change sends a Show frames with pips: the board copies
+the frame, stamps the pip on the copy, and shows it, so the change sends no
+image. A key that is not cached, such as one whose picture does not compress,
+gets the same pip drawn into its glyph. The pip's size, colors, and font are the
+constants of `driver/layers/pip.go`; the sheet's layout is in
+[`docs/wire-protocol.md`](../docs/wire-protocol.md#store-pip-sheet-cdc-host--device).
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -186,11 +199,16 @@ the poller used is not read any more; delete it.
   color. No status blinks.
 - `iconRef` is a PNG under the assets directory, 128×128. A path that is
   absolute or leaves the directory, with `..` or a symbolic link, is
-  rejected. Transparent pixels show the key color. If `iconRef` is empty,
-  `icon` is a built-in Emoji ID; firmware has no glyph table, so it draws
-  only the color.
-- `count` is drawn as a badge in the bottom-right corner of the image. A
-  count of 0 has no badge, and a count above 99 shows `99+`.
+  rejected. The icon sits on an opaque white round of radius 60
+  (`iconRoundRadius`), centred on the key, and the round's edge is blended
+  against the key color. Transparent pixels outside the round show the key
+  color. If `iconRef` is empty, `icon` is a built-in Emoji ID; firmware has no
+  glyph table, so it draws only the color. Every icon in `assets/` is dark, so
+  it shows on the white round; a white part of an icon (`gmail.png` has some)
+  merges with the round.
+- `count` is drawn as a pip, a red disc with a white ring and a white number,
+  in the bottom-right corner of the image (see "Count pip," above). A count of
+  0 has no pip, and a count above 99 shows `99+`.
 
 | status | color | RGB565 |
 |---|---|---|
@@ -208,7 +226,8 @@ duplicate `id`, or an `active` that names a key with no children is rejected.
 On the top layer, key N shows `keys[N]`.
 
 In a child layer, child N shows on keys 0, 1, 2, 4, and 5, in that order, and
-key 3 shows `assets/shift.png`, a shift arrow on a dark key. A key with no
+key 3 shows `assets/shift.png`, a black shift arrow on a white round, on a dark
+key. A key with no
 child in the open layer is blank.
 
 | Press | Result |

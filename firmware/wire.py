@@ -53,6 +53,14 @@ MESSAGE_TYPE_BATCH_INCOMPLETE = 11
 # Key state over CDC, host to device (task 0059): the same 6 bytes as the HID
 # report, in order with the glyphs, and never overwritten by the next one.
 MESSAGE_TYPE_KEY_STATE = 12
+# Store pip sheet: the sprites of the count pip (task 0062). Payload: the number
+# of discs n (1), their key colors (2 each, little-endian), then a zlib stream
+# that inflates to a 256x64 image, the size of a glyph.
+MESSAGE_TYPE_STORE_PIP_SHEET = 13
+PIP_SHEET_MAX_COLORS = 8
+# Show frames with pips: two bytes for each key, a slot or SLOT_UNCHANGED, and a
+# count (task 0062).
+MESSAGE_TYPE_SHOW_FRAMES_PIPS = 14
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -224,6 +232,28 @@ class StoreFrame:
         self.slot = slot
         self.color = color
         self.pixels = pixels
+
+
+class PipSheet:
+    """One decoded Store pip sheet message: `colors[i]` is the key color that
+    disc `i` of the sheet is blended against, and `pixels` is the sheet, 256x64
+    big-endian RGB565. See "Store pip sheet" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, colors, pixels):
+        self.colors = colors
+        self.pixels = pixels
+
+
+class ShowFramesPips:
+    """One decoded Show frames with pips message: `slots[k]` is the slot key
+    `k` shows, or `SLOT_UNCHANGED`, and `counts[k]` is the count of its pip. See
+    "Show frames with pips" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, slots, counts):
+        self.slots = slots
+        self.counts = counts
 
 
 class ShowFrames:
@@ -409,7 +439,20 @@ class CustomGlyphReader:
                 self._frame_type = frame_type
                 self._total = FRAME_HEADER_SIZE + length
                 return False
+            if (
+                frame_type == MESSAGE_TYPE_STORE_PIP_SHEET
+                and 4 <= length <= CUSTOM_GLYPH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_SHOW_FRAMES_PIPS
+                and 2 <= length <= 2 * SHOW_FRAMES_MAX_KEYS
+                and length % 2 == 0
+            ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
+                return False
             self._bad_length = frame_type in (
+                MESSAGE_TYPE_STORE_PIP_SHEET,
+                MESSAGE_TYPE_SHOW_FRAMES_PIPS,
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH,
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH_COMPRESSED,
                 MESSAGE_TYPE_BEGIN_BATCH,
@@ -470,6 +513,15 @@ class CustomGlyphReader:
             )
         if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES:
             return ShowFrames(slots=bytes(self._frame[base:total]))
+        if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES_PIPS:
+            slots = bytearray()
+            counts = bytearray()
+            for i in range(base, total, 2):
+                slots.append(self._frame[i])
+                counts.append(self._frame[i + 1])
+            return ShowFramesPips(slots=bytes(slots), counts=bytes(counts))
+        if self._frame_type == MESSAGE_TYPE_STORE_PIP_SHEET:
+            return self._pip_sheet(base, total)
         if self._frame_type == MESSAGE_TYPE_KEY_STATE:
             # Raises ValueError for a version this build cannot read.
             return decode_key_state(bytes(self._frame[base:total]))
@@ -488,6 +540,23 @@ class CustomGlyphReader:
         if key_index < GLYPH_KEYS:
             buffer = 2 * key_index + 1 - self._current[key_index]
         return self._inflate(_GLYPH, key_index, buffer, stream)
+
+    def _pip_sheet(self, base, total):
+        """Decode the Store pip sheet in `_frame`. The sheet comes once, so it
+        inflates on core 0, and the key colors and the stream are read from the
+        payload here. Raises `ValueError` for a payload that does not parse, or
+        a stream that does not inflate to the size of a glyph.
+        """
+        count = self._frame[base]
+        stream_at = base + 1 + 2 * count
+        if not 1 <= count <= PIP_SHEET_MAX_COLORS or stream_at >= total:
+            raise ValueError("pip sheet names {} colors in {} bytes".format(count, total - base))
+        colors = [
+            self._frame[base + 1 + 2 * i] | (self._frame[base + 2 + 2 * i] << 8)
+            for i in range(count)
+        ]
+        pixels = _inflate_glyph(bytes(self._view[stream_at:total]))
+        return PipSheet(colors=colors, pixels=pixels)
 
     def _inflate(self, kind, info, buffer, stream):
         """Inflate `stream`: on core 1 when it takes the job, else here."""

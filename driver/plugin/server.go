@@ -5,10 +5,14 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"net"
 	"net/http"
 	"sort"
@@ -286,7 +290,34 @@ func (s *Server) StoreFrame(slot byte, color uint16, png []byte) error {
 // setKeyState message, so the virtual pad needs no message of its own. It
 // implements layers.FrameOut (task 0061).
 func (s *Server) ShowFrames(slots []byte) error {
-	if err := s.dev.ShowFrames(slots); err != nil {
+	return s.showFrames(slots, nil)
+}
+
+// ShowFramesWithPips is ShowFrames with a count pip on the keys whose count is
+// above 0. The clients get the frame with the pip drawn on it. It implements
+// layers.FrameOut (task 0062).
+func (s *Server) ShowFramesWithPips(slots, counts []byte) error {
+	return s.showFrames(slots, counts)
+}
+
+// StorePipSheet sends the pip sprites to the board. A client needs none: it
+// gets the pip drawn into the image. It implements layers.FrameOut (task 0062).
+func (s *Server) StorePipSheet(colors []uint16, pixels []byte) error {
+	if err := s.dev.StorePipSheet(colors, pixels); err != nil {
+		s.logf("storePipSheet failed: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (s *Server) showFrames(slots, counts []byte) error {
+	var err error
+	if counts == nil {
+		err = s.dev.ShowFrames(slots)
+	} else {
+		err = s.dev.ShowFramesWithPips(slots, counts)
+	}
+	if err != nil {
 		s.logf("showFrames failed: %v", err)
 		return err
 	}
@@ -300,13 +331,21 @@ func (s *Server) ShowFrames(slots []byte) error {
 		if !ok {
 			continue
 		}
+		frame := rec.png
+		if counts != nil && counts[key] > 0 {
+			var perr error
+			if frame, perr = withPip(rec.png, rec.color, int(counts[key])); perr != nil {
+				s.logf("showFrames key=%d: draw the pip: %v", key, perr)
+				frame = rec.png
+			}
+		}
 		keyIndex := byte(key)
 		emoji := byte(0)
-		if len(rec.png) > 0 {
+		if len(frame) > 0 {
 			emoji = transport.CustomGlyphSentinelEmojiID
 			glyph := Message{
 				Kind:           KindSetCustomGlyph,
-				SetCustomGlyph: &SetCustomGlyphPayload{KeyIndex: keyIndex, Image: rec.png},
+				SetCustomGlyph: &SetCustomGlyphPayload{KeyIndex: keyIndex, Image: frame},
 			}
 			s.rememberState(keyIndex, glyph)
 			s.broadcast(glyph)
@@ -319,6 +358,27 @@ func (s *Server) ShowFrames(slots []byte) error {
 		s.broadcast(state)
 	}
 	return nil
+}
+
+// withPip returns the PNG of a frame with the count pip drawn on it. A nil png
+// is a frame with no picture, and gets a transparent image under the pip.
+func withPip(frame []byte, key uint16, count int) ([]byte, error) {
+	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
+	if len(frame) > 0 {
+		img, err := png.Decode(bytes.NewReader(frame))
+		if err != nil {
+			return nil, err
+		}
+		draw.Draw(canvas, canvas.Bounds(), img, img.Bounds().Min, draw.Src)
+	}
+	if err := layers.DrawPip(canvas, key, count); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, canvas); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // LayerChanged tells every client which layer is active.

@@ -1640,12 +1640,16 @@ def _show_misses(serial):
 UNCHANGED = wire.SLOT_UNCHANGED
 
 
-def test_the_pool_is_64_slots_allocated_before_the_loop():
+def test_the_pool_is_64_buffers_allocated_before_the_loop():
     pad, _, _, _, _, _ = _build_pad()
 
-    assert pad._frame_cache.slot_count == 64
+    # 52 numbered slots and 12 pip buffers (task 0062), 64 in all (task 0063).
+    cache = pad._frame_cache
+    assert cache.slot_count == 52
+    assert cache.pip_buffers == 12
+    assert len(cache._views) == 64
     assert wire.SLOT_UNCHANGED == 0xFF
-    assert not any(pad._frame_cache.filled(slot) for slot in range(64))
+    assert not any(cache.filled(slot) for slot in range(64))
 
 
 def test_store_frame_draws_nothing_and_show_frames_draws_the_stored_frame():
@@ -2106,3 +2110,219 @@ def test_a_batch_completes_from_key_states_on_cdc_in_order_with_its_glyphs(monke
     assert drawn_before_release == 1  # held until both arrived
     assert len(panels.per_key[2].frames) == 2
     assert _frame_pixel(_last_frame(panels.per_key[2]), 0) == 0x1234
+
+
+# --- The count pip (task 0062) ------------------------------------------------
+
+PIP_COLORS = [0x3AFF, 0x16C9, 0xF800, 0xFFE0, 0xFFFF]
+
+
+def _pip_sheet_pixels():
+    """A sheet with one value for each sprite: disc i is 0x1100 + i, the big
+    cell of character index c is 0x2200 + c, and the small 9 and + are 0x3309
+    and 0x330A. The top-left pixel of each disc is transparent."""
+    sheet = bytearray(32768)
+
+    def fill(x1, y1, x2, y2, value):
+        for y in range(y1, y2):
+            for x in range(x1, x2):
+                offset = (y * 256 + x) * 2
+                sheet[offset] = value >> 8
+                sheet[offset + 1] = value & 0xFF
+
+    for disc in range(5):
+        fill(44 * disc, 0, 44 * (disc + 1), 44, 0x1100 + disc)
+        sheet[(44 * disc) * 2 : (44 * disc) * 2 + 2] = b"\x00\x00"
+    for index in range(11):
+        fill(14 * index, 44, 14 * (index + 1), 64, 0x2200 + index)
+    fill(154, 44, 164, 58, 0x3309)
+    fill(164, 44, 174, 58, 0x330A)
+    return bytes(sheet)
+
+
+def _pip_sheet_bytes(colors=PIP_COLORS):
+    writer = FakeSerial()
+    payload = bytes((len(colors),))
+    for color in colors:
+        payload += bytes((color & 0xFF, color >> 8))
+    payload += zlib.compress(_pip_sheet_pixels(), 9)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_PIP_SHEET, payload)
+    return bytes(writer.written)
+
+
+def _show_frames_pips_bytes(slots, counts):
+    writer = FakeSerial()
+    payload = b"".join(bytes((slot, count)) for slot, count in zip(slots, counts))
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_PIPS, payload)
+    return bytes(writer.written)
+
+
+def _pip_pad(color=0xF800):
+    """A pad that holds the pip sheet and one stored frame, in slot 3: a glyph
+    of 0x07E0 over `color` with a transparent top-left pixel."""
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_pip_sheet_bytes())
+    pad.step(900)
+    serial.feed(_store_frame_bytes(3, color, _rgb565_pixels_with_transparent_corner(0x07E0)))
+    pad.step(1000)
+    return pad, panels, serial
+
+
+def _show_pips(pad, serial, counts, slot=3, now=2000):
+    slots = [slot] + [UNCHANGED] * 5
+    serial.feed(_show_frames_pips_bytes(slots, counts + [0] * (6 - len(counts))))
+    pad.step(now)
+    pad.step(now + 1)
+
+
+def _panel_pixel(frame, x, y):
+    return _frame_pixel(frame, y * 128 + x)
+
+
+def test_a_show_with_pips_stamps_the_pip_on_a_copy_and_leaves_the_slot_unchanged():
+    """DoD-4: counts 1, 42, and 100 differ from the slot only inside the pip box."""
+    pad, panels, serial = _pip_pad()
+    slot_before = bytes(pad._frame_cache.view(3))
+
+    for step, count in enumerate((1, 42, 100)):
+        _show_pips(pad, serial, [count], now=2000 + 10 * step)
+        frame = _last_frame(panels.per_key[0])
+        differs = 0
+        for y in range(128):
+            for x in range(128):
+                inside = 80 <= x < 124 and 80 <= y < 124
+                index = y * 128 + x
+                same = frame[2 * index : 2 * index + 2] == slot_before[2 * index : 2 * index + 2]
+                if not inside:
+                    assert same, "count {} changed ({}, {}) outside the pip box".format(count, x, y)
+                differs += not same
+        assert differs > 500, "count {} drew too little".format(count)
+        assert bytes(pad._frame_cache.view(3)) == slot_before
+
+
+def test_the_pip_is_the_disc_of_the_slots_color_with_the_digits_of_the_count():
+    pad, panels, serial = _pip_pad(color=0xF800)
+
+    _show_pips(pad, serial, [7])
+    frame = _last_frame(panels.per_key[0])
+    assert _panel_pixel(frame, 0, 0) == 0xF800  # the corner shows the key color
+    assert _panel_pixel(frame, 85, 85) == 0x1102  # disc 2 is the one for 0xF800
+    assert _panel_pixel(frame, 80, 80) == 0x07E0  # a transparent disc pixel keeps the slot's
+    assert _panel_pixel(frame, 95, 92) == 0x2207  # one big cell, centred
+
+    _show_pips(pad, serial, [42], now=3000)
+    frame = _last_frame(panels.per_key[0])
+    assert _panel_pixel(frame, 88, 92) == 0x2204
+    assert _panel_pixel(frame, 102, 92) == 0x2202
+
+
+def test_a_pip_on_a_color_the_sheet_has_no_disc_for_uses_the_first_disc():
+    pad, panels, serial = _pip_pad(color=0x1234)
+
+    _show_pips(pad, serial, [7])
+
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x1100
+
+
+def test_a_pip_count_above_99_draws_99_plus_and_a_count_of_0_shows_the_slot_itself():
+    """DoD-4 and the 100 case of DoD-4's sibling: 99+ in small cells; 0, no pip."""
+    pad, panels, serial = _pip_pad()
+
+    _show_pips(pad, serial, [100])
+    hundred = _last_frame(panels.per_key[0])
+    assert _panel_pixel(hundred, 87, 95) == 0x3309
+    assert _panel_pixel(hundred, 97, 95) == 0x3309
+    assert _panel_pixel(hundred, 107, 95) == 0x330A
+
+    _show_pips(pad, serial, [255], now=3000)
+    assert _last_frame(panels.per_key[0]) == hundred
+
+    _show_pips(pad, serial, [0], now=4000)
+    assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x07E0
+
+
+def test_a_pip_without_sheet_draws_the_slot_with_no_pip():
+    """DoD-5."""
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_store_frame_bytes(3, 0xF800, _rgb565_pixels_with_transparent_corner(0x07E0)))
+    pad.step(1000)
+
+    _show_pips(pad, serial, [12])
+
+    assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x07E0
+    assert _show_misses(serial) == []
+
+
+def test_a_pip_on_a_frame_with_no_picture_still_draws_and_marks_the_key_as_a_glyph():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_pip_sheet_bytes())
+    pad.step(900)
+    serial.feed(_store_frame_bytes(3, 0xF800))
+    pad.step(1000)
+
+    _show_pips(pad, serial, [3])
+
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x1102
+    assert pad.key_states[0].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+
+
+def test_two_pip_counts_in_a_row_use_the_two_buffers_of_the_key_in_turn():
+    pad, panels, serial = _pip_pad()
+    cache = pad._frame_cache
+
+    _show_pips(pad, serial, [1])
+    first = pad.key_states[0]._on_frame
+    first_bytes = bytes(first)
+    _show_pips(pad, serial, [2], now=3000)
+    second = pad.key_states[0]._on_frame
+
+    assert first is not second
+    assert first is cache.view(cache.pip_buffer(0, 0))
+    assert second is cache.view(cache.pip_buffer(0, 1))
+    assert bytes(first) == first_bytes  # the stamp of count 2 did not touch it
+    _show_pips(pad, serial, [3], now=4000)
+    assert pad.key_states[0]._on_frame is first  # back to the first buffer
+
+
+def test_a_show_with_pips_of_a_slot_above_the_numbered_ones_is_a_miss():
+    pad, panels, serial = _pip_pad()
+
+    serial.feed(_store_frame_bytes(52, 0x1234))  # a pip buffer, not a slot
+    pad.step(2000)
+    _show_pips(pad, serial, [5], slot=52, now=3000)
+
+    assert not pad._frame_cache.filled(52)
+    assert _show_misses(serial) == [0b1]
+
+
+def test_a_show_with_pips_draws_every_named_key_in_one_pass_and_traces_it():
+    tracer = _FakeTracer()
+    pad, bus, _ = _parallel_pad(tracer=tracer)
+    serial = pad._serial
+    _paint_power_on(pad)
+    serial.feed(_pip_sheet_bytes())
+    pad.step(900)
+    for key in range(6):
+        serial.feed(_store_frame_bytes(10 + key, 0xF800))
+        pad.step(1000 + key)
+    groups_before = len(bus.groups)
+    del tracer.records[:]
+
+    serial.feed(_show_frames_pips_bytes([10, 11, 12, 13, 14, 15], [1, 2, 3, 4, 5, 6]))
+    pad.step(5000)
+    pad.step(5001)
+
+    assert bus.groups[groups_before:] == [[0, 1, 2], [3, 4, 5]]
+    shown = [p for code, _, p in tracer.records if code == tracer_module.FRAMES_SHOWN]
+    assert shown == [ALL_KEYS]
+    codes = [code for code, _, _ in tracer.records]
+    started = [p for code, _, p in tracer.records if code == tracer_module.SHOW_WITH_PIPS_STARTED]
+    assert started == [ALL_KEYS]
+    assert codes.index(tracer_module.SHOW_WITH_PIPS_STARTED) < codes.index(tracer_module.FRAMES_SHOWN)
+    assert tracer_module.SHOW_WITH_PIPS_STARTED == 13
+

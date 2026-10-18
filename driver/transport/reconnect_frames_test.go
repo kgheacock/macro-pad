@@ -166,3 +166,46 @@ func TestReconnecting_AShownFrameIsTheKeysSavedState(t *testing.T) {
 		t.Fatalf("glyph file of a shown frame: %v", err)
 	}
 }
+
+// TestReconnecting_SendsThePipSheetBeforeTheFirstShowAfterAReconnect is task
+// 0062's DoD-7: a board that reconnects holds no sheet, so Reconnecting sends
+// it before anything else, stores the frames, and stamps the pips again.
+func TestReconnecting_SendsThePipSheetBeforeTheFirstShowAfterAReconnect(t *testing.T) {
+	bs := make(boards, 2)
+	first, second := newFakeBoard(), newFakeBoard()
+	bs <- first
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+	waitFor(t, "the first connect", func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.dev != nil })
+
+	if err := r.StorePipSheet([]uint16{1, 2, 3}, make([]byte, CustomGlyphPixelsSize)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.StoreFrame(4, 0xF800, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ShowFramesWithPips([]byte{4, SlotUnchanged}, []byte{12, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.sent(); len(got) != 3 || !strings.HasPrefix(got[0], "sheet 3 colors") {
+		t.Fatalf("first board calls = %q, want the sheet, the store, and the Show", got)
+	}
+
+	first.disconnect()
+	bs <- second
+	waitFor(t, "the pips shown again", func() bool { return countCalls(second.sent(), "show") >= 1 })
+
+	got := second.sent()
+	if len(got) == 0 || !strings.HasPrefix(got[0], "sheet 3 colors 32768 bytes") {
+		t.Fatalf("second board calls = %q, want the sheet first", got)
+	}
+	last := got[len(got)-1]
+	if !strings.HasPrefix(last, "show [4 255") || !strings.Contains(last, "pips [12 0") {
+		t.Fatalf("last call = %q, want a Show with pips for key 0", last)
+	}
+	for i, c := range got {
+		if strings.HasPrefix(c, "show") && countCalls(got[:i], "sheet") == 0 {
+			t.Fatalf("a Show came before the sheet: %q", got)
+		}
+	}
+}

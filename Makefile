@@ -66,7 +66,9 @@ ping-pong: check-circuitpy
 # six keys blink; it prints max skew, max span and max gap) or `batch` (task
 # 0060: six custom glyphs after Begin batch; it prints the push span) or
 # `cached` (task 0061: store two sets of six frames, then show them in turn; it
-# prints `six keys in` and `push span`). It puts a tracing code.py on the board, so run `make flash`
+# prints `six keys in` and `push span`) or `pips` (task 0062: store the pip
+# sheet and six frames, then show them with a count on every key; `six keys in`
+# includes the stamps). It puts a tracing code.py on the board, so run `make flash`
 # afterward to restore the real one. It unmounts CIRCUITPY for the run,
 # because a mounted CIRCUITPY on macOS reloads the board and breaks CDC and
 # HID, and it mounts the volume again when the run ends, even if it failed.

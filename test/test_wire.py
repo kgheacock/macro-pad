@@ -568,6 +568,98 @@ def test_show_miss_payload_is_the_mask_of_the_missed_keys():
     assert bytes(writer.written) == bytes((10, 1, 0, 0b100101))
 
 
+# --- The count pip (task 0062) ------------------------------------------------
+
+
+def _framed_pip_sheet(colors, pixels):
+    writer = FakeWriter()
+    payload = bytes((len(colors),))
+    for color in colors:
+        payload += bytes((color & 0xFF, color >> 8))
+    payload += zlib.compress(pixels, 9)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_PIP_SHEET, payload)
+    return bytes(writer.written)
+
+
+def _framed_show_frames_pips(slots, counts):
+    writer = FakeWriter()
+    payload = b"".join(bytes((slot, count)) for slot, count in zip(slots, counts))
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_PIPS, payload)
+    return bytes(writer.written)
+
+
+def test_the_pip_message_types_are_13_and_14():
+    assert wire.MESSAGE_TYPE_STORE_PIP_SHEET == 13
+    assert wire.MESSAGE_TYPE_SHOW_FRAMES_PIPS == 14
+
+
+def test_a_pip_sheet_decodes_to_its_colors_and_pixels():
+    pixels = bytes(range(256)) * 128
+    glyph_reader, reader = _read_all(_framed_pip_sheet([0x3AFF, 0x16C9, 0xF800], pixels))
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.PipSheet)
+    assert message.colors == [0x3AFF, 0x16C9, 0xF800]
+    assert bytes(message.pixels) == pixels
+
+
+def test_a_pip_sheet_that_does_not_inflate_to_a_glyphs_size_is_dropped():
+    writer = FakeWriter()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_STORE_PIP_SHEET,
+        bytes((1, 0x1F, 0x00)) + zlib.compress(b"short", 9),
+    )
+    framed = bytes(writer.written) + _framed_show_frames_pips([2], [9])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    message = glyph_reader.feed(reader)
+    assert list(message.slots) == [2] and list(message.counts) == [9]
+
+
+def test_a_pip_sheet_that_names_no_color_is_dropped():
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_PIP_SHEET, bytes((0, 1, 2, 3)))
+    framed = bytes(writer.written) + _framed_show_frames_pips([2], [9])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert list(glyph_reader.feed(reader).slots) == [2]
+
+
+def test_show_frames_with_pips_decodes_a_slot_and_a_count_for_each_key():
+    slots = [0, 51, wire.SLOT_UNCHANGED, 5, wire.SLOT_UNCHANGED, 40]
+    counts = [0, 7, 0, 100, 255, 1]
+    glyph_reader, reader = _read_all(_framed_show_frames_pips(slots, counts))
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.ShowFramesPips)
+    assert list(message.slots) == slots
+    assert list(message.counts) == counts
+
+
+def test_show_frames_with_pips_of_an_odd_length_is_dropped():
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_PIPS, bytes((1, 2, 3)))
+    framed = bytes(writer.written) + _framed_show_frames_pips([4], [5])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert list(glyph_reader.feed(reader).counts) == [5]
+
+
 # --- The second core (task 0059) ---------------------------------------------
 
 from fake_glyphcore import FakeGlyphcore  # noqa: E402

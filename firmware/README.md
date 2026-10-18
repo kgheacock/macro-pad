@@ -694,21 +694,47 @@ section, because it walks the heap and costs about 20 ms. The task stops if
 fewer than 2 MB are free after the pool: the firmware does not shrink the pool
 by itself.
 
-Probe figures: not measured yet. A `macropadd` daemon of another session held
-the board, so DoD-1 of task 0061 is open. Run `make flash`, `make slot-probe`,
-and `make flash` again, then record the three figures here:
+Probe figures (`make slot-probe`, 2026-10-18, Pico Plus 2, CircuitPython
+10.2.1). The probe builds a `FrameCache` and nothing else, so the figures do
+not include the heap that the panels and the reader take:
 
 | Figure | Value |
 |---|---|
-| Time to allocate 128 slots | not measured |
-| Free heap after 128 slots | not measured |
-| Time of a 32 KB copy | not measured |
+| Time to allocate 128 slots | 1,596 ms |
+| Free heap before the pool | 8,282,624 bytes |
+| Free heap after 128 slots | 4,176,288 bytes (limit 2,097,152) |
+| Time of a 32 KB copy (`target[:] = source`) | 5,767 us (best 5,615, worst 5,798, 5 trials) |
+
+The allocation takes 1.6 s at start-up, before the loop. A 32 KB copy takes
+5.8 ms, so copying a frame is cheaper than an inflate (32 to 65 ms).
 
 `go run ./cmd/blinksend --scenario=cached` stores two sets of six frames and
 shows them in turn. `tools/blink_trace.py report --scenario=cached` prints
 `six keys in N ms` (from the board's `FRAMES_SHOWN` to the last `REFRESH_DONE`,
-limit 150) and `push span N ms` (limit 40) for the worst Show. Cached-Show
-figures: not measured yet, for the same reason.
+limit 150) and `push span N ms` (limit 40) for the worst of the six Shows.
+Three runs on 2026-10-18 (the Show write took 0.1 to 0.4 ms on the host):
+
+| Run | Six keys in | Push span |
+|---|---|---|
+| 1 | 108.6 ms | 58.2 ms |
+| 2 | 108.7 ms | 58.1 ms |
+| 3 | 108.6 ms | 58.1 ms |
+
+A Show of six stored frames is inside 150 ms, and the board does no inflate and
+no compose for it: the trace shows `FRAMES_SHOWN`, then the first push 6 ms
+later. The push span is over its limit of 40 ms. Each group of three pushes
+took 48 ms from `PUSH_STARTED` to `REFRESH_DONE` in most of the Shows, and 25 ms
+in the others (slots 9 to 11, the three frames stored last). The same board
+gave 24 ms for a group in `--scenario=batch` a few minutes later. A group is on
+the wire for 26 ms at 10 MHz, so a 48 ms group means the DMA read the slot
+frames at half speed. The cause is not found: the next step is to time a group
+from slot frames and from fresh frames on the board, one slot at a time.
+
+The pool also slowed the older paths. `--scenario=batch` on the same firmware
+took 1.07 s for six keys (0.82 s before; the glyph write of key 5 took 404
+ms), and the board released the batch after its 2 s time-out. A likely cause is the
+garbage collector, which scans the 4 MB of live bitmaps on each pass. This is
+not measured yet either.
 
 ## Out of scope
 

@@ -1,0 +1,16 @@
+{
+  "name": "inbox",
+  "version": "0.1.0",
+  "description": "Leave short messages per channel in an SQLite file, and read them later",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "inbox": "bin/inbox.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

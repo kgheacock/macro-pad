@@ -18,6 +18,8 @@ little-endian, matching the RP2350's native byte order.
 | Begin batch | Host → Device | CDC serial | 2 bytes |
 | Store frame | Host → Device | CDC serial | 3 + up to 32,766 bytes |
 | Show frames | Host → Device | CDC serial | 1 to 32 bytes |
+| Store pip sheet | Host → Device | CDC serial | 4 + up to 32,765 bytes |
+| Show frames with pips | Host → Device | CDC serial | 2 to 64 bytes |
 | Show miss | Device → Host | CDC serial | 1 byte |
 | Batch incomplete | Device → Host | CDC serial | 2 bytes |
 | Press/release event | Device → Host | CDC serial | 10 bytes |
@@ -65,6 +67,8 @@ bytes arrive is a truncated message, not a partial value.
 | 10 | Show miss | Device → Host |
 | 11 | Batch incomplete | Device → Host |
 | 12 | Key state | Host → Device |
+| 13 | Store pip sheet | Host → Device |
+| 14 | Show frames with pips | Host → Device |
 
 A Key state message also rides on HID, where a report ID and a fixed transfer
 size already identify it. The HID report has no frame header. The same 6 bytes
@@ -266,20 +270,21 @@ draws nothing. Framed per [Framing](#framing) as type `8`.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| 0 | 1 | Slot | `0` to `63` |
+| 0 | 1 | Slot | `0` to `51` |
 | 1 | 2 | Color | Background color, RGB565, little-endian |
 | 3 | 0 to 32,766 | Stream | A zlib stream (RFC 1950) that inflates to exactly 32,768 bytes, the Pixels field of Set custom glyph. An empty stream is a frame of the color alone, with no glyph |
 
-The board keeps a fixed pool of 64 slots in RAM, one frame in each: the
-picture, with a transparent pixel (`0x0000`) showing the color, as a Set custom
+The board keeps a fixed pool of 64 buffers in RAM. The first 52 are the slots,
+one frame in each (the last 12 are pip buffers, see [Show frames with
+pips](#show-frames-with-pips-cdc-host--device)): the picture, with a transparent pixel (`0x0000`) showing the color, as a Set custom
 glyph and a Key state would draw the key. A Store frame replaces the frame in
 its slot. The board allocates the pool when it starts, before its loop, and
 never frees, grows, or shrinks it, and never writes it to flash. A board that
 resets has an empty cache.
 
 The host owns the slot numbers. It picks a slot for each frame, and when all
-64 are in use it overwrites the least recently used one. The board is only an
-array. A Store frame for a slot above `63`, or with a stream that does not
+52 are in use it overwrites the least recently used one. The board is only an
+array. A Store frame for a slot above `51`, or with a stream that does not
 inflate to exactly 32,768 bytes, is dropped, and the frame is consumed by its
 `Length`: the slot keeps what it held.
 
@@ -303,7 +308,7 @@ Names a slot for each key. The board draws the named keys together. Framed per
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| `k` | 1 | Slot of key `k` | `0` to `63`, or `255` for "unchanged" |
+| `k` | 1 | Slot of key `k` | `0` to `51`, or `255` for "unchanged" |
 
 The payload has one byte for each key, key `0` first, and at least one byte. The
 board ignores the bytes of keys it does not have. A key whose byte is `255`
@@ -319,7 +324,7 @@ glyph, and no blink. A later Key state that names the same color keeps the
 frame. A later Key state with another color, or a built-in Emoji ID, builds a
 plain color frame.
 
-A key that names an empty slot, or a slot above `63`, keeps the image it had.
+A key that names an empty slot, or a slot above `51`, keeps the image it had.
 The board draws the other keys, and answers with a Show miss. The board records
 `FRAMES_SHOWN` (see the [trace code registry](#trace-code-registry)) for the
 keys it drew.
@@ -328,6 +333,83 @@ A Show frames with no byte is dropped, and the frame is consumed by its
 `Length`. Firmware that does not know type `9` skips the frame, and no key
 changes. See [task 0061](../tasks/ongoing/0061-cache-composed-glyph-frames-on-the-board.md)
 for the design decision.
+
+### Store pip sheet (CDC, host → device)
+
+Carries the sprites of the count pip (task 0062). The host sends it once after it
+connects, and again after each reconnect, before any Show frames with pips.
+Framed per [Framing](#framing) as type `13`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 0 | 1 | Discs | `n`, the number of discs, `1` to `8` |
+| 1 | 2 × `n` | Colors | The key color of each disc, RGB565, little-endian. Disc `i` is blended against color `i` |
+| 1 + 2 × `n` | 1 to 32,764 | Stream | A zlib stream (RFC 1950) that inflates to exactly 32,768 bytes: the sheet |
+
+The sheet is an image of 256 by 64 pixels in the pixel format of a custom glyph
+(RGB565, big-endian, `0x0000` is transparent), row-major. The board treats its
+32,768 bytes as 16,384 pixels, 256 to a row. The sprites sit at fixed places:
+
+| Sprite | Where (x, y) | Size |
+|---|---|---|
+| Disc `i`: a red disc with a white ring, the edge blended against color `i` | `(44 × i, 0)` | 44 × 44 |
+| Big character `c`, for `0` to `9` (index 0 to 9) and `+` (index 10): white on red | `(14 × index, 44)` | 14 × 20 |
+| Small `9`: white on red | `(154, 44)` | 10 × 14 |
+| Small `+`: white on red | `(164, 44)` | 10 × 14 |
+
+A transparent pixel of a disc (its corners, and an edge pixel with little disc in
+it) keeps what lies under it. The character cells are opaque. The board draws a
+pip with these sprites, so the host decides the look, and a change of size, color,
+or font needs no new firmware. `driver/layers/pip.go` builds the sheet and
+`firmware/display_render.py` reads it.
+
+The board keeps the sheet in RAM until it resets, and the colors with it. A
+sheet that does not inflate to exactly 32,768 bytes, that names no color, or
+whose payload is shorter than its colors need, is dropped and the frame is
+consumed by its `Length`: the board keeps the sheet it had. Firmware that does not
+know type `13` skips the frame by its `Length`, as Framing says. Update the
+firmware before the driver.
+
+### Show frames with pips (CDC, host → device)
+
+Names a slot and a count for each key. It is Show frames with a pip on each key
+whose count is above 0. Framed per [Framing](#framing) as type `14`.
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| `2 × k` | 1 | Slot of key `k` | `0` to `51`, or `255` for "unchanged" |
+| `2 × k + 1` | 1 | Count of key `k` | `0` for no pip, `1` to `99` for that number, `100` to `255` for `99+` |
+
+The payload has two bytes for each key, key `0` first, and at least one key: its
+`Length` is even, from 2 to 64. A key whose slot byte is `255` keeps what it
+shows, pip included, and its count is ignored. To change only the count of a key,
+name the slot it shows again with the new count.
+
+For a key with a count above 0, the board copies the frame in the slot into one
+of the key's two pip buffers, stamps the pip on the copy, and queues the push of
+the buffer. It does not change the slot, so a slot never holds a pip, and one
+picture on one color is one slot whatever its count. The pip is the disc for the
+slot's color, or disc `0` when the sheet has none for it, then the characters of
+the count centred on the disc: the big cells for `1` to `99`, and the small `9`,
+`9`, and `+` for `99+`. The disc is at `(80, 80)`, 4 pixels from the bottom-right
+corner of the panel. The characters sit in the middle of it, in cells side by
+side with no gap. A key with a count of 0 shows the slot's own frame, as Show
+frames does.
+
+The rest is as in [Show frames](#show-frames-cdc-host--device): the pushes of all
+named keys start together, an open batch is released first, a slot that is empty
+or above `51` keeps the key's image and the board answers with a [Show
+miss](#show-miss-cdc-device--host), and the key's state afterward is what a Set
+custom glyph and a Key state would have left, with `0xFE` as its Emoji ID when
+the frame has a picture or a pip. A count above 0 before the board has a sheet
+draws the slot with no pip. The board records `SHOW_WITH_PIPS_STARTED` before it
+copies, and `FRAMES_SHOWN` after (see the [trace code
+registry](#trace-code-registry)). A key that blinks is not cached, and gets its
+pip drawn into the glyph by the host. A payload that is not a whole number of
+keys is dropped, and the frame is consumed by its `Length`. Firmware that does
+not know type `14` skips the frame, and no key changes. See [task
+0062](../tasks/ongoing/0062-red-circle-count-pip-with-a-real-font.md) for the
+design decision.
 
 ### Show miss (CDC, device → host)
 
@@ -453,6 +535,7 @@ for the design decision.
 | 10 | `BATCH_TIMED_OUT` | The pending masks of a batch that the board released after 2 s, task 0060: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
 | 11 | `FRAMES_SHOWN` | The keys a Show frames drew, task 0061: bit `k` for key `k`. The Key field is `0xFF`. The board records it as it queues the pushes, so the `PUSH_STARTED` records of the keys follow it |
 | 12 | `BATCH_INCOMPLETE` | The pending masks of a batch that asked the host for more, task 0063: the glyph mask in the low byte, the Key state mask in the high byte. The Key field is `0xFF` |
+| 13 | `SHOW_WITH_PIPS_STARTED` | The keys a Show frames with pips names a slot for, task 0062: bit `k` for key `k`. The Key field is `0xFF`. The board records it before it copies and stamps any frame, so the time to the next `FRAMES_SHOWN` is the time of the stamps |
 
 `TRACE_DROPPED` is emitted by `drain`, not recorded during the loop, so
 its Timestamp is always `0` — it marks drops counted since the last

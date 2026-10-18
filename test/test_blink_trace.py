@@ -306,3 +306,36 @@ def test_batchloss_run_released_after_the_time_out_fails():
 
     assert blink_trace.report(records, "batchloss", out) is False
     assert "time-out" in out.getvalue()
+
+
+def _icons_run(compose_ms=65, dropped=0, keys=range(6)):
+    lines = [json.dumps({"offset_us": 0, "samples": 1, "estimator": "x"})]
+    for key in keys:
+        start = key * 150_000
+        lines.append(_trace_line(blink_trace.CUSTOM_GLYPH_DECODED, key, start))
+        lines.append(_trace_line(blink_trace.GLYPH_BUILT, key, start + compose_ms * 1000))
+    lines += [_trace_line(blink_trace.TRACE_DROPPED, 0, 900_000)] * dropped
+    return lines
+
+
+def test_icons_run_prints_the_compose_time_of_each_key_and_passes():
+    out = io.StringIO()
+
+    ok = blink_trace.report(blink_trace.load_trace(_icons_run()), "icons", out)
+
+    assert ok is True
+    assert "key 3 compose 65.0 ms" in out.getvalue()
+    assert "TRACE_DROPPED records 0" in out.getvalue()
+
+
+def test_icons_run_with_a_dropped_trace_record_fails():
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(_icons_run(dropped=1)), "icons", out) is False
+    assert "TRACE_DROPPED records 1" in out.getvalue()
+
+
+def test_icons_run_with_a_missing_key_fails():
+    out = io.StringIO()
+
+    assert blink_trace.report(blink_trace.load_trace(_icons_run(keys=range(5))), "icons", out) is False

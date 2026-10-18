@@ -230,6 +230,7 @@ func TestDevice_SendKeyState(t *testing.T) {
 	var written []byte
 	hid := &captureWriteCloser{}
 	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+	d.keyStateOverHID = true
 	defer d.Close()
 
 	ks := KeyState{KeyIndex: 2, Version: ProtocolVersion, Color: 0xF800, EmojiID: 7, Blink: true}
@@ -262,6 +263,7 @@ func (w *timedWriteCloser) Close() error { return nil }
 func TestSendKeyStateSpacesReports(t *testing.T) {
 	hid := &timedWriteCloser{}
 	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+	d.keyStateOverHID = true
 	defer d.Close()
 
 	var wg sync.WaitGroup
@@ -397,6 +399,7 @@ func TestDevice_BeginBatchWritesAFrameOfTwoMasks(t *testing.T) {
 func TestDevice_DropKeyStateSkipsTheWrite(t *testing.T) {
 	hid := &captureWriteCloser{}
 	d := newDevice(hid, &fakeSerialConn{Reader: bytes.NewReader(nil)})
+	d.keyStateOverHID = true
 	defer d.Close()
 	dropped := false
 	d.dropKeyState = func(ks KeyState) bool {
@@ -417,5 +420,104 @@ func TestDevice_DropKeyStateSkipsTheWrite(t *testing.T) {
 	}
 	if len(hid.written) != 2*(1+keyStateSize) {
 		t.Fatalf("%d bytes written in all, want two reports of %d", len(hid.written), 1+keyStateSize)
+	}
+}
+
+// By default a key state is a Key state frame over CDC (task 0059): type 12,
+// length 6, the 6 bytes of the key state message, and nothing on HID.
+func TestDevice_SendKeyStateWritesAFrameOverCDC(t *testing.T) {
+	hid := &captureWriteCloser{}
+	serial := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(hid, serial)
+	defer d.Close()
+
+	ks := KeyState{KeyIndex: 2, Version: ProtocolVersion, Color: 0xF800, EmojiID: 7, Blink: true}
+	if err := d.SendKeyState(ks); err != nil {
+		t.Fatalf("SendKeyState: %v", err)
+	}
+
+	want := []byte{byte(MessageTypeKeyState), 6, 0, 2, ProtocolVersion, 0x00, 0xF8, 7, 1}
+	if !bytes.Equal(serial.written, want) {
+		t.Fatalf("CDC write = % x, want % x", serial.written, want)
+	}
+	if len(hid.written) != 0 {
+		t.Fatalf("HID write = % x, want none", hid.written)
+	}
+}
+
+// Six key states over CDC wait for nothing: the 150 ms of minReportGap exists
+// for the one-report HID buffer, and CDC has no such limit.
+func TestDevice_SendKeyStateOverCDCDoesNotWait(t *testing.T) {
+	serial := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(&captureWriteCloser{}, serial)
+	defer d.Close()
+
+	start := time.Now()
+	for key := byte(0); key < 6; key++ {
+		if err := d.SendKeyState(KeyState{KeyIndex: key, Version: ProtocolVersion}); err != nil {
+			t.Fatalf("SendKeyState: %v", err)
+		}
+	}
+
+	if elapsed := time.Since(start); elapsed >= minReportGap {
+		t.Fatalf("six key states took %v, want well under minReportGap (%v)", elapsed, minReportGap)
+	}
+	if len(serial.written) != 6*(frameHeaderSize+keyStateSize) {
+		t.Fatalf("%d bytes written, want six frames", len(serial.written))
+	}
+}
+
+func TestDevice_SendKeyStateOverCDCRejectsAnotherVersion(t *testing.T) {
+	serial := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(&captureWriteCloser{}, serial)
+	defer d.Close()
+
+	err := d.SendKeyState(KeyState{KeyIndex: 1, Version: ProtocolVersion + 1})
+
+	if !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("err = %v, want ErrUnsupportedVersion", err)
+	}
+	if len(serial.written) != 0 {
+		t.Fatalf("%d bytes written for a key state that was refused", len(serial.written))
+	}
+}
+
+// A key state and a glyph from two goroutines never interleave their bytes:
+// every frame on the wire starts where the one before it ends.
+func TestDevice_ConcurrentFramesDoNotInterleave(t *testing.T) {
+	serial := &fakeSerialConn{Reader: bytes.NewReader(nil)}
+	d := newDevice(&captureWriteCloser{}, serial)
+	defer d.Close()
+	pixels := make([]byte, CustomGlyphPixelsSize)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); d.SendKeyState(KeyState{KeyIndex: 1, Version: ProtocolVersion}) }()
+		go func() { defer wg.Done(); d.SendCustomGlyph(2, pixels) }()
+	}
+	wg.Wait()
+
+	r := bytes.NewReader(serial.written)
+	keyStates, glyphs := 0, 0
+	for r.Len() > 0 {
+		typ, payload, err := readFrame(r)
+		if err != nil {
+			t.Fatalf("readFrame: %v: the frames interleaved", err)
+		}
+		switch typ {
+		case MessageTypeKeyState:
+			keyStates++
+			if len(payload) != keyStateSize {
+				t.Fatalf("key state payload is %d bytes", len(payload))
+			}
+		case MessageTypeSetCustomGlyph, MessageTypeSetCustomGlyphCompressed:
+			glyphs++
+		default:
+			t.Fatalf("unexpected frame type %d", typ)
+		}
+	}
+	if keyStates != 20 || glyphs != 20 {
+		t.Fatalf("read %d key states and %d glyphs, want 20 of each", keyStates, glyphs)
 	}
 }

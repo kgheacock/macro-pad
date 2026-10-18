@@ -46,6 +46,11 @@ const (
 	// states that an open batch still waits for. See "Batch incomplete" in
 	// docs/wire-protocol.md (task 0063).
 	MessageTypeBatchIncomplete MessageType = 11
+	// MessageTypeKeyState is a host→device frame that carries one key state,
+	// the same 6 bytes as the HID report. CDC is flow controlled and keeps the
+	// order of the frames, so a key state is never overwritten by the next one,
+	// and needs no gap between two of them (task 0059).
+	MessageTypeKeyState MessageType = 12
 )
 
 const (
@@ -73,6 +78,16 @@ func encodeKeyState(w io.Writer, ks KeyState) error {
 	}
 	_, err := w.Write(buf)
 	return err
+}
+
+// encodeKeyStateFrame returns the payload of a Key state frame: the 6 bytes of
+// the key state message, without the HID report ID.
+func encodeKeyStateFrame(ks KeyState) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := encodeKeyState(&buf, ks); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func decodeKeyState(r io.Reader) (KeyState, error) {

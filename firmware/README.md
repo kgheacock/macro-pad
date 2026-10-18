@@ -759,6 +759,115 @@ host for it:
   on purpose, and `tools/blink_trace.py report --scenario=batchloss` prints how
   long after the last report the batch released (limit 1,000 ms).
 
+## The second core: the `glyphcore` module (task 0059)
+
+Stock CircuitPython 10.2.1 cannot reach the second core of the RP2350. The
+`glyphcore` module (`tools/usermod/glyphcore/`) is a user C module for a custom
+build. With it, core 1 inflates a type 6 or type 8 stream while core 0 reads the
+next frame and composes the previous one, and the frame pool lives outside the
+Python heap. Without it, the firmware runs the code of tasks 0058 and 0061
+unchanged: `wire.py`, `display_render.py`, and `frame_cache.py` each do
+`try: import glyphcore` and fall back to `zlib.decompress` on core 0 and to
+`Bitmap` slots on the heap.
+
+What the module does:
+
+- **Inflate on core 1.** `submit(stream, buffer)` copies the zlib stream and wakes
+  core 1. It inflates, from RAM, into one of 16 glyph buffers in PSRAM. `poll()`
+  returns `None` while core 1 runs, then the length. `glyph_view(buffer)` gives
+  a `memoryview` of 16-bit items, which `bitmaptools.arrayblit` reads without a
+  copy. Two buffers belong to each key, so a new glyph never overwrites the
+  pixels that the key draws from. `cancel()` and `last_us()` complete it.
+- **A pool off the heap.** `alloc(slots)` takes the slots and the glyph buffers
+  from the port heap, not the Python heap: the garbage collector does not scan
+  them. `slot_view(slot)` gives the byte view that the DMA push reads.
+  `FrameCache` composes into one `Bitmap` and copies the 32 KB into the slot.
+- **Flash writes.** A write to `CIRCUITPY` or to `nvm` calls `flash_range_erase`
+  and `flash_range_program`, and core 1 reads PSRAM through the same window
+  as flash. The module wraps both calls at link time (`--wrap`): the wrapper
+  waits for the job on core 1 to end, and refuses a new job until the call
+  returns. A refused job inflates on core 0.
+- **Order and time-out.** `CustomGlyphReader` keeps the order of the messages: a
+  frame behind a stream on core 1 waits in the buffer. A stream that core 1 has
+  not finished after `INFLATE_TIMEOUT_NS` (500 ms) is dropped, the key keeps its
+  image, and an open batch asks the host for the glyph again (task 0063).
+
+### Build
+
+The recipe needs the Arm GNU toolchain 14.x. Homebrew's `arm-none-eabi-gcc` has
+no newlib and fails with `cannot read spec file 'nosys.specs'`. Download
+`arm-gnu-toolchain-14.3.rel1-darwin-arm64-arm-none-eabi.tar.xz` from
+developer.arm.com, unpack it, and put its `bin/` first on the `PATH`. Then, from
+the repo root:
+
+```bash
+make circuitpython-glyphcore
+```
+
+`tools/build_circuitpython.sh` clones CircuitPython 10.2.1 (about 3 GB with the
+submodules of the raspberrypi port) into `../circuitpython-build`, and builds
+`pimoroni_pico_plus2` with `USER_C_MODULES=tools/usermod`. The tree of
+CircuitPython has no patch. The UF2 is copied to
+`firmware/modules/circuitpython-pimoroni_pico_plus2-10.2.1-glyphcore.uf2`. The
+build adds 6 KB of flash (885,112 of 1,044,480 bytes used) and 10 KB of RAM.
+
+### Flash
+
+1. Hold `BOOTSEL`, plug in the board, and copy the UF2 onto the `RP2350` drive.
+   The board restarts as `CIRCUITPY`. The `CIRCUITPY` drive survives the change
+   of the interpreter.
+2. `make flash` copies the firmware.
+3. `import glyphcore` in the REPL confirms the build. To go back to stock
+   CircuitPython, copy `adafruit-circuitpython-pimoroni_pico_plus2-en_US-10.2.1.uf2`
+   the same way.
+
+### Checks without a board
+
+- `cc` compiles `inflate.c` on the host, and `test/test_glyphcore_inflate.py`
+  compares it with `zlib` on 44 streams, damaged ones included.
+- `nm` and `objdump` on `firmware.elf`: `core1_main`, the inflater, and the flash
+  wrappers are at `0x2000....` (RAM), and the only call out of them is `memset`,
+  which is in RAM too.
+
+### Measured figures
+
+Measured on 2026-10-18 on a Pico Plus 2 with the custom build (the UF2 of this
+branch, `make glyphcore-spike`, three runs, and `make blink-trace
+SCENARIO=icons` and `SCENARIO=batch`). The glyph is the icon of `assets/` that
+compresses worst: a stream of 3,823 bytes.
+
+| What | Figure |
+|---|---|
+| One inflate, `zlib.decompress` on core 0 | 45.9 ms |
+| One inflate on core 1 (`glyphcore.last_us()`) | 12.7 to 12.9 ms |
+| `submit` call on core 0 (copy of the stream) | 0.8 ms |
+| One compose on core 0, alone | 43.9 to 44.1 ms |
+| The same compose while core 1 inflates | 49.7 to 50.0 ms (6 ms slower) |
+| A 32 KB copy of a frame into a slot | 5.9 ms |
+| `gc.collect()` with 128 slots in module memory | 2.62, 2.72, 2.72 ms (three runs) |
+
+The pixels from core 1 equal those of `zlib.decompress` in every trial. The
+probe line for DoD-8: `gc.collect() with 128 slots in module memory 2716 us
+(median; limit 10000)`. On the heap the same pool took 115 to 150 ms.
+
+`blinksend --scenario=icons`, three runs with the HID gap in the way (key
+state over HID): `six keys in 0.80 s`, `0.79 s`, and `0.81 s`. The 0.65 s of
+the spec was not met, and the board was not the limit: the run sends a glyph
+and then a Key state for each key, and the driver waits 150 ms (`minReportGap`)
+between two HID reports. Five gaps and the last key take 0.75 s or more
+whatever the board does, and the run was already at that floor after task 0058.
+
+With the Key state sent as a type 12 frame over CDC (the default since this
+task), three runs gave `six keys in 0.56 s` each, with `compose` at 59 to 74 ms
+for each key (from `CUSTOM_GLYPH_DECODED` to `GLYPH_BUILT`) and no
+`TRACE_DROPPED` record. `--scenario=batchloss` still released the batch after
+one resend (515 ms after the last report), and `--scenario=burst` decoded 6 of 6.
+
+`blinksend --scenario=batch`, 15 runs with the 64-slot pool in module memory and
+key state over CDC: no `BATCH_TIMED_OUT`, `six keys in 0.46 to 0.51 s`, and a
+push span of 32.6 to 35.9 ms (limit 40) in all 15. Over HID the same 15 runs gave
+`six keys in 0.77 to 0.83 s` and a push span of 31.0 to 35.0 ms.
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

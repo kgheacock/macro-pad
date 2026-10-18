@@ -171,12 +171,14 @@ class MacroPad:
         self._serial = serial
         self._tracer = tracer
         self._push_bus = push_bus
-        self._custom_glyph_reader = wire.CustomGlyphReader()
         # The pool of composed frames (task 0061): all its slots are allocated
-        # here, before the loop, and never freed.
+        # here, before the loop, and never freed. It comes first: with the
+        # glyphcore module it also makes the glyph buffers that the reader
+        # inflates into on core 1 (task 0059).
         self._frame_cache = (
             frame_cache if frame_cache is not None else frame_cache_module.FrameCache()
         )
+        self._custom_glyph_reader = wire.CustomGlyphReader()
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
         # The switch's own initial reading, not a sentinel, so the first
@@ -358,6 +360,12 @@ class MacroPad:
         except ValueError:
             return False
 
+        return self._apply_key_state(message, now_us)
+
+    def _apply_key_state(self, message, now_us):
+        """Apply one decoded key state, from an HID report or a CDC frame.
+        Returns True when a key's state changed.
+        """
         if self._tracer is not None:
             self._tracer.record(
                 tracer_module.HOST_MESSAGE_DECODED,
@@ -389,7 +397,7 @@ class MacroPad:
 
     def _apply_cdc_message(self, now_us):
         """Read one message from the CDC channel: a Set custom glyph, which
-        updates its key, or a Begin batch, which opens a batch.
+        updates its key, a Key state, or a Begin batch, which opens a batch.
 
         Returns True when a message arrived that changed the board. A message
         of the wrong length, or a glyph naming a key index this pad does not
@@ -403,6 +411,8 @@ class MacroPad:
             return False
         if glyph is None:
             return False
+        if isinstance(glyph, wire.KeyState):
+            return self._apply_key_state(glyph, now_us)
         if isinstance(glyph, wire.BeginBatch):
             self._begin_batch(glyph, now_us)
             return True

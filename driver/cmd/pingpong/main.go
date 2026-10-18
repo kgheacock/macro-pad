@@ -39,6 +39,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		VendorID:     uint16(*vendorID),
 		ProductID:    uint16(*productID),
 		SerialNumber: *serialNumber,
+
+		// The check proves the HID path: firmware/ping_pong.py reads only HID
+		// reports, so the ping must not go over CDC (task 0059).
+		KeyStateOverHID: true,
 	})
 	if err != nil {
 		fmt.Fprintln(stdout, "FAIL")

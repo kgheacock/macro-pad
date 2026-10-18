@@ -147,26 +147,33 @@ test('TestCommands', (t) => {
   assert.equal(run(['count'], { sc, cwd: inside }).stdout, '1\n');
   assert.equal(run(['count'], { sc, cwd: sc.dir }).stdout, '4\n');
 
-  // list: text, scope, --seen, -n, --json
+  // list: seen and unseen by default, --unseen, scope, -n, --json
   assert.deepEqual(bodies(run(['list', 'a'], { sc }).stdout), ['a one', 'a two']);
   assert.deepEqual(bodies(run(['list', '--all-channels'], { sc }).stdout), [
-    'a one', 'a two', 'b one', 'p two',
+    'a one', 'a two', 'b one', 'p one', 'p two',
   ]);
   assert.match(run(['list', '--all-channels'], { sc }).stdout, /\ba {2}a one/);
-  assert.deepEqual(bodies(run(['list'], { sc, cwd: inside }).stdout), ['p two']);
-  assert.deepEqual(bodies(run(['list'], { sc, cwd: sc.dir }).stdout).length, 4);
-  const withSeen = run(['list', '--seen', 'proj.sub'], { sc }).stdout.trimEnd().split('\n');
-  assert.equal(withSeen.length, 2);
-  assert.match(withSeen[0], /^ {2}\d{4}-/);
-  assert.match(withSeen[1], /^\* \d{4}-/);
+  assert.deepEqual(bodies(run(['list'], { sc, cwd: inside }).stdout), ['p one', 'p two']);
+  assert.equal(bodies(run(['list'], { sc, cwd: sc.dir }).stdout).length, 5);
+  const lines = run(['list', 'proj.sub'], { sc }).stdout.trimEnd().split('\n');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^ {2}\d{4}-.* {2}p one$/);
+  assert.match(lines[1], /^\* \d{4}-.* {2}p two$/);
+  assert.deepEqual(bodies(run(['list', '--unseen', 'proj.sub'], { sc }).stdout), ['p two']);
+  assert.deepEqual(bodies(run(['list', '--unseen', '--all-channels'], { sc }).stdout), [
+    'a one', 'a two', 'b one', 'p two',
+  ]);
   assert.deepEqual(bodies(run(['list', '-n', '1', 'a'], { sc }).stdout), ['a two']);
   const json = JSON.parse(run(['list', '--json', '--all-channels'], { sc }).stdout);
-  assert.deepEqual(json.map((m) => [m.channel, m.body]), [
-    ['a', 'a one'], ['a', 'a two'], ['b', 'b one'], ['proj.sub', 'p two'],
+  assert.deepEqual(json.map((m) => [m.channel, m.body, m.seen_at !== null]), [
+    ['a', 'a one', false], ['a', 'a two', false], ['b', 'b one', false],
+    ['proj.sub', 'p one', true], ['proj.sub', 'p two', false],
   ]);
   assert.deepEqual(Object.keys(json[0]), ['id', 'channel', 'body', 'created_at', 'seen_at', 'cwd']);
   assert.equal(json[0].created_at, Date.UTC(2026, 0, 1, 12));
   assert.equal(json[0].seen_at, null);
+  const unseenJson = JSON.parse(run(['list', '--json', '--unseen', '--all-channels'], { sc }).stdout);
+  assert.equal(unseenJson.length, 4);
 
   // channels
   const channels = run(['channels'], { sc }).stdout.trim().split('\n');

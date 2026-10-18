@@ -177,7 +177,7 @@ and exits with code 2.
 | `inbox send CHANNEL MESSAGE` | Sends one message to `CHANNEL`. |
 | `inbox send MESSAGE` | Sends one message to the inferred channel. |
 | `inbox pipe [CHANNEL]` | Reads standard input, one message per line, into `CHANNEL` or the inferred channel. |
-| `inbox list [CHANNEL \| --all-channels] [--seen] [--json] [-n N]` | Lists unseen messages, oldest first. `--seen` includes seen ones. Default: the inferred channel, else every channel. |
+| `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | Lists messages, oldest first, seen and unseen. `--unseen` lists only unseen ones. Default: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Prints the unseen count. |
 | `inbox channels [--json]` | Prints each channel with unseen messages, its count, and its newest message time. |
 | `inbox seen [CHANNEL \| --all-channels]` | Marks unseen messages seen. Prints how many. |
@@ -316,8 +316,8 @@ is ticked.
 
 - [ ] Is `~/source` the right default root, or should it be another path? —
   kgheacock
-- [ ] Should `inbox list` print seen messages too by default? The default
-  here is unseen only. — kgheacock
+- [x] Should `inbox list` print seen messages too by default? — kgheacock:
+  yes, seen messages are shown; `--unseen` limits the list to unseen ones.
 
 ## Notes
 

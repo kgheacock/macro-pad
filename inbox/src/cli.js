@@ -26,7 +26,7 @@ Usage: inbox COMMAND [ARGUMENTS] [--db PATH]
 Commands:
   send       send one message
   pipe       send each line of standard input as a message
-  list       list messages that are not seen yet
+  list       list messages, seen and unseen
   count      print how many messages are not seen yet
   channels   list channels that have unseen messages
   seen       mark messages as seen
@@ -69,14 +69,13 @@ Examples:
   my_cmd 2>&1 | inbox pipe debug
   tail -f build.log | inbox pipe`,
 
-  list: `Usage: inbox list [CHANNEL | --all-channels] [--seen] [--json] [-n N]
+  list: `Usage: inbox list [CHANNEL | --all-channels] [--unseen] [--json] [-n N]
 
-List messages, oldest first.
+List messages, oldest first. A leading "*" marks the ones not seen yet.
 
   CHANNEL         list this channel
   --all-channels  list every channel
-  --seen          include messages that are already seen (a leading "*"
-                  marks the unseen ones)
+  --unseen        list only the messages that are not seen yet
   --json          print a JSON array of {id, channel, body, created_at,
                   seen_at, cwd}
   -n N            keep only the newest N messages
@@ -138,7 +137,7 @@ const OPTIONS = {
   pipe: {},
   list: {
     'all-channels': { type: 'boolean' },
-    seen: { type: 'boolean' },
+    unseen: { type: 'boolean' },
     json: { type: 'boolean' },
     n: { type: 'string', short: 'n' },
   },
@@ -392,14 +391,14 @@ function runList(io, { values, positionals }) {
   }
   const channel = readScope(io, values, positionals);
   const messages = withStore(io, values, (store) =>
-    store.list({ channel, includeSeen: Boolean(values.seen), limit }),
+    store.list({ channel, includeSeen: !values.unseen, limit }),
   );
   if (values.json) {
     out(io, JSON.stringify(messages));
     return 0;
   }
   for (const m of messages) {
-    const mark = values.seen ? (m.seen_at === null ? '* ' : '  ') : '';
+    const mark = m.seen_at === null ? '* ' : '  ';
     const where = channel === null ? `${m.channel}  ` : '';
     out(io, `${mark}${formatTime(m.created_at)}  ${where}${m.body}`);
   }

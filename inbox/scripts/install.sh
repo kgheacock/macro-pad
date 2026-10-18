@@ -171,6 +171,7 @@ install_macos() {
   if [ "$DRY" = 1 ]; then
     printf 'would run: launchctl bootout gui/%s/%s\n' "$uid" "$LABEL"
     printf 'would run: launchctl bootstrap gui/%s %s\n' "$uid" "$SERVICE_FILE"
+    printf 'would run: launchctl kickstart -k gui/%s/%s\n' "$uid" "$LABEL"
     return
   fi
   launchctl bootout "gui/$uid/$LABEL" >/dev/null 2>&1
@@ -180,6 +181,9 @@ install_macos() {
     n=$((n + 1))
   done
   do_run launchctl bootstrap "gui/$uid" "$SERVICE_FILE"
+  # RunAtLoad alone can leave a job loaded but never started right after a
+  # bootstrap, so start it (or restart it, on an upgrade) by name.
+  do_run launchctl kickstart -k "gui/$uid/$LABEL"
   STATE=stopped
   n=0
   while [ $n -lt 20 ]; do

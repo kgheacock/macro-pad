@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"image/png"
 )
 
@@ -42,7 +43,15 @@ func DecodePNGToRGB565(pngBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: got %dx%d, want %dx%d", ErrInvalidGlyphSize, bounds.Dx(), bounds.Dy(), CustomGlyphWidth, CustomGlyphHeight)
 	}
 
-	pixels := make([]byte, CustomGlyphPixelsSize)
+	return ImageToRGB565(img), nil
+}
+
+// ImageToRGB565 converts the pixels of img to the format of a custom glyph,
+// row-major, 2 bytes each, big-endian. The caller checks the size. Transparency
+// is one bit wide, as DecodePNGToRGB565 says.
+func ImageToRGB565(img image.Image) []byte {
+	bounds := img.Bounds()
+	pixels := make([]byte, bounds.Dx()*bounds.Dy()*2)
 	i := 0
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -62,5 +71,5 @@ func DecodePNGToRGB565(pngBytes []byte) ([]byte, error) {
 			i += 2
 		}
 	}
-	return pixels, nil
+	return pixels
 }

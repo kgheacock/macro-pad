@@ -32,6 +32,9 @@ type Emulator struct {
 	frames          map[byte]StoredFrame
 	lastShow        []byte
 	shows           int
+	lastCounts      []byte
+	pipSheet        PipSheet
+	havePipSheet    bool
 
 	msgQueue chan Message
 }
@@ -104,10 +107,40 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 			if slots, err := decodeShowFrames(payload); err == nil {
 				e.mu.Lock()
 				e.lastShow = append([]byte(nil), slots...)
+				e.lastCounts = nil
 				e.shows++
 				// The emulator's board draws each named key, so what a test
 				// reads back as the last key state and glyph is what a Set
 				// custom glyph and a key state would have left.
+				for key, slot := range slots {
+					f, ok := e.frames[slot]
+					if slot == SlotUnchanged || !ok {
+						continue
+					}
+					ks := KeyState{KeyIndex: byte(key), Version: ProtocolVersion, Color: f.Color}
+					if f.Pixels != nil {
+						ks.EmojiID = CustomGlyphSentinelEmojiID
+						e.lastCustomGlyph = CustomGlyph{KeyIndex: byte(key), Pixels: f.Pixels}
+						e.haveCustomGlyph = true
+					}
+					e.lastKeyState, e.haveKeyState = ks, true
+				}
+				e.mu.Unlock()
+			}
+			continue
+		case MessageTypeStorePipSheet:
+			if sheet, err := decodeStorePipSheet(payload); err == nil {
+				e.mu.Lock()
+				e.pipSheet, e.havePipSheet = sheet, true
+				e.mu.Unlock()
+			}
+			continue
+		case MessageTypeShowFramesPips:
+			if slots, counts, err := decodeShowFramesPips(payload); err == nil {
+				e.mu.Lock()
+				e.lastShow = slots
+				e.lastCounts = counts
+				e.shows++
 				for key, slot := range slots {
 					f, ok := e.frames[slot]
 					if slot == SlotUnchanged || !ok {
@@ -192,6 +225,43 @@ func (e *Emulator) ShowFrames(slots []byte) error {
 		return err
 	}
 	return writeFrame(e.customGlyphW, MessageTypeShowFrames, payload)
+}
+
+// StorePipSheet implements Transport. It encodes a Store pip sheet message per
+// docs/wire-protocol.md and delivers it to the emulator's device side.
+func (e *Emulator) StorePipSheet(colors []uint16, pixels []byte) error {
+	payload, err := encodeStorePipSheet(colors, pixels)
+	if err != nil {
+		return err
+	}
+	return writeFrame(e.customGlyphW, MessageTypeStorePipSheet, payload)
+}
+
+// ShowFramesWithPips implements Transport. It encodes a Show frames with pips
+// message per docs/wire-protocol.md and delivers it to the emulator's device
+// side.
+func (e *Emulator) ShowFramesWithPips(slots, counts []byte) error {
+	payload, err := encodeShowFramesPips(slots, counts)
+	if err != nil {
+		return err
+	}
+	return writeFrame(e.customGlyphW, MessageTypeShowFramesPips, payload)
+}
+
+// PipSheet returns the pip sheet the emulator's device side received last, and
+// whether one has arrived.
+func (e *Emulator) PipSheet() (PipSheet, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pipSheet, e.havePipSheet
+}
+
+// LastShowCounts returns the counts of the most recent Show frames with pips
+// message, or nil if the last Show had none.
+func (e *Emulator) LastShowCounts() []byte {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]byte(nil), e.lastCounts...)
 }
 
 // StoredFrame returns the frame the emulator's device side holds in slot, and

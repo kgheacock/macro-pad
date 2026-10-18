@@ -73,7 +73,7 @@ func TestStoreFrameRefusesAGlyphThatDoesNotCompress(t *testing.T) {
 }
 
 func TestShowFramesNamesASlotOrUnchangedForEachKey(t *testing.T) {
-	slots := []byte{0, 63, SlotUnchanged, 5, SlotUnchanged, 40}
+	slots := []byte{0, 51, SlotUnchanged, 5, SlotUnchanged, 40}
 	payload, err := encodeShowFrames(slots)
 	if err != nil {
 		t.Fatal(err)
@@ -168,8 +168,88 @@ func TestDecodeBatchIncompleteRejectsAWrongLength(t *testing.T) {
 	}
 }
 
-func TestSlotCountIs64(t *testing.T) {
-	if SlotCount != 64 {
-		t.Fatalf("SlotCount = %d, want 64 (task 0063)", SlotCount)
+// TestPoolIs64Buffers: the pool stays at the 64 buffers of task 0063. Twelve are
+// the pip buffers of task 0062, two for each key, so the host numbers 52.
+func TestPoolIs64Buffers(t *testing.T) {
+	if PoolSize != 64 || PipBufferCount != 12 || SlotCount != 52 {
+		t.Fatalf("pool %d, pip buffers %d, slots %d; want 64, 12, 52", PoolSize, PipBufferCount, SlotCount)
 	}
+}
+
+func TestPipSheetCodecRoundTrips(t *testing.T) {
+	pixels := make([]byte, CustomGlyphPixelsSize)
+	for i := range pixels {
+		pixels[i] = byte(i % 7)
+	}
+	colors := []uint16{0x3AFF, 0x16C9, 0xF800}
+	payload, err := encodeStorePipSheet(colors, pixels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeStorePipSheet(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Colors) != 3 || got.Colors[1] != 0x16C9 || !bytes.Equal(got.Pixels, pixels) {
+		t.Fatalf("decoded %+v", got.Colors)
+	}
+	if _, err := encodeStorePipSheet(nil, pixels); err == nil {
+		t.Error("a sheet with no colors was accepted")
+	}
+	if _, err := encodeStorePipSheet(colors, pixels[:10]); err == nil {
+		t.Error("a sheet of the wrong size was accepted")
+	}
+	if _, err := decodeStorePipSheet(payload[:3]); err == nil {
+		t.Error("a short payload was decoded")
+	}
+}
+
+func TestShowFramesPipsCodecRoundTrips(t *testing.T) {
+	slots := []byte{0, 5, SlotUnchanged, 51, 2, 3}
+	counts := []byte{0, 7, 0, 100, 255, 1}
+	payload, err := encodeShowFramesPips(slots, counts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 12 {
+		t.Fatalf("payload is %d bytes, want 2 for each key", len(payload))
+	}
+	gs, gc, err := decodeShowFramesPips(payload)
+	if err != nil || !bytes.Equal(gs, slots) || !bytes.Equal(gc, counts) {
+		t.Fatalf("decoded %v %v, %v", gs, gc, err)
+	}
+	if _, err := encodeShowFramesPips([]byte{SlotCount}, []byte{1}); err == nil {
+		t.Error("a slot above the last was accepted")
+	}
+	if _, err := encodeShowFramesPips([]byte{1, 2}, []byte{1}); err == nil {
+		t.Error("slots and counts of different length were accepted")
+	}
+	if _, _, err := decodeShowFramesPips([]byte{1, 2, 3}); err == nil {
+		t.Error("an odd payload was decoded")
+	}
+}
+
+func TestPipsCrossAnEmulator(t *testing.T) {
+	e := NewEmulator()
+	defer e.Close()
+	pixels := make([]byte, CustomGlyphPixelsSize)
+	go func() {
+		e.StorePipSheet([]uint16{1, 2}, pixels)
+		e.StoreFrame(3, 0xF800, nil)
+		e.ShowFramesWithPips([]byte{3, SlotUnchanged}, []byte{42, 0})
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, n := e.LastShowFrames(); n == 1 {
+			if _, ok := e.PipSheet(); !ok {
+				t.Fatal("the Show arrived before the sheet")
+			}
+			if c := e.LastShowCounts(); len(c) != 2 || c[0] != 42 {
+				t.Fatalf("counts = %v", c)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("no Show with pips arrived")
 }

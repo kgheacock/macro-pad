@@ -11,10 +11,12 @@ def _be(value):
     return bytes((value >> 8, value & 0xFF))
 
 
-def test_the_pool_has_64_slots_of_32_kb():
+def test_the_pool_has_64_buffers_of_32_kb_and_the_host_numbers_52():
     cache = frame_cache.FrameCache()
 
-    assert frame_cache.SLOT_COUNT == cache.slot_count == 64
+    assert frame_cache.POOL_SIZE == 64
+    assert frame_cache.SLOT_COUNT == cache.slot_count == 52
+    assert frame_cache.PIP_BUFFERS == cache.pip_buffers == 12
     assert len(cache.view(0)) == 32768
     assert len(cache.view(63)) == 32768
 
@@ -100,7 +102,8 @@ def test_with_the_module_the_slots_are_in_its_memory_not_bitmaps():
 
     cache = frame_cache.FrameCache(slot_count=8, core=core)
 
-    assert len(core.slots) == 8
+    # The slots, and the pip buffers after them.
+    assert len(core.slots) == 8 + frame_cache.PIP_BUFFERS
     assert cache.view(3).obj is core.slots[3]
     assert cache._bitmaps is None
 
@@ -138,3 +141,58 @@ def test_without_the_module_the_pool_stays_on_the_heap():
 
     assert cache._bitmaps is not None
     assert len(cache.view(0)) == 32768
+
+
+def _sheet_pixels():
+    """A sheet with a distinct value in every sprite, as test_app.py builds."""
+    sheet = bytearray(32768)
+
+    def fill(x1, y1, x2, y2, value):
+        for y in range(y1, y2):
+            for x in range(x1, x2):
+                offset = (y * 256 + x) * 2
+                sheet[offset] = value >> 8
+                sheet[offset + 1] = value & 0xFF
+
+    for disc in range(3):
+        fill(44 * disc, 0, 44 * (disc + 1), 44, 0x1100 + disc)
+        sheet[44 * disc * 2 : 44 * disc * 2 + 2] = b"\x00\x00"
+    for index in range(11):
+        fill(14 * index, 44, 14 * (index + 1), 64, 0x2200 + index)
+    fill(154, 44, 164, 58, 0x3309)
+    fill(164, 44, 174, 58, 0x330A)
+    return bytes(sheet)
+
+
+def _stamped(core, count):
+    cache = frame_cache.FrameCache(slot_count=2, core=core)
+    cache.set_sheet([0x1111, 0xF800, 0x2222], _sheet_pixels())
+    pixels = bytearray(_be(0x07E0) * PIXEL_COUNT)
+    pixels[0:2] = b"\x00\x00"
+    cache.store(0, 0xF800, bytes(pixels))
+    buffer = cache.pip_buffer(0, 1)
+    cache.stamp(buffer, 0, count)
+    return bytes(cache.view(buffer)), bytes(cache.view(0))
+
+
+@pytest.mark.parametrize("count", [1, 42, 100])
+def test_a_stamp_with_the_module_equals_a_stamp_on_the_heap_and_leaves_the_slot(count):
+    on_heap, slot_on_heap = _stamped(None, count)
+    with_module, slot_with_module = _stamped(FakeGlyphcore(), count)
+
+    assert with_module == on_heap
+    assert slot_with_module == slot_on_heap
+    assert on_heap != slot_on_heap  # the pip is there
+    # The disc of 0xF800 is disc 1 of the sheet: its interior value is 0x1101.
+    assert on_heap[(85 * 128 + 85) * 2 : (85 * 128 + 85) * 2 + 2] == _be(0x1101)
+
+
+def test_a_stamp_changes_only_the_pip_box():
+    stamped, slot = _stamped(FakeGlyphcore(), 42)
+
+    for y in range(128):
+        for x in range(128):
+            if 80 <= x < 124 and 80 <= y < 124:
+                continue
+            i = (y * 128 + x) * 2
+            assert stamped[i : i + 2] == slot[i : i + 2]

@@ -127,6 +127,14 @@ func (r *fanoutReader) ShowFrames(slots []byte) error {
 	return r.t.ShowFrames(slots)
 }
 
+func (r *fanoutReader) StorePipSheet(colors []uint16, pixels []byte) error {
+	return r.t.StorePipSheet(colors, pixels)
+}
+
+func (r *fanoutReader) ShowFramesWithPips(slots, counts []byte) error {
+	return r.t.ShowFramesWithPips(slots, counts)
+}
+
 func (r *fanoutReader) ReadMessage() (Message, error) {
 	msg, ok := <-r.sub.ch
 	if !ok {

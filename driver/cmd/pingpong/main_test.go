@@ -40,6 +40,14 @@ func (f *fakeTransport) ShowFrames(slots []byte) error {
 	return nil
 }
 
+func (f *fakeTransport) StorePipSheet(colors []uint16, pixels []byte) error {
+	return nil
+}
+
+func (f *fakeTransport) ShowFramesWithPips(slots, counts []byte) error {
+	return nil
+}
+
 func (f *fakeTransport) ReadMessage() (transport.Message, error) {
 	return f.readMsg, f.readErr
 }

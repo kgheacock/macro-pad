@@ -142,6 +142,76 @@ def compose_into(frame, scratch, color: int, pixels: bytes) -> None:
         )
 
 
+# The count pip (task 0062). The host draws the sprites into a sheet of 256x64
+# pixels and sends it; the layout is the contract of docs/wire-protocol.md's
+# "Store pip sheet" and of driver/layers/pip.go. The sheet has a 44x44 disc for
+# each key color at (44 * i, 0), the characters "0" to "9" and "+" as cells of
+# 14x20 at (14 * index, 44), and the "9" and "+" of "99+" as cells of 10x14 after
+# them. A transparent sheet pixel keeps what lies under it.
+PIP_SHEET_WIDTH = 256
+PIP_SHEET_HEIGHT = 64
+PIP_DISC = 44
+PIP_MARGIN = 4
+PIP_BIG_W = 14
+PIP_BIG_H = 20
+PIP_SMALL_W = 10
+PIP_SMALL_H = 14
+PIP_CELL_Y = PIP_DISC
+PIP_MAX_COUNT = 99
+
+
+def pip_text(count: int) -> str:
+    """The text of the pip for a count above 0: the number, or "99+"."""
+    if count > PIP_MAX_COUNT:
+        return "99+"
+    return str(count)
+
+
+def _pip_cell(char: str, small: bool):
+    """The (x1, y1, x2, y2) of a character's cell on the sheet."""
+    index = 10 if char == "+" else ord(char) - 48
+    if not small:
+        x = PIP_BIG_W * index
+        return x, PIP_CELL_Y, x + PIP_BIG_W, PIP_CELL_Y + PIP_BIG_H
+    x = PIP_BIG_W * 11 + (PIP_SMALL_W if char == "+" else 0)
+    return x, PIP_CELL_Y, x + PIP_SMALL_W, PIP_CELL_Y + PIP_SMALL_H
+
+
+def stamp_pip(frame, sheet, disc: int, count: int) -> None:
+    """Draw the count pip in the bottom-right corner of `frame`, a 128x128
+    `Bitmap`: disc number `disc` of `sheet`, then the characters of `count`
+    centred on it. `sheet` is a 256x64 `Bitmap` that holds the sprites. A count
+    of 0 or less draws nothing. This changes `frame` in place, so the caller
+    passes a copy of a cached frame, never the frame itself.
+    """
+    if count <= 0:
+        return
+    x0 = FRAME_WIDTH - PIP_MARGIN - PIP_DISC
+    y0 = FRAME_HEIGHT - PIP_MARGIN - PIP_DISC
+    bitmaptools.blit(
+        frame,
+        sheet,
+        x0,
+        y0,
+        x1=PIP_DISC * disc,
+        y1=0,
+        x2=PIP_DISC * (disc + 1),
+        y2=PIP_DISC,
+        skip_source_index=TRANSPARENT_PIXEL,
+    )
+    text = pip_text(count)
+    small = count > PIP_MAX_COUNT
+    width = PIP_SMALL_W if small else PIP_BIG_W
+    height = PIP_SMALL_H if small else PIP_BIG_H
+    x = x0 + (PIP_DISC - len(text) * width) // 2
+    y = y0 + (PIP_DISC - height) // 2
+    for position, char in enumerate(text):
+        x1, y1, x2, y2 = _pip_cell(char, small)
+        bitmaptools.blit(
+            frame, sheet, x + position * width, y, x1=x1, y1=y1, x2=x2, y2=y2
+        )
+
+
 def _compose(color: int, pixels: bytes) -> memoryview:
     """Build one frame: fill it with `color`, then blit `pixels` over it,
     skipping the transparent value. `pixels` may be `None`.

@@ -404,6 +404,26 @@ func (d *Device) ShowFrames(slots []byte) error {
 	return d.writeFrame(MessageTypeShowFrames, payload)
 }
 
+// StorePipSheet implements Transport. It writes a framed Store pip sheet
+// message to the device over CDC.
+func (d *Device) StorePipSheet(colors []uint16, pixels []byte) error {
+	payload, err := encodeStorePipSheet(colors, pixels)
+	if err != nil {
+		return err
+	}
+	return d.writeFrame(MessageTypeStorePipSheet, payload)
+}
+
+// ShowFramesWithPips implements Transport. It writes a framed Show frames with
+// pips message to the device over CDC.
+func (d *Device) ShowFramesWithPips(slots, counts []byte) error {
+	payload, err := encodeShowFramesPips(slots, counts)
+	if err != nil {
+		return err
+	}
+	return d.writeFrame(MessageTypeShowFramesPips, payload)
+}
+
 // ReadMessage implements Transport. It decodes one frame from the CDC
 // stream using the same readMessage the emulator uses, so both paths
 // share one framing implementation. ReadMessage does not route by type;

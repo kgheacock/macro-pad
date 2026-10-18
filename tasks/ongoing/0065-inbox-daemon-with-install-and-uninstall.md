@@ -227,32 +227,38 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — With a test WebSocket server in place of `macropadd`, a
+- [x] **DoD-1** — With a test WebSocket server in place of `macropadd`, a
   row inserted by another process reaches the server as a message within 1 s.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestChangeReachesPad test/daemon.test.js`
-- [ ] **DoD-2** — A poll with no commit runs no query but `data_version`.
+- [x] **DoD-2** — A poll with no commit runs no query but `data_version`.
   **Proof:** `node --test --test-name-pattern=TestIdlePollIsCheap test/daemon.test.js`
-- [ ] **DoD-3** — Started with no server listening, the daemon connects when
+- [x] **DoD-3** — Started with no server listening, the daemon connects when
   one starts. After the server restarts, it sends its full state again.
   **Proof:** `node --test --test-name-pattern='TestConnectLate|TestResendOnReconnect' test/daemon.test.js`
-- [ ] **DoD-4** — A second daemon on the same store exits with code 3 and
+- [x] **DoD-4** — A second daemon on the same store exits with code 3 and
   the message above. **Proof:** `node --test --test-name-pattern=TestSecondDaemonRefused test/cli.test.js`
-- [ ] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
-- [ ] **DoD-6** — `install.sh --dry-run` and `uninstall.sh --dry-run` print
+- [x] **DoD-5** — SIGTERM exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
+- [x] **DoD-6** — `install.sh --dry-run` and `uninstall.sh --dry-run` print
   the plist path on macOS and the unit path on Linux, and change nothing.
   **Proof:** run both, then `git status` and `ls` the service paths
+  - The Linux paths were checked on this Mac with a stub `uname`, not on Linux.
 - [ ] **DoD-7** — On macOS, `install.sh` leaves
   `launchctl print gui/$UID/com.kgheacock.macropad.inbox` showing
   `state = running`. A second run still shows it running.
   `uninstall.sh` leaves `launchctl print` failing, and the store in place.
   **Proof:** the reviewer runs the scripts on Keith's Mac
-- [ ] **DoD-8** — `uninstall.sh --purge` also removes the store files.
+  - Not confirmed: the implementer did not load a LaunchAgent on the real
+    login session. A stubbed `launchctl` and a scratch `HOME` showed the
+    install, a second run, and the uninstall working; the plist passes
+    `plutil -lint`. Run `inbox/scripts/install.sh` on the Mac to confirm.
+- [x] **DoD-8** — `uninstall.sh --purge` also removes the store files.
   **Proof:** `ls` the store path after the run
-- [ ] **DoD-9** — `shellcheck inbox/scripts/*.sh` exits 0. **Proof:** the exit code
-- [ ] **DoD-10** — `inbox/README.md` "Daemon" records the flags, the
+- [x] **DoD-9** — `shellcheck inbox/scripts/*.sh` exits 0. **Proof:** the exit code
+  - Run with `shellcheck-py` from a scratch venv; shellcheck is not installed on this Mac.
+- [x] **DoD-10** — `inbox/README.md` "Daemon" records the flags, the
   service paths, the log path, and how to install and uninstall. **Proof:**
   `inbox/README.md`
-- [ ] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
+- [x] **DoD-11** — `inbox daemon -h`, `install.sh -h`, and `uninstall.sh -h`
   (and `--help`) print usage and exit 0. An unknown option exits 2 with a
   message that names it. **Proof:** `node --test --test-name-pattern=TestDaemonHelp test/cli.test.js`
   and running the scripts

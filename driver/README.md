@@ -139,7 +139,7 @@ layer, saves the object, and shows the same layer after a restart. See task
 
 **Frame cache.** When the board keeps a frame cache, the daemon draws a layer
 through it (task 0061). Each distinct picture over each color is a frame, and
-the controller keeps a table of 128 slots with least-recently-used eviction: it
+the controller keeps a table of 64 slots with least-recently-used eviction: it
 never overwrites a slot that a key shows. A layer change stores the frames the
 board lacks, then sends one Show frames for all the keys that change. At start,
 and after each change to the tree, a preload stores the frames of every node of

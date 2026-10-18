@@ -6,7 +6,7 @@
 wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst|busyburst|sync|batch|cached TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst|sync|batch|batchloss|cached TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -26,6 +26,11 @@ CUSTOM_GLYPH_DECODED = 5
 PUSH_STARTED = 9
 REFRESH_DONE = 8
 BATCH_TIMED_OUT = 10
+# Task 0063: an open batch asked the host for what it lacks.
+BATCH_INCOMPLETE = 12
+# The most ms between the last report of the first pass and the release, when a
+# key state was lost and sent again.
+MAX_RESEND_RELEASE_MS = 1000
 FRAMES_SHOWN = 11
 
 # The largest allowed gap, in milliseconds, between two PUSH_STARTED records
@@ -239,6 +244,9 @@ def report(records, scenario, out):
     if scenario == "batch":
         return report_batch(records, out)
 
+    if scenario == "batchloss":
+        return report_batchloss(records, out)
+
     if scenario == "cached":
         return report_cached(records, out)
 
@@ -290,6 +298,40 @@ def report_batch(records, out):
     if timed_out:
         print("the board released the batch after its time-out", file=out)
     return span <= MAX_PUSH_SPAN_LIMIT_MS and not timed_out
+
+
+def report_batchloss(records, out):
+    """Print the `batchloss` run's resend. A key state was dropped on purpose,
+    so the board must ask for it with Batch incomplete (trace code 12), the host
+    must send it again, and the board must release the batch before its 2 s
+    time-out. Return True when it did, and within MAX_RESEND_RELEASE_MS of the
+    last report that the first pass delivered.
+    """
+    window_start = batch_window_start(records)
+    if window_start is None:
+        print("no custom glyph in the trace", file=out)
+        return False
+    asks = [t for code, _, _, t in records if code == BATCH_INCOMPLETE and t >= window_start]
+    timed_out = any(code == BATCH_TIMED_OUT for code, _, _, _ in records)
+    if not asks:
+        print("the board never asked for the missing key state", file=out)
+        return False
+    first_ask = asks[0]
+    reports = [t for code, _, _, t in records if code == HOST_MESSAGE_DECODED and window_start <= t <= first_ask]
+    pushes = [t for code, _, _, t in records if code == PUSH_STARTED and t > first_ask]
+    if not reports or not pushes:
+        print("no push after the board asked, or no report before it", file=out)
+        return False
+    released = (min(pushes) - max(reports)) / 1000
+    print(
+        "batch incomplete {}, released {:.0f} ms after the last report (limit {})".format(
+            len(asks), released, MAX_RESEND_RELEASE_MS
+        ),
+        file=out,
+    )
+    if timed_out:
+        print("the board released the batch after its time-out", file=out)
+    return released <= MAX_RESEND_RELEASE_MS and not timed_out
 
 
 def show_figures(records, keys=BATCH_KEYS):
@@ -384,7 +426,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "cached"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "batchloss", "cached"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

@@ -5,6 +5,10 @@
     {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR"}},
     {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
   ],
+  "removeLayerKey": [
+    {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}},
+    {"kind": "removeLayerKey", "removeLayerKey": {"id": "github"}}
+  ],
   "layerChanged": [
     {"kind": "layerChanged", "layerChanged": {"active": null}},
     {"kind": "layerChanged", "layerChanged": {"active": "inbox"}}

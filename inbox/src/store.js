@@ -223,6 +223,16 @@ export class Store {
     });
   }
 
+  // Every channel that holds a message, seen or not, in name order.
+  channels() {
+    return this.#guard(() =>
+      this.#db
+        .prepare('SELECT DISTINCT channel FROM messages ORDER BY channel')
+        .all()
+        .map((row) => row.channel),
+    );
+  }
+
   // Changes when another connection commits to the file. Cheaper than a read
   // of the table, so a watcher polls this and reads the table on a change.
   dataVersion() {

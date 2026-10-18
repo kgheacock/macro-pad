@@ -254,40 +254,43 @@ is ticked.
 - [ ] **DoD-1** — `cd inbox && npm test` passes on Node 22.13 with no
   `npm install`, and `package.json` lists no dependencies. **Proof:** the
   command's exit code, and `package.json`
-- [ ] **DoD-2** — Under root `R`, the directory `R/a/b/c` infers `a.b.c`;
+  - Not confirmed: the suite passes (22 of 22) on Node v22.22.3 with no
+    dependencies, but Node 22.13 itself is not installed here. Run it on 22.13
+    to tick this box.
+- [x] **DoD-2** — Under root `R`, the directory `R/a/b/c` infers `a.b.c`;
   `R` itself and a directory outside `R` infer nothing; a symbolic link into
   `R` infers the target's channel; `R/my.repo` is an error naming
   `my.repo`. **Proof:** `cd inbox && node --test --test-name-pattern=TestInfer test/channel.test.js`
-- [ ] **DoD-3** — Outside the root, `inbox send hi` and `echo hi | inbox
+- [x] **DoD-3** — Outside the root, `inbox send hi` and `echo hi | inbox
   pipe` exit 2, print the root, and write no row. `inbox send debug hi` and
   `echo hi | inbox pipe debug` both store `hi` in `debug`. Under the root,
   `inbox send debug hi` still uses `debug`. **Proof:** `node --test --test-name-pattern=TestChannelArgument test/cli.test.js`
-- [ ] **DoD-4** — `printf 'a\n\n  \nb\r\nc' | inbox pipe x` stores three
+- [x] **DoD-4** — `printf 'a\n\n  \nb\r\nc' | inbox pipe x` stores three
   messages, `a`, `b`, `c`, in order. **Proof:** `node --test --test-name-pattern=TestPipedLines test/cli.test.js`
-- [ ] **DoD-5** — `inbox send a b c` exits 2, says to quote the message, and
+- [x] **DoD-5** — `inbox send a b c` exits 2, says to quote the message, and
   writes no row. **Proof:** `node --test --test-name-pattern=TestSendTooManyArgs test/cli.test.js`
-- [ ] **DoD-6** — While a pipe stays open, a line written to it is readable
+- [x] **DoD-6** — While a pipe stays open, a line written to it is readable
   by another connection within 500 ms. **Proof:** `node --test --test-name-pattern=TestPipeCommitsWhileOpen test/cli.test.js`
-- [ ] **DoD-7** — 10 000 piped lines store 10 000 rows in under 2 s on the
+- [x] **DoD-7** — 10 000 piped lines store 10 000 rows in under 2 s on the
   reviewer's machine. **Proof:** `node --test --test-name-pattern=TestPipeBurst test/cli.test.js` prints the time
-- [ ] **DoD-8** — Eight processes that each pipe 1 000 lines at once store
+- [x] **DoD-8** — Eight processes that each pipe 1 000 lines at once store
   8 000 rows, with no "database is locked" error. **Proof:** `node --test --test-name-pattern=TestConcurrentWriters test/store.test.js`
-- [ ] **DoD-9** — `markSeen(ch, id)` marks only rows of `ch` with an id at
+- [x] **DoD-9** — `markSeen(ch, id)` marks only rows of `ch` with an id at
   or below `id`; a later row stays unseen. `unseen()` returns the right count
   and newest id per channel. **Proof:** `node --test --test-name-pattern='TestMarkSeenUpTo|TestUnseen' test/store.test.js`
-- [ ] **DoD-10** — `list`, `count`, `channels`, and `seen` give the results
+- [x] **DoD-10** — `list`, `count`, `channels`, and `seen` give the results
   in the table above, with and without a channel, `--all-channels`, and
   `--json`.
   **Proof:** `node --test --test-name-pattern=TestCommands test/cli.test.js`
-- [ ] **DoD-11** — A file with a newer `user_version` is refused with an
+- [x] **DoD-11** — A file with a newer `user_version` is refused with an
   error naming both versions, and the file is not changed. **Proof:** `node --test --test-name-pattern=TestNewerSchemaRefused test/store.test.js`
-- [ ] **DoD-12** — `inbox/README.md` records the commands, the channel
+- [x] **DoD-12** — `inbox/README.md` records the commands, the channel
   rules, the schema, `$INBOX_DB`, `$INBOX_SOURCE_ROOT`, and the exit codes.
   **Proof:** `inbox/README.md`
-- [ ] **DoD-13** — `-h` and `--help` on `inbox` and on each subcommand
+- [x] **DoD-13** — `-h` and `--help` on `inbox` and on each subcommand
   print usage to standard output and exit 0, also with otherwise bad
   arguments. **Proof:** `node --test --test-name-pattern=TestHelpFlags test/cli.test.js`
-- [ ] **DoD-14** — Each situation in the "Help and error messages" table
+- [x] **DoD-14** — Each situation in the "Help and error messages" table
   gives one line on standard error that starts with `inbox:` and matches the
   table, with the stated exit code. **Proof:** `node --test --test-name-pattern=TestErrorMessages test/cli.test.js`
 - [ ] **DoD-15** — The PR in the `pr` field links to this spec. **Proof:** PR body

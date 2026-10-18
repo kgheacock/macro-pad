@@ -252,3 +252,14 @@ Implementation notes, 2026-10-18:
   accepts the PNG and the `removeLayerKey` examples that the inbox tests use.
 - The `pr` field named the spec's own PR (#77, merged). Step 7 sets it to the
   PR for this work.
+
+Board check, 2026-10-18, with a new `macropadd` and the restarted Inbox
+LaunchAgent, on an empty store:
+
+- `inbox send demo hi` gave the Inbox key a count. A press opened the child
+  layer: `macropadd` drew the `demo` key and the shift arrow.
+- A press on the `demo` key changed nothing. That is task 0067.
+- `inbox seen demo` while the layer was open redrew one key: the `demo` pip
+  went, and the key stayed.
+- Not checked: the key positions, the press on the shift arrow, and the
+  Inbox key at count 0.

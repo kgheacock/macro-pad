@@ -171,12 +171,14 @@ class MacroPad:
         self._serial = serial
         self._tracer = tracer
         self._push_bus = push_bus
-        self._custom_glyph_reader = wire.CustomGlyphReader()
         # The pool of composed frames (task 0061): all its slots are allocated
-        # here, before the loop, and never freed.
+        # here, before the loop, and never freed. It comes first: with the
+        # glyphcore module it also makes the glyph buffers that the reader
+        # inflates into on core 1 (task 0059).
         self._frame_cache = (
             frame_cache if frame_cache is not None else frame_cache_module.FrameCache()
         )
+        self._custom_glyph_reader = wire.CustomGlyphReader()
 
         self._debouncers = [Debouncer(debounce_window_ms) for _ in switches]
         # The switch's own initial reading, not a sentinel, so the first

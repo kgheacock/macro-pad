@@ -28,6 +28,13 @@ import displayio
 
 import tracer as tracer_module
 
+# The module of the second core (task 0059). It also checks a glyph for a
+# transparent pixel in C, where a glyph in its memory has no `bytes.find`.
+try:
+    import glyphcore
+except ImportError:
+    glyphcore = None
+
 FRAME_WIDTH = 128
 FRAME_HEIGHT = 128
 FRAME_COLORS = 65536  # a 16-bit bitmap
@@ -99,8 +106,13 @@ def _has_transparent_pixel(pixels: bytes) -> bool:
     Searches for two zero bytes at an even offset. `bytes.find` runs in C,
     so this avoids a 16,384-step loop in Python on the board. A hit at an
     odd offset straddles two pixels, so the search goes on from the next
-    byte.
+    byte. A glyph that core 1 inflated is a `memoryview` of the glyphcore
+    module's memory, and `glyphcore.has_transparent` checks it.
     """
+    if isinstance(pixels, memoryview):
+        if glyphcore is not None:
+            return glyphcore.has_transparent(pixels)
+        pixels = bytes(pixels)
     start = 0
     while True:
         found = pixels.find(_TRANSPARENT_BYTES, start)
@@ -122,7 +134,9 @@ def compose_into(frame, scratch, color: int, pixels: bytes) -> None:
     """
     bitmaptools.fill_region(frame, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, _swap16(color))
     if pixels is not None:
-        bitmaptools.arrayblit(scratch, array.array("H", pixels))
+        # A glyph that core 1 inflated is already a view of 16-bit items.
+        data = pixels if isinstance(pixels, memoryview) else array.array("H", pixels)
+        bitmaptools.arrayblit(scratch, data)
         bitmaptools.blit(
             frame, scratch, 0, 0, skip_source_index=TRANSPARENT_PIXEL
         )

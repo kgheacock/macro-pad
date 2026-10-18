@@ -40,6 +40,9 @@ BATCH_TIMED_OUT = 10
 # Task 0061: a Show frames message that the board applied. The key is 0xFF, and
 # the payload is the mask of the keys it drew, bit k for key k.
 FRAMES_SHOWN = 11
+# Task 0063: an open batch asked the host for what it lacks. The key is 0xFF,
+# and the payload is the pending masks, as for BATCH_TIMED_OUT.
+BATCH_INCOMPLETE = 12
 
 
 class Tracer:

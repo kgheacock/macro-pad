@@ -11,12 +11,12 @@ def _be(value):
     return bytes((value >> 8, value & 0xFF))
 
 
-def test_the_pool_has_128_slots_of_32_kb():
+def test_the_pool_has_64_slots_of_32_kb():
     cache = frame_cache.FrameCache()
 
-    assert frame_cache.SLOT_COUNT == cache.slot_count == 128
+    assert frame_cache.SLOT_COUNT == cache.slot_count == 64
     assert len(cache.view(0)) == 32768
-    assert len(cache.view(127)) == 32768
+    assert len(cache.view(63)) == 32768
 
 
 def test_every_slot_is_empty_until_it_is_stored():

@@ -1,7 +1,7 @@
 ---
 id: "0062"
 title: "Draw the count pip on the board, and put a white round behind each icon"
-status: "ongoing"
+status: "complete"
 created: "2026-10-17"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -101,8 +101,8 @@ ticked.
 - [x] **DoD-9** — On the board, a Show of six keys with counts takes at most 215 ms from `SHOW_WITH_PIPS_STARTED` to the last `REFRESH_DONE`. The owner accepted 215 ms, over the 150 ms of a cached Show, because six stamps take about 100 ms. **Proof:** the line `six keys in N ms` of `tools/blink_trace.py report --scenario=pips`, in three runs. It counts from `SHOW_WITH_PIPS_STARTED`, so it includes the stamps.
   Measured on 2026-10-18: `six keys in` is 212.2, 212.9, and 206.5 ms in three runs, inside 215 ms. The six stamps take about 100 ms (15.4 ms each) and the two push groups about 105 ms. See `firmware/README.md`, "The count pip", for the figures and two changes that did not help.
 - [x] **DoD-10** — At least 2 MB of heap stay free with the sheet loaded. **Proof:** the figure in `firmware/README.md`, from `make slot-probe`: 5,523,168 bytes free after the pool and the sheet.
-- [ ] **DoD-11** — On the board, counts 1, 12, and 100 show a red circle and a legible number on a red key and a white key, and every icon shows on its round. **Proof:** the owner's check, recorded in this spec.
-  Missing: the owner's check of the panel is not done.
+- [x] **DoD-11** — On the board, counts 1, 12, and 100 show a red circle and a legible number on a red key and a white key, and every icon shows on its round. **Proof:** the owner's check, recorded in this spec.
+  Checked by the owner on 2026-10-18 with `blinksend --scenario=pips` on the real firmware: LGTM. Some icons bleed over the round; the owner will fix that by resizing the icons, in another task.
 - [x] **DoD-12** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
 - [x] **DoD-13** — `docs/wire-protocol.md`, `firmware/README.md`, and `driver/README.md` describe the pip. The PR in the `pr` field links to this spec. **Proof:** those three files and the PR body.
 
@@ -116,11 +116,12 @@ ticked.
 
 ## Open questions
 
-- [ ] Are 44 pixels, `#E02020`, and a 2 pixel ring the right size and color on the panel? — the owner, from DoD-11.
-- [ ] Is 60 pixels the right radius for the round? It decides how much of the pip lies over white, and so whether the second set of discs is needed. — the owner, from DoD-11.
+- [x] Are 44 pixels, `#E02020`, and a 2 pixel ring the right size and color on the panel? — Yes, the owner's check of 2026-10-18.
+- [x] Is 60 pixels the right radius for the round? It decides how much of the pip lies over white, and so whether the second set of discs is needed. — Yes for the round and the pip. Some icons are larger than the round and bleed over it, and the owner will resize the icons. No second set of discs is needed.
 
 ## Notes
 
 - The panel treats a pixel at half opacity or more as opaque, and any other as transparent (`transport.DecodePNGToRGB565`). A composed frame is opaque, so the board may stamp an antialiased edge on it.
 - Measured by tasks 0059 and 0061: a Store frame takes 94 to 109 ms, a 32 KB copy 5.9 ms, and a compose 44 ms on core 0.
 - `golang.org/x/image` v0.24.0 requires Go 1.18. Check the `GoVersion` of any other version before `go get`.
+- `make blink-trace` mounts `CIRCUITPY` again when it ends, and macOS mounting it reloads the board, so the panels go back to their power-on state a few seconds after the run. To see the pictures stay, run `blinksend --scenario=pips` on the real firmware, with nothing writing to the drive.

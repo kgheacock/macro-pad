@@ -48,6 +48,7 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 	vendorID := fs.Uint("vendor-id", 0, "USB vendor ID of the macro pad, e.g. 0x2E8A")
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x0009")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
+	keyStateOverHID := fs.Bool("key-state-over-hid", false, "send key states as HID reports, 150 ms apart, for firmware older than task 0059; the default is a Key state frame over CDC")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly (e.g. /dev/cu.usbmodem2103), bypassing discovery; needed when the board exposes more than one CDC port, such as a debug console alongside the data channel")
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key and the layer tree (layers.json) are saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
@@ -76,6 +77,8 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 			ProductID:    uint16(*productID),
 			SerialNumber: *serialNumber,
 			CDCPort:      *cdcPort,
+
+			KeyStateOverHID: *keyStateOverHID,
 		}, *stateDir, func(format string, args ...any) {
 			fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
 		})

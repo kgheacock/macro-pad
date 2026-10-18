@@ -59,6 +59,13 @@ across the reboot that flashing new firmware causes. If more than one
 matching device is attached, set `Options.SerialNumber` to pick one;
 otherwise `Open` returns `ErrAmbiguousDevice`.
 
+**Key state goes over CDC.** Since task 0059, `Device.SendKeyState` writes a
+type 12 Key state frame over CDC, in order with the glyphs, with no wait: the
+board cannot lose it to the next one, and six keys no longer take 150 ms each.
+`Options.KeyStateOverHID` (`--key-state-over-hid` of `macropadd` and
+`blinksend`) sends HID reports 150 ms apart instead, for firmware older than
+task 0059. `pingpong` always uses HID, because it checks that path.
+
 **cgo requirement.** `Device` binds `github.com/sstallion/go-hid`, a cgo
 wrapper around hidapi, to reach the HID output report. Building or testing
 any package that imports `transport` therefore requires `CGO_ENABLED=1`

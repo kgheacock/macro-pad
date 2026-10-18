@@ -12,7 +12,7 @@ little-endian, matching the RP2350's native byte order.
 
 | Message | Sender | Channel | Size |
 |---|---|---|---|
-| Key state | Host → Device | HID | 6 bytes |
+| Key state | Host → Device | HID, or CDC serial (type `12`) | 6 bytes |
 | Set custom glyph | Host → Device | CDC serial | 1 + 32,768 bytes |
 | Set custom glyph (compressed) | Host → Device | CDC serial | 1 + up to 32,767 bytes |
 | Begin batch | Host → Device | CDC serial | 2 bytes |
@@ -25,7 +25,7 @@ little-endian, matching the RP2350's native byte order.
 | Pong | Device → Host | CDC serial | 1 byte |
 | Trace record | Device → Host | CDC serial | 12 bytes |
 
-Sizes for every message but Key state are the payload only. Every message
+Sizes are the payload only; a Key state on HID has no frame header and a report ID before the 6 bytes. Every message
 on the CDC data channel, in either direction, is wrapped in the 3-byte
 frame header described in [Framing](#framing).
 
@@ -64,14 +64,29 @@ bytes arrive is a truncated message, not a partial value.
 | 9 | Show frames | Host → Device |
 | 10 | Show miss | Device → Host |
 | 11 | Batch incomplete | Device → Host |
+| 12 | Key state | Host → Device |
 
-The host→device key-state message is not framed this way. It rides on
-HID, where a report ID and a fixed transfer size already identify it.
+A Key state message also rides on HID, where a report ID and a fixed transfer
+size already identify it. The HID report has no frame header. The same 6 bytes
+can go as a type `12` frame over CDC; see the next section.
 
-### Key state (HID, host → device)
+### Key state (HID or CDC, host → device)
 
 Sent whenever the driver wants a key's emoji, color, or blink state to
 change. One message covers one key.
+
+The driver sends it as a frame over CDC, type `12` with a `Length` of 6, since
+task 0059: CDC is flow controlled and keeps the order of the frames, so the
+board never loses a Key state to the next one, the driver needs no gap between
+two of them, and a Key state arrives in order with the glyph that precedes it.
+The board reads the HID report too, and treats both the same. The HID report
+stays for firmware and tools that read only HID: the board holds one report, a
+second one that arrives before the loop reads the first overwrites it, and the
+driver spaces HID reports 150 ms apart (task 0044). Firmware older than task
+0059 skips a type `12` frame by its `Length`, so a driver that sends it needs
+the firmware of task 0059; `--key-state-over-hid` of `macropadd` and
+`blinksend` keeps the old path. A type `12` frame whose `Length` is not 6 is
+dropped, and so is one whose version byte the board cannot read.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
@@ -197,9 +212,10 @@ the pushes start together: one push group holds at most three panels, so six
 keys go out as two groups, about 30 ms apart. A key that blinks draws the frame
 of the blink slot that is current at the release.
 
-The two channels have no common order. A Key state message can reach the
-board before or after the glyphs that follow the Begin batch, and the masks
-make that order unimportant.
+When a Key state goes over HID, the two channels have no common order: it can
+reach the board before or after the glyphs that follow the Begin batch, and the
+masks make that order unimportant. Over CDC (type `12`) the frames arrive in the
+order they were sent.
 
 While a batch is open and no new glyph or Key state has arrived for 500 ms,
 the board asks the host for what it lacks with a [Batch incomplete](#batch-incomplete-cdc-device--host)

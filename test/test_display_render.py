@@ -413,3 +413,27 @@ def test_a_steady_key_is_never_due_to_blink():
 
     assert display_render.blink_is_due(key, False) is False
     assert display_render.blink_is_due(key, True) is False
+
+
+# --- A glyph that core 1 inflated (task 0059) ---------------------------------
+
+from fake_glyphcore import FakeGlyphcore  # noqa: E402
+
+
+def test_transparency_of_a_glyph_view_is_checked_by_the_module(monkeypatch):
+    core = FakeGlyphcore()
+    monkeypatch.setattr(display_render, "glyphcore", core)
+    opaque = bytes([0x12, 0x34]) * (128 * 128)
+    holed = bytes([0x00, 0x00]) + opaque[2:]
+    core.glyphs[0][:] = opaque
+    core.glyphs[1][:] = holed
+
+    assert display_render._has_transparent_pixel(core.glyph_view(0)) is False
+    assert display_render._has_transparent_pixel(core.glyph_view(1)) is True
+
+
+def test_transparency_of_a_view_without_the_module_falls_back_to_bytes(monkeypatch):
+    monkeypatch.setattr(display_render, "glyphcore", None)
+    holed = bytes([0x00, 0x00]) + bytes([0x12, 0x34]) * (128 * 128 - 1)
+
+    assert display_render._has_transparent_pixel(memoryview(bytearray(holed))) is True

@@ -43,8 +43,9 @@ const (
 	syncSpacing = 2 * time.Second
 
 	// burstUpdates is the DoD-6 scenario: 6 updates sent back to back.
-	// transport.Device spaces them by minReportGap, so the run measures
-	// that gap.
+	// With --key-state-over-hid, transport.Device spaces them by
+	// minReportGap, so the run measures that gap. Over CDC, the default since
+	// task 0059, they go out at once and none is lost.
 	burstUpdates = 6
 
 	// cachedShows and cachedSpacing are task 0061's DoD-2 scenario: six Show
@@ -65,6 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
 	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, or warmup (send nothing)")
+	keyStateOverHID := fs.Bool("key-state-over-hid", false, "send key states as HID reports, 150 ms apart, as before task 0059; for the burst and busyburst scenarios, which test lost HID reports")
 	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
 	openTimeout := fs.Duration("open-timeout", 30*time.Second, "how long to wait for the device, which reloads after a code.py copy")
@@ -124,6 +126,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ProductID:    uint16(*productID),
 		SerialNumber: *serialNumber,
 		CDCPort:      *cdcPort,
+
+		KeyStateOverHID: *keyStateOverHID,
 	}
 	var dev transport.Transport
 	if *scenario == "batchloss" {
@@ -216,8 +220,8 @@ func sendSingle(dev transport.Transport) error {
 	return nil
 }
 
-// sendBurst updates six keys with no pause of its own. SendKeyState holds
-// each report back until minReportGap has passed since the one before.
+// sendBurst updates six keys with no pause of its own. Over HID, SendKeyState
+// holds each report back until minReportGap has passed since the one before.
 func sendBurst(dev transport.Transport) error {
 	for i := 0; i < burstUpdates; i++ {
 		if err := dev.SendKeyState(keyState(byte(i), uint16(0x0800*(i+1)), false)); err != nil {

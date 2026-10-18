@@ -27,10 +27,14 @@ def arrayblit(bitmap, data, x1=0, y1=0, x2=None, y2=None, skip_index=None):
     """Copy a whole array of 16-bit values into `bitmap`.
 
     The real call reads `data` item by item, in the item size of its
-    typecode, so this accepts only an `array.array("H")`.
+    typecode, so this accepts only an `array.array("H")`, or a `memoryview`
+    of 16-bit items, like the glyph views of the glyphcore module.
     """
     calls.append(("arrayblit", len(data)))
-    if not isinstance(data, array.array) or data.typecode != "H":
+    if isinstance(data, memoryview):
+        if data.format != "H":
+            raise TypeError("arrayblit needs a view of uint16")
+    elif not isinstance(data, array.array) or data.typecode != "H":
         raise TypeError("arrayblit needs an array of uint16")
     if len(data) != bitmap.width * bitmap.height:
         raise ValueError("array length does not match the bitmap")

@@ -1908,3 +1908,201 @@ def test_a_show_releases_an_open_batch_first():
 
     assert pad._batch is None
     assert _last_frame(panels.per_key[1]) == _solid_frame(0x4444)
+
+
+# --- The second core (task 0059) ---------------------------------------------
+
+from fake_glyphcore import FakeGlyphcore  # noqa: E402
+import frame_cache as frame_cache_module  # noqa: E402
+
+
+def _use_core_1(monkeypatch, core1):
+    monkeypatch.setattr(wire, "glyphcore", core1)
+    monkeypatch.setattr(display_render, "glyphcore", core1)
+    monkeypatch.setattr(frame_cache_module, "glyphcore", core1)
+
+
+def test_a_glyph_inflated_on_core_1_draws_the_same_frame_as_one_inflated_on_core_0(
+    monkeypatch,
+):
+    pixels = _rgb565_pixels_with_transparent_corner(0x07E0)
+    stream = zlib.compress(pixels, 9)
+
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+    serial.feed(_compressed_glyph_frame(2, stream))
+    pad.step(1000)
+    expected = _last_frame(panels.per_key[2])
+
+    _use_core_1(monkeypatch, FakeGlyphcore(polls_before_done=2))
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+    serial.feed(_compressed_glyph_frame(2, stream))
+    for step in range(1, 8):
+        pad.step(step * 1000)
+
+    assert _last_frame(panels.per_key[2]) == expected
+    assert _frame_pixel(expected, 0) == 0x0000  # the key's color shows through
+    assert _frame_pixel(expected, 1) == 0x07E0
+    assert pad.key_states[2].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+
+
+def test_the_loop_keeps_scanning_while_core_1_inflates(monkeypatch):
+    core1 = FakeGlyphcore(polls_before_done=50)
+    _use_core_1(monkeypatch, core1)
+    pad, switches, _, _, hid_device, serial = _build_pad()
+    pad.step(0)
+
+    serial.feed(_compressed_glyph_frame(2, zlib.compress(_rgb565_solid_pixels(0x1234), 9)))
+    pad.step(1000)  # submitted; core 1 has not finished
+    hid_device.feed(_key_state_report(key_index=4, color=0xF81F, emoji_id=7))
+    pad.step(2000)
+
+    assert pad.key_states[2].pixels is None
+    assert pad.key_states[4].color == 0xF81F
+
+
+def test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_key_keeps_its_image(
+    monkeypatch,
+):
+    core1 = FakeGlyphcore(polls_before_done=0)
+    _use_core_1(monkeypatch, core1)
+    monkeypatch.setattr(wire, "INFLATE_TIMEOUT_NS", 0)
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    pad.step(0)
+    first = _rgb565_solid_pixels(0x1234)
+    serial.feed(_compressed_glyph_frame(3, zlib.compress(first, 9)))
+    for step in range(1, 4):
+        pad.step(step * 1000)
+    assert bytes(pad.key_states[3].pixels) == first
+    frames_before = len(panels.per_key[3].frames)
+
+    core1.never_answers = True
+    serial.feed(_compressed_glyph_frame(3, zlib.compress(_rgb565_solid_pixels(0x5678), 9)))
+    for step in range(4, 10):
+        pad.step(step * 1000)
+
+    assert bytes(pad.key_states[3].pixels) == first
+    assert len(panels.per_key[3].frames) == frames_before
+    # The loop goes on: the next key state still draws.
+    hid_device.feed(_key_state_report(key_index=0, color=0xF81F, emoji_id=7))
+    pad.step(11_000)
+    assert _last_frame(panels.per_key[0]) == _solid_frame(0xF81F)
+
+
+def test_a_store_frame_inflated_on_core_1_fills_the_slot_in_module_memory(monkeypatch):
+    core1 = FakeGlyphcore(polls_before_done=1)
+    _use_core_1(monkeypatch, core1)
+    pad, _, _, _, _, serial = _build_pad()
+    pad.step(0)
+    pixels = _rgb565_solid_pixels(0x07E0)
+    writer = FakeSerial()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_STORE_FRAME,
+        bytes((5, 0x1F, 0x00)) + zlib.compress(pixels, 9),
+    )
+    serial.feed(bytes(writer.written))
+
+    for step in range(1, 6):
+        pad.step(step * 1000)
+
+    assert bytes(core1.slots[5]) == pixels
+
+
+# --- Key state over CDC (task 0059) --------------------------------------------
+
+
+def _key_state_frame(key_index, color, emoji_id, blink=False):
+    writer = FakeSerial()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_KEY_STATE,
+        _key_state_report(key_index, color, emoji_id, blink),
+    )
+    return bytes(writer.written)
+
+
+def test_a_key_state_frame_on_cdc_updates_one_key_like_a_hid_report():
+    pad, _, panels, _, hid_device, serial = _build_pad()
+    pad.step(0)
+
+    serial.feed(_key_state_frame(key_index=3, color=0xF81F, emoji_id=0xA2))
+    pad.step(1000)
+
+    assert pad.key_states[3].color == 0xF81F
+    assert pad.key_states[3].emoji_id == 0xA2
+    assert _last_frame(panels.per_key[3]) == _solid_frame(0xF81F)
+    assert hid_device.queued == []
+
+
+def test_a_key_state_frame_of_another_version_is_dropped():
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+    bad = FakeSerial()
+    wire.write_frame(
+        bad,
+        wire.MESSAGE_TYPE_KEY_STATE,
+        _key_state_report(3, 0xF81F, 0xA2, version=wire.PROTOCOL_VERSION + 1),
+    )
+
+    serial.feed(bytes(bad.written))
+    pad.step(1000)
+
+    assert pad.key_states[3].color == DEFAULT_COLOR
+    assert len(panels.per_key[3].frames) == 1
+
+
+def test_a_key_state_frame_for_an_unknown_key_is_ignored():
+    pad, _, _, _, _, serial = _build_pad()
+    pad.step(0)
+
+    serial.feed(_key_state_frame(key_index=99, color=0xF81F, emoji_id=0xA2))
+    pad.step(1000)
+
+    assert all(state.color == DEFAULT_COLOR for state in pad.key_states)
+
+
+def test_a_key_state_frame_is_traced_like_a_report():
+    tracer = tracer_module.Tracer(capacity=32, enabled=True)
+    pad, _, _, _, _, serial = _build_pad(tracer=tracer)
+    pad.step(0)
+
+    serial.feed(_key_state_frame(key_index=2, color=0x001F, emoji_id=7))
+    pad.step(1000)
+
+    records = [
+        _decode_trace_record(payload)
+        for message_type, payload in _parse_frames(bytes(serial.written))
+        if message_type == wire.MESSAGE_TYPE_TRACE
+    ]
+    assert any(
+        code == tracer_module.HOST_MESSAGE_DECODED and key == 2 and trace_payload == 7
+        for code, key, trace_payload, _ in records
+    )
+
+
+def test_a_batch_completes_from_key_states_on_cdc_in_order_with_its_glyphs(monkeypatch):
+    core1 = FakeGlyphcore(polls_before_done=2)
+    _use_core_1(monkeypatch, core1)
+    pad, _, panels, _, _, serial = _build_pad()
+    pad.step(0)
+    pixels = _rgb565_solid_pixels(0x1234)
+    begin = FakeSerial()
+    wire.write_frame(begin, wire.MESSAGE_TYPE_BEGIN_BATCH, bytes((0b100, 0b100)))
+    serial.feed(
+        bytes(begin.written)
+        + _compressed_glyph_frame(2, zlib.compress(pixels, 9))
+        + _key_state_frame(2, 0x0000, wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID)
+    )
+
+    drawn_before_release = None
+    for step in range(1, 12):
+        pad.step(step * 1000)
+        if pad._batch is not None:
+            drawn_before_release = len(panels.per_key[2].frames)
+
+    assert pad._batch is None
+    assert drawn_before_release == 1  # held until both arrived
+    assert len(panels.per_key[2].frames) == 2
+    assert _frame_pixel(_last_frame(panels.per_key[2]), 0) == 0x1234

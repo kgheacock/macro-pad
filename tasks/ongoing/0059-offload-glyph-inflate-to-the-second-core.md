@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/75"
 branch: "0059-offload-glyph-inflate-to-the-second-core"
 related: ["0058", "0060", "0061", "0044", "0045", "0048", "0057"]
 tags: ["firmware", "driver", "performance", "multicore", "circuitpython", "memory", "reliability"]
@@ -135,7 +135,7 @@ ticked.
 - [ ] **DoD-10** — On the board, 15 runs of `blinksend --scenario=batch` with the 128-slot or 64-slot pool of task 0061 end with no `BATCH_TIMED_OUT` record, and each completes within 1.0 s of its last send. **Proof:** the 15 JSONL trace files.
   - Not confirmed: needs the board. It also needs the module pool in use, and the host `SlotCount` is still 64.
 - [x] **DoD-11** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. `.venv/bin/pytest test/ -q`: 368 passed. `cd driver && go test ./...`: all packages ok.
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body.
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
 

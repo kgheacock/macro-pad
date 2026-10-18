@@ -240,7 +240,7 @@ sent, and a key that the frame does not name is left alone. The 2 s time-out
 stays as the last resort. A resend for a plain Key state outside a batch does
 not exist: the board cannot tell that it lost one. Firmware that does not
 send the frame leaves the host as it was. See [task
-0063](../tasks/ongoing/0063-resend-lost-batch-state-and-cap-the-pool-at-64.md)
+0063](../tasks/complete/0063-resend-lost-batch-state-and-cap-the-pool-at-64.md)
 for the design decision.
 
 ### Store frame (CDC, host → device)

@@ -408,7 +408,7 @@ registry](#trace-code-registry)). A key that blinks is not cached, and gets its
 pip drawn into the glyph by the host. A payload that is not a whole number of
 keys is dropped, and the frame is consumed by its `Length`. Firmware that does
 not know type `14` skips the frame, and no key changes. See [task
-0062](../tasks/ongoing/0062-red-circle-count-pip-with-a-real-font.md) for the
+0062](../tasks/complete/0062-red-circle-count-pip-with-a-real-font.md) for the
 design decision.
 
 ### Show miss (CDC, device → host)

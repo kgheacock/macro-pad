@@ -22,7 +22,7 @@ stamps the pip on the copy, so a slot never holds a pip and one icon on one
 color is one slot, whatever its count.
 
 See tasks/complete/0061-cache-composed-glyph-frames-on-the-board.md and
-tasks/ongoing/0062-red-circle-count-pip-with-a-real-font.md.
+tasks/complete/0062-red-circle-count-pip-with-a-real-font.md.
 """
 
 import array

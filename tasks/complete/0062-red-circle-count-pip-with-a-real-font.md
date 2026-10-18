@@ -125,3 +125,4 @@ ticked.
 - Measured by tasks 0059 and 0061: a Store frame takes 94 to 109 ms, a 32 KB copy 5.9 ms, and a compose 44 ms on core 0.
 - `golang.org/x/image` v0.24.0 requires Go 1.18. Check the `GoVersion` of any other version before `go get`.
 - `make blink-trace` mounts `CIRCUITPY` again when it ends, and macOS mounting it reloads the board, so the panels go back to their power-on state a few seconds after the run. To see the pictures stay, run `blinksend --scenario=pips` on the real firmware, with nothing writing to the drive.
+- On 2026-10-18 the owner asked for a one-time resize of the icons that bled over the round. `ai`, `alert`, `deploy`, `docs`, `gmail`, and `lint` were scaled down about the centre of their opaque pixels, with no icon reaching past a radius of 57 pixels (the round is 60), and the others (50 to 59) were left as they were.

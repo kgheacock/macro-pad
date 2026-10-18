@@ -49,7 +49,8 @@ test('TestChangeReachesPad', async (t) => {
   await waitFor(() => inboxCounts(server).includes(1), 1000, 'the new count');
   assert.ok(Date.now() - started < 1000);
   const last = server.received.at(-1).setLayerKey;
-  assert.equal(last.status, 'WARN');
+  assert.equal(last.status, '');
+  assert.equal(last.iconRef, 'gmail.png');
 });
 
 test('TestIdlePollIsCheap', async (t) => {

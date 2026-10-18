@@ -217,6 +217,12 @@ func (e *Emulator) InjectShowMiss(mask byte) error {
 	return writeFrame(e.msgW, MessageTypeShowMiss, encodeShowMiss(mask))
 }
 
+// InjectBatchIncomplete simulates the device asking for the glyphs and key
+// states that an open batch lacks, for driver tests with no board attached.
+func (e *Emulator) InjectBatchIncomplete(glyphMask, stateMask byte) error {
+	return writeFrame(e.msgW, MessageTypeBatchIncomplete, encodeBatchIncomplete(BatchIncomplete{GlyphMask: glyphMask, StateMask: stateMask}))
+}
+
 // LastBeginBatch returns the glyph mask and key state mask of the most
 // recent Begin batch message the emulator's device side received, and
 // whether one has arrived yet.

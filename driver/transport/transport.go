@@ -110,7 +110,8 @@ type TraceRecord struct {
 }
 
 // Message is one decoded device→host message read from ReadMessage. Type
-// says which of Event, AudioChunk, Pong, Trace, or ShowMiss is populated.
+// says which of Event, AudioChunk, Pong, Trace, ShowMiss, or BatchIncomplete is
+// populated.
 type Message struct {
 	Type       MessageType
 	Event      Event
@@ -118,6 +119,8 @@ type Message struct {
 	Pong       Pong
 	Trace      TraceRecord
 	ShowMiss   ShowMiss
+
+	BatchIncomplete BatchIncomplete
 }
 
 // Transport is the driver's connection to a device, real or emulated. It

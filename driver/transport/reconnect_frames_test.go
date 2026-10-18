@@ -37,10 +37,10 @@ func TestReconnecting_StoresEveryFrameAgainAfterAReconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := r.StoreFrame(77, 0xF800, nil); err != nil {
+	if err := r.StoreFrame(50, 0xF800, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ShowFrames([]byte{0, 10, 20, 30, 77, SlotUnchanged}); err != nil {
+	if err := r.ShowFrames([]byte{0, 10, 20, 30, 50, SlotUnchanged}); err != nil {
 		t.Fatal(err)
 	}
 	if got := countCalls(first.sent(), "store"); got != 5 {
@@ -62,7 +62,7 @@ func TestReconnecting_StoresEveryFrameAgainAfterAReconnect(t *testing.T) {
 		"store 10 color 0x0001 32768 bytes",
 		"store 20 color 0x0002 32768 bytes",
 		"store 30 color 0x0003 32768 bytes",
-		"store 77 color 0xf800 0 bytes",
+		"store 50 color 0xf800 0 bytes",
 	}
 	if !reflect.DeepEqual(stores, want) {
 		t.Fatalf("second board stores = %q, want %q", stores, want)
@@ -70,11 +70,11 @@ func TestReconnecting_StoresEveryFrameAgainAfterAReconnect(t *testing.T) {
 
 	// The next switch draws: one Show, and no store before it.
 	before := len(second.sent())
-	if err := r.ShowFrames([]byte{30, 20, 10, 0, SlotUnchanged, 77}); err != nil {
+	if err := r.ShowFrames([]byte{30, 20, 10, 0, SlotUnchanged, 50}); err != nil {
 		t.Fatal(err)
 	}
 	after := second.sent()[before:]
-	if want := []string{"show [30 20 10 0 255 77]"}; !reflect.DeepEqual(after, want) {
+	if want := []string{"show [30 20 10 0 255 50]"}; !reflect.DeepEqual(after, want) {
 		t.Fatalf("calls after the reconnect's Show = %q, want %q", after, want)
 	}
 }

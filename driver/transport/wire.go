@@ -51,6 +51,14 @@ const (
 	// order of the frames, so a key state is never overwritten by the next one,
 	// and needs no gap between two of them (task 0059).
 	MessageTypeKeyState MessageType = 12
+	// MessageTypeStorePipSheet is a host→device frame that carries the sprites
+	// of the count pip. See "Store pip sheet" in docs/wire-protocol.md (task
+	// 0062).
+	MessageTypeStorePipSheet MessageType = 13
+	// MessageTypeShowFramesPips is a host→device frame that names a slot and a
+	// count for each key. See "Show frames with pips" in
+	// docs/wire-protocol.md (task 0062).
+	MessageTypeShowFramesPips MessageType = 14
 )
 
 const (

@@ -9,9 +9,18 @@ import (
 	"io"
 )
 
+// PoolSize is the number of 32 KB buffers the board allocates for frames:
+// 64, the cap of task 0063. PipBufferCount of them are pip buffers, two for
+// each key, and the rest are the slots the host numbers.
+const (
+	PoolSize       = 64
+	PipBufferCount = 12
+)
+
 // SlotCount is the number of slots in the board's frame cache. A slot number
-// is 0 to SlotCount-1. See "Store frame" in docs/wire-protocol.md (task 0061).
-const SlotCount = 64
+// is 0 to SlotCount-1. See "Store frame" in docs/wire-protocol.md (tasks 0061
+// and 0062).
+const SlotCount = PoolSize - PipBufferCount
 
 // SlotUnchanged is the Show frames value that leaves a key as it is.
 const SlotUnchanged = 0xFF
@@ -160,4 +169,109 @@ func decodeShowMiss(payload []byte) (byte, error) {
 		return 0, fmt.Errorf("transport: show miss payload is %d bytes, want %d", len(payload), showMissSize)
 	}
 	return payload[0], nil
+}
+
+// MaxPipSprites is the most key colors a Store pip sheet names: one disc for
+// each.
+const MaxPipSprites = 8
+
+// PipSheet is one decoded Store pip sheet message: the key color of each disc
+// of the sheet, and the sheet's pixels, a 256 by 64 image in the pixel format
+// of a custom glyph. See "Store pip sheet" in docs/wire-protocol.md (task
+// 0062).
+type PipSheet struct {
+	Colors []uint16
+	Pixels []byte
+}
+
+// encodeStorePipSheet builds a Store pip sheet payload: the number of discs,
+// their key colors (little-endian), then a zlib stream of the pixels. The
+// pixels are CustomGlyphPixelsSize bytes, the same size as a glyph, so the
+// stream fits one frame whenever a glyph's does.
+func encodeStorePipSheet(colors []uint16, pixels []byte) ([]byte, error) {
+	if len(colors) == 0 || len(colors) > MaxPipSprites {
+		return nil, fmt.Errorf("transport: pip sheet names %d colors, want 1 to %d", len(colors), MaxPipSprites)
+	}
+	if len(pixels) != CustomGlyphPixelsSize {
+		return nil, fmt.Errorf("%w: pip sheet is %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	}
+	buf := make([]byte, 1+2*len(colors), 1+2*len(colors)+4096)
+	buf[0] = byte(len(colors))
+	for i, c := range colors {
+		binary.LittleEndian.PutUint16(buf[1+2*i:], c)
+	}
+	out := bytes.NewBuffer(buf)
+	zw, err := zlib.NewWriterLevel(out, zlib.BestCompression)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := zw.Write(pixels); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	if out.Len() > customGlyphPayload-1 {
+		return nil, fmt.Errorf("%w: pip sheet is %d bytes", ErrFrameTooLarge, out.Len())
+	}
+	return out.Bytes(), nil
+}
+
+func decodeStorePipSheet(payload []byte) (PipSheet, error) {
+	if len(payload) < 1 {
+		return PipSheet{}, errors.New("transport: pip sheet payload is empty")
+	}
+	n := int(payload[0])
+	if n == 0 || n > MaxPipSprites || len(payload) <= 1+2*n {
+		return PipSheet{}, fmt.Errorf("transport: pip sheet payload is %d bytes for %d colors", len(payload), n)
+	}
+	sheet := PipSheet{Colors: make([]uint16, n)}
+	for i := range sheet.Colors {
+		sheet.Colors[i] = binary.LittleEndian.Uint16(payload[1+2*i:])
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(payload[1+2*n:]))
+	if err != nil {
+		return PipSheet{}, fmt.Errorf("transport: pip sheet: %w", err)
+	}
+	defer zr.Close()
+	pixels, err := io.ReadAll(io.LimitReader(zr, CustomGlyphPixelsSize+1))
+	if err != nil {
+		return PipSheet{}, fmt.Errorf("transport: pip sheet: %w", err)
+	}
+	if len(pixels) != CustomGlyphPixelsSize {
+		return PipSheet{}, fmt.Errorf("%w: pip sheet inflated to %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	}
+	sheet.Pixels = pixels
+	return sheet, nil
+}
+
+// encodeShowFramesPips builds a Show frames with pips payload: two bytes for
+// each key, key 0 first, the slot (or SlotUnchanged) and the count. slots and
+// counts have one entry for each key.
+func encodeShowFramesPips(slots, counts []byte) ([]byte, error) {
+	if len(slots) == 0 {
+		return nil, fmt.Errorf("%w: no key", ErrInvalidSlot)
+	}
+	if len(counts) != len(slots) {
+		return nil, fmt.Errorf("transport: %d slots but %d counts", len(slots), len(counts))
+	}
+	if _, err := encodeShowFrames(slots); err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, 2*len(slots))
+	for i, slot := range slots {
+		out = append(out, slot, counts[i])
+	}
+	return out, nil
+}
+
+func decodeShowFramesPips(payload []byte) (slots, counts []byte, err error) {
+	if len(payload) == 0 || len(payload)%2 != 0 {
+		return nil, nil, fmt.Errorf("transport: show frames with pips payload is %d bytes, want 2 for each key", len(payload))
+	}
+	for i := 0; i < len(payload); i += 2 {
+		slots = append(slots, payload[i])
+		counts = append(counts, payload[i+1])
+	}
+	return slots, counts, nil
 }

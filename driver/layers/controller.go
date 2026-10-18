@@ -165,6 +165,9 @@ func Open(opts Options) (*Controller, error) {
 	}
 
 	c.sendMu.Lock()
+	if c.frameOut != nil {
+		c.storePipSheet()
+	}
 	c.mu.Lock()
 	want := desired(c.doc)
 	c.mu.Unlock()
@@ -471,7 +474,7 @@ func (c *Controller) prepare(key byte, w view) keyDraw {
 		return d
 	}
 	if w.iconRef != "" || w.count > 0 {
-		png, err := renderGlyph(c.assetsDir, w.iconRef, w.count)
+		png, err := renderGlyph(c.assetsDir, w.iconRef, w.count, w.color)
 		if err != nil {
 			c.logf("layers: key %d: draw %q: %v", key, w.iconRef, err)
 		} else {

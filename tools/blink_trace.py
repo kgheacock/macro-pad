@@ -76,6 +76,9 @@ MAX_PUSH_SPAN_LIMIT_MS = 40
 # DoD-2 limits the time from the board's Show to the end of the last push, and
 # the span between the first PUSH_STARTED of the six keys.
 MAX_SHOW_LIMIT_MS = 150
+# Task 0062's `pips` scenario: a Show of six keys with pips is a Show of six
+# cached keys (108 ms) and six stamps (about 100 ms). The owner accepted 215 ms.
+MAX_PIPS_SHOW_LIMIT_MS = 215
 ALL_KEYS_MASK = 0b111111
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -452,9 +455,9 @@ def report_pips(records, out):
         return False
     six_keys = max(figure[0] for figure in complete)
     span = max(figure[1] for figure in complete)
-    print("six keys in {:.1f} ms (limit {})".format(six_keys, MAX_SHOW_LIMIT_MS), file=out)
+    print("six keys in {:.1f} ms (limit {})".format(six_keys, MAX_PIPS_SHOW_LIMIT_MS), file=out)
     print("push span {:.1f} ms (not limited)".format(span), file=out)
-    return len(complete) == len(figures) and six_keys <= MAX_SHOW_LIMIT_MS
+    return len(complete) == len(figures) and six_keys <= MAX_PIPS_SHOW_LIMIT_MS
 
 
 def report_cached(records, out):

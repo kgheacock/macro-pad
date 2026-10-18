@@ -803,13 +803,14 @@ the glyphcore build (`glyphcore=True`):
 | Free heap after the pool and the sheet (`make slot-probe`) | 5,523,168 bytes (limit 2,097,152) |
 | One stamp, `FrameCache.stamp` alone (copy into the buffer, a second 32 KB copy, blits) | 15.4 ms: 2 × 5.6 ms of copies and 3.8 ms for the blits of `42` (2.2 ms for `7`) |
 | `set_sheet`, once | 21 ms |
-| Show of six keys with counts, `six keys in` | 212.2, 212.9, and 206.5 ms in three runs (limit 150) |
+| Show of six keys with counts, `six keys in` | 212.2, 212.9, and 206.5 ms in three runs (limit 215, accepted by the owner) |
 | Of it: the six stamps, `SHOW_WITH_PIPS_STARTED` to the first `PUSH_STARTED` and `FRAMES_SHOWN` | about 100 ms |
 | Of it: the two push groups, first `PUSH_STARTED` to the last `REFRESH_DONE` | about 105 ms, 45 to 50 ms for each group (task 0061's 48 ms; the ideal is 26) |
 | `push span` | 59.9, 60.0, and 56.4 ms |
 
-The limit of 150 ms is not met: a Show of six keys with a pip is a Show of six
-keys (108 ms in task 0061) and six stamps (about 100 ms). Two changes were tried
+The limit of task 0061's Show, 150 ms, is not met, and the owner accepted 215 ms:
+a Show of six keys with a pip is a Show of six keys (108 ms in task 0061) and
+six stamps (about 100 ms). Two changes were tried
 and dropped, on the same board:
 
 - **Stamp through a 44×44 bitmap** instead of a second 32 KB copy: the 44 row

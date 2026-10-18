@@ -1,7 +1,7 @@
 ---
 id: "0065"
 title: "An inbox daemon that watches the store and feeds macropadd, with install and uninstall scripts"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -242,15 +242,16 @@ is ticked.
   the plist path on macOS and the unit path on Linux, and change nothing.
   **Proof:** run both, then `git status` and `ls` the service paths
   - The Linux paths were checked on this Mac with a stub `uname`, not on Linux.
-- [ ] **DoD-7** — On macOS, `install.sh` leaves
+- [x] **DoD-7** — On macOS, `install.sh` leaves
   `launchctl print gui/$UID/com.kgheacock.macropad.inbox` showing
   `state = running`. A second run still shows it running.
   `uninstall.sh` leaves `launchctl print` failing, and the store in place.
   **Proof:** the reviewer runs the scripts on Keith's Mac
-  - Not confirmed: the implementer did not load a LaunchAgent on the real
-    login session. A stubbed `launchctl` and a scratch `HOME` showed the
-    install, a second run, and the uninstall working; the plist passes
-    `plutil -lint`. Run `inbox/scripts/install.sh` on the Mac to confirm.
+  - Confirmed on Keith's Mac on 2026-10-18: install, a second install, and
+    uninstall (`launchctl print` exits 113 after it, the store stays). The first
+    run left the job loaded but never started (`runs = 0`), so `install.sh` now
+    runs `launchctl kickstart -k` after `bootstrap`, and `uninstall.sh` waits
+    until launchd lets go of the job.
 - [x] **DoD-8** — `uninstall.sh --purge` also removes the store files.
   **Proof:** `ls` the store path after the run
 - [x] **DoD-9** — `shellcheck inbox/scripts/*.sh` exits 0. **Proof:** the exit code

@@ -75,6 +75,13 @@ else
       printf 'would run: launchctl bootout gui/%s/%s\n' "$uid" "$LABEL"
     else
       launchctl bootout "gui/$uid/$LABEL" >/dev/null 2>&1
+      # launchd lets go of the job a moment later; wait so that a check
+      # right after this script sees it gone.
+      n=0
+      while launchctl print "gui/$uid/$LABEL" >/dev/null 2>&1 && [ $n -lt 50 ]; do
+        sleep 0.1
+        n=$((n + 1))
+      done
     fi
   elif [ "$DRY" = 1 ]; then
     printf 'would run: systemctl --user disable --now %s\n' "$UNIT"

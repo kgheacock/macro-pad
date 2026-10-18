@@ -99,7 +99,7 @@ ticked.
 - [x] **DoD-7** — After a reconnect, the host sends the sheet before the first type 14. **Proof:** `cd driver && go test ./transport -run Reconnect` passes, with a test for it.
 - [x] **DoD-8** — A key that is not cached draws a pip with the code that builds the sheet, and `digitFont` is gone. `driver/go.mod` pins `golang.org/x/image` at v0.24.0 or older. **Proof:** `cd driver && go test ./layers -run Pip` passes, `git grep -n digitFont driver/` lists nothing, and `go build ./...` passes with `go1.22.0`.
 - [ ] **DoD-9** — On the board, a Show of six keys with counts takes at most 150 ms from `FRAMES_SHOWN` to the last `REFRESH_DONE`. **Proof:** the line `six keys in N ms` of `tools/blink_trace.py report --scenario=pips`, in three runs. It counts from `SHOW_WITH_PIPS_STARTED`, so it includes the stamps.
-  Missing: `six keys in` is 212.2 and 212.9 ms in two runs on 2026-10-18, over the limit of 150 ms. The six stamps take about 100 ms (15.4 ms each) and the two push groups about 105 ms. A third run could not unmount `CIRCUITPY` (loginwindow refused). See `firmware/README.md`, "The count pip", for the figures and two changes that did not help.
+  Missing: `six keys in` is 212.2, 212.9, and 206.5 ms in three runs on 2026-10-18, over the limit of 150 ms. The six stamps take about 100 ms (15.4 ms each) and the two push groups about 105 ms. See `firmware/README.md`, "The count pip", for the figures and two changes that did not help.
 - [x] **DoD-10** — At least 2 MB of heap stay free with the sheet loaded. **Proof:** the figure in `firmware/README.md`, from `make slot-probe`: 5,523,168 bytes free after the pool and the sheet.
 - [ ] **DoD-11** — On the board, counts 1, 12, and 100 show a red circle and a legible number on a red key and a white key, and every icon shows on its round. **Proof:** the owner's check, recorded in this spec.
   Missing: the owner's check of the panel is not done.
@@ -110,7 +110,7 @@ ticked.
 
 - A disc edge is blended against the key color, but the round makes the pixels under part of the edge white. A faint ring in the key color shows there → the host builds the sheet, so a second set of discs blended against white is a change in host code only. DoD-11 shows if it is needed.
 - A white part of an icon merges with the round. `gmail.png` has 1,917 white pixels (its envelope) and `dev.png` has 6 → the colored strokes of `gmail.png` stay, and the owner checks it in DoD-11.
-- A stamp costs 15.4 ms on the board (2 copies of 5.6 ms and 3.8 ms of blits), so six stamps cost about 100 ms and DoD-9 fails at 212 ms. The options are: a limit of about 215 ms for a Show of six keys with pips; a push of only the pip's window, which needs no stamp copy and changes the push code; or a faster stamp when a buffer already holds the same slot. The owner decides.
+- A stamp costs 15.4 ms on the board (2 copies of 5.6 ms and 3.8 ms of blits), so six stamps cost about 100 ms and DoD-9 fails at 206 to 213 ms. The options are: a limit of about 215 ms for a Show of six keys with pips; a push of only the pip's window, which needs no stamp copy and changes the push code; or a faster stamp when a buffer already holds the same slot. The owner decides.
 - The push span of task 0061 (58 ms, limit 40) is not solved. This task does not claim to meet that limit.
 - Without `glyphcore`, each extra `Bitmap` on the heap adds about 1 ms to `gc.collect()` (task 0063) → the 12 buffers come out of the 64, not on top of them.
 

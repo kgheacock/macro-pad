@@ -228,7 +228,7 @@ inbox daemon --assets-dir "$PWD/assets"
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--assets-dir DIR] [--port N] [--slot N] [--dry-run]
+inbox/scripts/install.sh [--assets-dir DIR] [--port N] [--slot N] [--no-completions] [--dry-run]
 inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
 
@@ -238,9 +238,10 @@ inbox/scripts/uninstall.sh [--purge] [--dry-run]
 
 1. writes `$PREFIX/bin/inbox` (`PREFIX` defaults to `~/.local`), a wrapper that
    runs `inbox/bin/inbox.js` of this checkout with that `node`;
-2. writes the service and starts it;
-3. prints where the command, the service file, the log, and the store are, and
-   whether the daemon runs.
+2. links the zsh completion, if oh-my-zsh is installed (see "Completions");
+3. writes the service and starts it;
+4. prints where the command, the service file, the log, and the store are,
+   whether the daemon runs, and where the completion link is.
 
 | | macOS | Linux |
 |---|---|---|
@@ -252,10 +253,26 @@ Run `install.sh` again to upgrade: it rewrites the files and restarts the
 daemon. Keep the checkout where it is; run the script again after you move it
 or change the Node version. `install.sh` does not start `macropadd`.
 
-`uninstall.sh` stops the daemon, removes the service and the wrapper, and
-keeps the store. `--purge` also removes the store, its `-wal` and `-shm`
+`uninstall.sh` stops the daemon, removes the service, the wrapper, and the
+completion link, and keeps the store. `--purge` also removes the store, its `-wal` and `-shm`
 files, and the pid file. With nothing installed it says so and exits 0. Both
 scripts take `--dry-run` (print each step, change nothing) and `-h`.
+
+### Completions
+
+With oh-my-zsh, `install.sh` links `inbox/completions/_inbox` into
+`$ZSH_CACHE_DIR/completions`, a directory oh-my-zsh puts on `fpath` before it
+runs `compinit`. It finds the directory by asking `zsh -ic`, so a
+`ZSH_CACHE_DIR` set in `.zshrc` counts, and otherwise uses
+`~/.oh-my-zsh/cache/completions`. Without oh-my-zsh it installs nothing and
+says so. `--no-completions` skips the step.
+
+Open a new shell (`exec zsh`) to use it. If the completion does not appear, delete
+`~/.zcompdump*` and open a new shell. `Tab` completes the commands, each
+command's options, and channel names. The channel names come from
+`inbox channels`, so only channels with unseen messages are offered. It is a
+link into this checkout, so an edit to `_inbox` applies at once, and moving
+the checkout needs `install.sh` again.
 
 Exit codes of `inbox daemon`: 0 after a signal, 1 store error, 2 usage error,
 3 a daemon already runs.

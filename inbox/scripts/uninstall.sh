@@ -12,6 +12,7 @@ Usage: uninstall.sh [--purge] [--dry-run]
 Stop the inbox daemon and remove what install.sh made:
   - the LaunchAgent (macOS) or the systemd user unit (Linux)
   - the \$PREFIX/bin/inbox wrapper (PREFIX defaults to \$HOME/.local)
+  - the zsh completion link in the oh-my-zsh completions directory
 
 The store (the SQLite file with your messages) stays unless you pass --purge.
 If nothing is installed, it says so and exits 0.
@@ -63,8 +64,15 @@ ours() {
   [ -f "$WRAPPER" ] && grep -q 'bin/inbox.js' "$WRAPPER"
 }
 
+# The completion link install.sh made: a link to this checkout's _inbox.
+COMP_FILE=$("$(dirname "$0")/zsh-completion-dir.sh")
+[ -z "$COMP_FILE" ] || COMP_FILE=$COMP_FILE/_inbox
+comp_ours() {
+  [ -n "$COMP_FILE" ] && [ -L "$COMP_FILE" ] && case $(readlink "$COMP_FILE") in */inbox/completions/_inbox) true ;; *) false ;; esac
+}
+
 FOUND=0
-{ [ -e "$SERVICE_FILE" ] || ours; } && FOUND=1
+{ [ -e "$SERVICE_FILE" ] || ours || comp_ours; } && FOUND=1
 
 if [ "$FOUND" = 0 ]; then
   printf 'nothing is installed (no %s, no %s)\n' "$SERVICE_FILE" "$WRAPPER"
@@ -95,6 +103,7 @@ else
   elif [ -e "$WRAPPER" ]; then
     printf 'kept %s: install.sh did not write it\n' "$WRAPPER"
   fi
+  if comp_ours; then do_run rm -f "$COMP_FILE"; fi
 fi
 
 if [ "$PURGE" = 1 ]; then

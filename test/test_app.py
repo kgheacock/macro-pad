@@ -2217,7 +2217,7 @@ def test_the_pip_is_the_disc_of_the_slots_color_with_the_digits_of_the_count():
     assert _panel_pixel(frame, 102, 92) == 0x2202
 
 
-def test_a_color_the_sheet_has_no_disc_for_gets_the_first_disc():
+def test_a_pip_on_a_color_the_sheet_has_no_disc_for_uses_the_first_disc():
     pad, panels, serial = _pip_pad(color=0x1234)
 
     _show_pips(pad, serial, [7])
@@ -2225,7 +2225,7 @@ def test_a_color_the_sheet_has_no_disc_for_gets_the_first_disc():
     assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x1100
 
 
-def test_a_count_above_99_draws_99_plus_and_a_count_of_0_shows_the_slot_itself():
+def test_a_pip_count_above_99_draws_99_plus_and_a_count_of_0_shows_the_slot_itself():
     """DoD-4 and the 100 case of DoD-4's sibling: 99+ in small cells; 0, no pip."""
     pad, panels, serial = _pip_pad()
 
@@ -2271,7 +2271,7 @@ def test_a_pip_on_a_frame_with_no_picture_still_draws_and_marks_the_key_as_a_gly
     assert pad.key_states[0].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
 
 
-def test_two_counts_in_a_row_use_the_two_buffers_of_the_key_in_turn():
+def test_two_pip_counts_in_a_row_use_the_two_buffers_of_the_key_in_turn():
     pad, panels, serial = _pip_pad()
     cache = pad._frame_cache
 
@@ -2289,7 +2289,7 @@ def test_two_counts_in_a_row_use_the_two_buffers_of_the_key_in_turn():
     assert pad.key_states[0]._on_frame is first  # back to the first buffer
 
 
-def test_a_slot_above_the_numbered_ones_is_a_miss_even_though_the_pool_has_a_buffer_there():
+def test_a_show_with_pips_of_a_slot_above_the_numbered_ones_is_a_miss():
     pad, panels, serial = _pip_pad()
 
     serial.feed(_store_frame_bytes(52, 0x1234))  # a pip buffer, not a slot

@@ -1,14 +1,14 @@
 ---
 id: "0067"
 title: "A press on a channel key marks that channel's messages seen"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+branch: "0067-press-a-channel-key-to-mark-it-seen"
 related: ["0013", "0057", "0064", "0065", "0066"]
 tags: ["inbox", "layers", "input"]
 ---

@@ -1,14 +1,14 @@
 ---
 id: "0065"
 title: "An inbox daemon that watches the store and feeds macropadd, with install and uninstall scripts"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+branch: "0065-inbox-daemon-with-install-and-uninstall"
 related: ["0055", "0057", "0064", "0066", "0067"]
 tags: ["inbox", "daemon", "launchd", "systemd"]
 ---

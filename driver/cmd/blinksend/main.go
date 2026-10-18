@@ -354,12 +354,27 @@ func sendPips(dev transport.Transport, stdout io.Writer, assetsDir string) error
 	if err := dev.StorePipSheet(sheet.Colors, sheet.Pixels); err != nil {
 		return err
 	}
+	// The frames are what a layer stores: the icon on its white round, with no
+	// pip, because the board stamps the pip.
+	names, err := filepath.Glob(filepath.Join(assetsDir, "*.png"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(names)
 	for key := byte(0); key < 6; key++ {
-		pixels, err := iconGlyph(assetsDir, key)
+		if int(key) >= len(names) {
+			return fmt.Errorf("%s holds %d PNG files, want at least 6", assetsDir, len(names))
+		}
+		color := layers.PipColors[int(key)%len(layers.PipColors)]
+		png, err := layers.RenderGlyph(assetsDir, filepath.Base(names[key]), 0, color)
 		if err != nil {
 			return err
 		}
-		if err := dev.StoreFrame(key, layers.PipColors[int(key)%len(layers.PipColors)], pixels); err != nil {
+		pixels, err := transport.DecodePNGToRGB565(png)
+		if err != nil {
+			return err
+		}
+		if err := dev.StoreFrame(key, color, pixels); err != nil {
 			return err
 		}
 	}

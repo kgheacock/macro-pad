@@ -2325,3 +2325,4 @@ def test_a_show_with_pips_draws_every_named_key_in_one_pass_and_traces_it():
     assert started == [ALL_KEYS]
     assert codes.index(tracer_module.SHOW_WITH_PIPS_STARTED) < codes.index(tracer_module.FRAMES_SHOWN)
     assert tracer_module.SHOW_WITH_PIPS_STARTED == 13
+

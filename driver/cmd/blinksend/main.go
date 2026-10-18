@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/kgheacock/macro-pad/driver/recorder"
@@ -22,6 +23,10 @@ import (
 )
 
 const (
+	// batchLossKey is the key whose first key state the batchloss scenario
+	// drops (task 0063).
+	batchLossKey = 2
+
 	// settle is how long a run waits before its first update and after its
 	// last, so the board has drawn what came before and traced what came
 	// after.
@@ -91,6 +96,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		script = func(dev transport.Transport) error {
 			return sendGlyphs(dev, stdout, true, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
 		}
+	case "batchloss":
+		// Task 0063: the batch scenario, with the first key state of key 2
+		// dropped on purpose. The board asks for it, and Reconnecting sends it
+		// again. The report checks the board did not time the batch out.
+		script = func(dev transport.Transport) error {
+			return sendGlyphs(dev, stdout, true, func(key byte) ([]byte, error) { return iconGlyph(*assetsDir, key) })
+		}
 	case "cached":
 		// Task 0061: store two sets of six frames, then show them in turn.
 		script = func(dev transport.Transport) error { return sendCached(dev, stdout, *assetsDir) }
@@ -101,21 +113,43 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, cached or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, batchloss, cached or warmup\n", *scenario)
 		return 2
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *openTimeout)
 	defer cancel()
-	dev, err := transport.Open(ctx, transport.Options{
+	opts := transport.Options{
 		VendorID:     uint16(*vendorID),
 		ProductID:    uint16(*productID),
 		SerialNumber: *serialNumber,
 		CDCPort:      *cdcPort,
-	})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	}
+	var dev transport.Transport
+	if *scenario == "batchloss" {
+		// Reconnecting keeps each key's last glyph and state, and sends them
+		// again when the board asks. The first key state of key 2 is dropped.
+		var dropped atomic.Bool
+		opts.DropKeyState = func(ks transport.KeyState) bool {
+			if ks.KeyIndex == batchLossKey && dropped.CompareAndSwap(false, true) {
+				fmt.Fprintf(stdout, "blinksend: dropped the key state of key %d on purpose\n", ks.KeyIndex)
+				return true
+			}
+			return false
+		}
+		dev = transport.NewReconnecting(opts, "", func(format string, args ...any) {
+			fmt.Fprintf(stdout, "blinksend: "+format+"\n", args...)
+		})
+		// It connects in the background, and settles for a second before it
+		// replays state. Wait, so the batch goes out on a connected board.
+		time.Sleep(3 * time.Second)
+	} else {
+		d, err := transport.Open(ctx, opts)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		dev = d
 	}
 
 	f, err := os.Create(*traceFile)

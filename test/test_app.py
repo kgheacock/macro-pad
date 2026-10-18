@@ -961,6 +961,110 @@ def test_a_completed_batch_records_no_time_out():
     assert not any(code == tracer_module.BATCH_TIMED_OUT for code, _, _ in tracer.records)
 
 
+def _device_frames(serial, message_type):
+    """The payloads of the frames of one type that the board wrote to the host."""
+    data = bytes(serial.written)
+    out = []
+    i = 0
+    while i + wire.FRAME_HEADER_SIZE <= len(data):
+        length = data[i + 1] | (data[i + 2] << 8)
+        if data[i] == message_type:
+            out.append(data[i + wire.FRAME_HEADER_SIZE : i + wire.FRAME_HEADER_SIZE + length])
+        i += wire.FRAME_HEADER_SIZE + length
+    return out
+
+
+def test_open_batch_asks_the_host_for_what_it_lacks_after_500_ms():
+    """DoD-1 (task 0063): key 2's state never arrives, and after 500 ms with no
+    new data the board sends Batch incomplete with the masks that are pending.
+    """
+    tracer = _FakeTracer()
+    pad, _, _, _, hid_device, serial = _build_pad(tracer=tracer)
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b111))
+    pad.step(10_000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(20_000)
+    hid_device.feed(_key_state_report(1, 0x07E0, 0))
+    pad.step(30_000)
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == []
+
+    pad.step(30_000 + 499_999)
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == []
+
+    pad.step(30_000 + 500_000)
+
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == [
+        bytes((0b000, 0b100))
+    ]
+    incomplete = [r for r in tracer.records if r[0] == tracer_module.BATCH_INCOMPLETE]
+    assert incomplete == [(tracer_module.BATCH_INCOMPLETE, 0xFF, 0b100 << 8)]
+
+
+def test_batch_incomplete_names_the_missing_glyphs_and_key_states_apart():
+    pad, _, _, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0b11, 0b11))
+    pad.step(10_000)
+    serial.feed(_custom_glyph_frame(key_index=0, fill_byte=0xAB))
+    pad.step(20_000)
+    hid_device.feed(_key_state_report(1, 0x07E0, 0))
+    pad.step(30_000)
+
+    pad.step(30_000 + 500_000)
+
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == [
+        bytes((0b10, 0b01))
+    ]
+
+
+def test_batch_incomplete_repeats_every_500_ms_at_most_three_times():
+    tracer = _FakeTracer()
+    pad, _, _, _, _, serial = _build_pad(tracer=tracer)
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b1))
+    pad.step(10_000)
+    for step in range(1, 8):
+        pad.step(10_000 + step * 500_000)
+
+    frames = _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE)
+    assert len(frames) == 3
+    assert set(frames) == {bytes((0, 0b1))}
+
+
+def test_batch_incomplete_timer_restarts_when_data_arrives():
+    pad, _, _, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+
+    serial.feed(_begin_batch_frame(0, 0b11))
+    pad.step(10_000)
+    pad.step(400_000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(410_000)
+
+    pad.step(410_000 + 499_999)
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == []
+
+    pad.step(410_000 + 500_000)
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == [bytes((0, 0b10))]
+
+
+def test_a_complete_batch_sends_no_batch_incomplete():
+    pad, _, _, _, hid_device, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_begin_batch_frame(0, 0b1))
+    pad.step(1000)
+    hid_device.feed(_key_state_report(0, 0xF800, 0))
+    pad.step(2000)
+
+    pad.step(3_000_000)
+
+    assert _device_frames(serial, wire.MESSAGE_TYPE_BATCH_INCOMPLETE) == []
+
+
 def test_key_outside_the_masks_draws_at_once_while_a_batch_is_open():
     """DoD-5."""
     pad, _, panels, _, hid_device, serial = _build_pad()
@@ -1536,12 +1640,12 @@ def _show_misses(serial):
 UNCHANGED = wire.SLOT_UNCHANGED
 
 
-def test_the_pool_is_128_slots_allocated_before_the_loop():
+def test_the_pool_is_64_slots_allocated_before_the_loop():
     pad, _, _, _, _, _ = _build_pad()
 
-    assert pad._frame_cache.slot_count == 128
+    assert pad._frame_cache.slot_count == 64
     assert wire.SLOT_UNCHANGED == 0xFF
-    assert not any(pad._frame_cache.filled(slot) for slot in range(128))
+    assert not any(pad._frame_cache.filled(slot) for slot in range(64))
 
 
 def test_store_frame_draws_nothing_and_show_frames_draws_the_stored_frame():
@@ -1771,7 +1875,7 @@ def test_a_key_that_blinks_is_not_cached_and_blinks_as_before():
 
     assert {_frame_pixel(first, 0), _frame_pixel(second, 0)} == {0x07E0, 0x0000}
     assert _last_frame(panels.per_key[4]) == first
-    assert not any(pad._frame_cache.filled(slot) for slot in range(128))
+    assert not any(pad._frame_cache.filled(slot) for slot in range(64))
 
 
 def test_a_shown_frame_that_then_blinks_alternates_with_black():

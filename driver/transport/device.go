@@ -74,6 +74,13 @@ type Options struct {
 	// Confirmed live during task 0031's key-0 bring-up.
 	CDCPort string
 
+	// DropKeyState, when not nil, is called for each key state before it is
+	// written, and a key state for which it returns true is not written at
+	// all, as if the board had lost the report. It is a fault injection for
+	// hardware tests of the resend in task 0063. Production callers leave it
+	// nil.
+	DropKeyState func(KeyState) bool
+
 	// pollInterval paces Open's retries while ctx is still open. Tests
 	// set it low; production callers leave it at its zero value, which
 	// open treats as defaultPollInterval.
@@ -169,6 +176,9 @@ type Device struct {
 	closeErr  error
 
 	msgQueue chan Message
+
+	// dropKeyState is Options.DropKeyState.
+	dropKeyState func(KeyState) bool
 }
 
 var _ Transport = (*Device)(nil)
@@ -237,7 +247,9 @@ func tryOpen(opts Options, hidB hidBackend, serialB serialBackend) (*Device, err
 		return nil, err
 	}
 
-	return newDevice(hidConn, serialConn), nil
+	d := newDevice(hidConn, serialConn)
+	d.dropKeyState = opts.DropKeyState
+	return d, nil
 }
 
 // matchOne picks the one HID candidate Open should connect to. When want
@@ -305,6 +317,10 @@ func (d *Device) SendKeyState(ks KeyState) error {
 	defer d.reportMu.Unlock()
 	if wait := minReportGap - time.Since(d.lastReport); wait > 0 {
 		time.Sleep(wait)
+	}
+	if d.dropKeyState != nil && d.dropKeyState(ks) {
+		d.lastReport = time.Now()
+		return nil
 	}
 	_, err := d.hid.Write(buf.Bytes())
 	d.lastReport = time.Now()

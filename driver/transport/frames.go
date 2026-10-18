@@ -11,7 +11,7 @@ import (
 
 // SlotCount is the number of slots in the board's frame cache. A slot number
 // is 0 to SlotCount-1. See "Store frame" in docs/wire-protocol.md (task 0061).
-const SlotCount = 128
+const SlotCount = 64
 
 // SlotUnchanged is the Show frames value that leaves a key as it is.
 const SlotUnchanged = 0xFF
@@ -134,6 +134,26 @@ func decodeShowFrames(payload []byte) ([]byte, error) {
 }
 
 func encodeShowMiss(mask byte) []byte { return []byte{mask} }
+
+// BatchIncomplete is a device→host message: bit k of GlyphMask is key k, which
+// an open batch still waits for a glyph for, and bit k of StateMask is key k,
+// which it still waits for a key state for. The host sends those items again.
+// See "Batch incomplete" in docs/wire-protocol.md (task 0063).
+type BatchIncomplete struct {
+	GlyphMask byte
+	StateMask byte
+}
+
+func encodeBatchIncomplete(bi BatchIncomplete) []byte {
+	return []byte{bi.GlyphMask, bi.StateMask}
+}
+
+func decodeBatchIncomplete(payload []byte) (BatchIncomplete, error) {
+	if len(payload) != batchIncompleteSize {
+		return BatchIncomplete{}, fmt.Errorf("transport: batch incomplete payload is %d bytes, want %d", len(payload), batchIncompleteSize)
+	}
+	return BatchIncomplete{GlyphMask: payload[0], StateMask: payload[1]}, nil
+}
 
 func decodeShowMiss(payload []byte) (byte, error) {
 	if len(payload) != showMissSize {

@@ -527,3 +527,69 @@ func TestReconnecting_BeginBatchWithNoBoardIsDropped(t *testing.T) {
 		t.Fatalf("BeginBatch with no board = %v, want nil", err)
 	}
 }
+
+// A board that lost a key state asks for it, and the host sends the glyph and
+// the key state it holds for each key the board names (task 0063).
+func TestReconnecting_BatchIncompleteSendsTheNamedGlyphsAndKeyStatesAgain(t *testing.T) {
+	bs := make(boards, 1)
+	board := newFakeBoard()
+	bs <- board
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+	waitFor(t, "the connect", func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.dev != nil })
+
+	r.SendKeyState(key(1, 0x001F, 0, false))
+	r.SendCustomGlyph(2, make([]byte, CustomGlyphPixelsSize))
+	r.SendKeyState(key(2, 0x07E0, CustomGlyphSentinelEmojiID, false))
+	before := len(board.sent())
+
+	board.in <- Message{Type: MessageTypeBatchIncomplete, BatchIncomplete: BatchIncomplete{GlyphMask: 0b100, StateMask: 0b110}}
+
+	want := []string{
+		"key 1 color 0x001f emoji 0 blink false",
+		"glyph 2 32768 bytes",
+		"key 2 color 0x07e0 emoji 254 blink false",
+	}
+	waitFor(t, "the resend", func() bool { return len(board.sent()) >= before+len(want) })
+	if got := board.sent()[before:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resent %q, want %q", got, want)
+	}
+}
+
+func TestReconnecting_BatchIncompleteSendsOnlyWhatTheBoardNames(t *testing.T) {
+	bs := make(boards, 1)
+	board := newFakeBoard()
+	bs <- board
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+	waitFor(t, "the connect", func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.dev != nil })
+
+	r.SendCustomGlyph(2, make([]byte, CustomGlyphPixelsSize))
+	r.SendKeyState(key(2, 0x07E0, CustomGlyphSentinelEmojiID, false))
+	before := len(board.sent())
+
+	// Only key 2's glyph is named, and key 5 is a key the host never sent.
+	board.in <- Message{Type: MessageTypeBatchIncomplete, BatchIncomplete: BatchIncomplete{GlyphMask: 0b100, StateMask: 0b100000}}
+
+	waitFor(t, "the resend", func() bool { return len(board.sent()) >= before+1 })
+	time.Sleep(20 * time.Millisecond)
+	if got, want := board.sent()[before:], []string{"glyph 2 32768 bytes"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resent %q, want %q: no key state for key 2, none for the unknown key 5", got, want)
+	}
+}
+
+func TestReconnecting_BatchIncompleteForUnknownKeysSendsNothing(t *testing.T) {
+	bs := make(boards, 1)
+	board := newFakeBoard()
+	bs <- board
+	r := newReconnecting(bs.open, 0, "", nil)
+	defer r.Close()
+	waitFor(t, "the connect", func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.dev != nil })
+
+	board.in <- Message{Type: MessageTypeBatchIncomplete, BatchIncomplete: BatchIncomplete{GlyphMask: 0xFF, StateMask: 0xFF}}
+	time.Sleep(50 * time.Millisecond)
+
+	if got := board.sent(); len(got) != 0 {
+		t.Fatalf("sent %q, want nothing for keys the host never sent", got)
+	}
+}

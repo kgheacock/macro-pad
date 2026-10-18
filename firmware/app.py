@@ -360,6 +360,12 @@ class MacroPad:
         except ValueError:
             return False
 
+        return self._apply_key_state(message, now_us)
+
+    def _apply_key_state(self, message, now_us):
+        """Apply one decoded key state, from an HID report or a CDC frame.
+        Returns True when a key's state changed.
+        """
         if self._tracer is not None:
             self._tracer.record(
                 tracer_module.HOST_MESSAGE_DECODED,
@@ -391,7 +397,7 @@ class MacroPad:
 
     def _apply_cdc_message(self, now_us):
         """Read one message from the CDC channel: a Set custom glyph, which
-        updates its key, or a Begin batch, which opens a batch.
+        updates its key, a Key state, or a Begin batch, which opens a batch.
 
         Returns True when a message arrived that changed the board. A message
         of the wrong length, or a glyph naming a key index this pad does not
@@ -405,6 +411,8 @@ class MacroPad:
             return False
         if glyph is None:
             return False
+        if isinstance(glyph, wire.KeyState):
+            return self._apply_key_state(glyph, now_us)
         if isinstance(glyph, wire.BeginBatch):
             self._begin_batch(glyph, now_us)
             return True

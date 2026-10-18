@@ -50,6 +50,9 @@ MESSAGE_TYPE_SHOW_MISS = 10
 # Batch incomplete, device to host: the masks of the glyphs and the key states
 # that an open batch still waits for (task 0063).
 MESSAGE_TYPE_BATCH_INCOMPLETE = 11
+# Key state over CDC, host to device (task 0059): the same 6 bytes as the HID
+# report, in order with the glyphs, and never overwritten by the next one.
+MESSAGE_TYPE_KEY_STATE = 12
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -336,7 +339,8 @@ class CustomGlyphReader:
         Returns a decoded `CustomGlyph` once a full Set custom glyph
         frame has arrived, a `BeginBatch` once a full Begin batch frame
         has arrived, a `StoreFrame` or a `ShowFrames` once a full frame of
-        that type has arrived (task 0061), `None` otherwise. A frame of a type this
+        that type has arrived (task 0061), a `KeyState` once a full Key
+        state frame has arrived (task 0059), `None` otherwise. A frame of a type this
         reader does not know is dropped, by its declared length, matching
         `driver/transport/wire.go`'s `readFrame`/`decodeMessage` split. A
         glyph frame of the wrong length is dropped the same way, and then
@@ -389,6 +393,8 @@ class CustomGlyphReader:
             if (
                 frame_type == MESSAGE_TYPE_BEGIN_BATCH
                 and length == BEGIN_BATCH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_KEY_STATE and length == KEY_STATE_SIZE
             ):
                 self._frame_type = frame_type
                 self._total = FRAME_HEADER_SIZE + length
@@ -409,6 +415,7 @@ class CustomGlyphReader:
                 MESSAGE_TYPE_BEGIN_BATCH,
                 MESSAGE_TYPE_STORE_FRAME,
                 MESSAGE_TYPE_SHOW_FRAMES,
+                MESSAGE_TYPE_KEY_STATE,
             )
             self._bad_length_size = length
             self._filled = 0
@@ -463,6 +470,9 @@ class CustomGlyphReader:
             )
         if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES:
             return ShowFrames(slots=bytes(self._frame[base:total]))
+        if self._frame_type == MESSAGE_TYPE_KEY_STATE:
+            # Raises ValueError for a version this build cannot read.
+            return decode_key_state(bytes(self._frame[base:total]))
         if self._frame_type == MESSAGE_TYPE_STORE_FRAME:
             stream = self._view[base + STORE_FRAME_HEADER_SIZE : total]
             slot = self._frame[base]

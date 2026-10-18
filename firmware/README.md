@@ -759,6 +759,84 @@ host for it:
   on purpose, and `tools/blink_trace.py report --scenario=batchloss` prints how
   long after the last report the batch released (limit 1,000 ms).
 
+## The second core: the `glyphcore` module (task 0059)
+
+Stock CircuitPython 10.2.1 cannot reach the second core of the RP2350. The
+`glyphcore` module (`tools/usermod/glyphcore/`) is a user C module for a custom
+build. With it, core 1 inflates a type 6 or type 8 stream while core 0 reads the
+next frame and composes the previous one, and the frame pool lives outside the
+Python heap. Without it, the firmware runs the code of tasks 0058 and 0061
+unchanged: `wire.py`, `display_render.py`, and `frame_cache.py` each do
+`try: import glyphcore` and fall back to `zlib.decompress` on core 0 and to
+`Bitmap` slots on the heap.
+
+What the module does:
+
+- **Inflate on core 1.** `submit(stream, buffer)` copies the zlib stream and wakes
+  core 1. It inflates, from RAM, into one of 16 glyph buffers in PSRAM. `poll()`
+  returns `None` while core 1 runs, then the length. `glyph_view(buffer)` gives
+  a `memoryview` of 16-bit items, which `bitmaptools.arrayblit` reads without a
+  copy. Two buffers belong to each key, so a new glyph never overwrites the
+  pixels that the key draws from. `cancel()` and `last_us()` complete it.
+- **A pool off the heap.** `alloc(slots)` takes the slots and the glyph buffers
+  from the port heap, not the Python heap: the garbage collector does not scan
+  them. `slot_view(slot)` gives the byte view that the DMA push reads.
+  `FrameCache` composes into one `Bitmap` and copies the 32 KB into the slot.
+- **Flash writes.** A write to `CIRCUITPY` or to `nvm` calls `flash_range_erase`
+  and `flash_range_program`, and core 1 reads PSRAM through the same window
+  as flash. The module wraps both calls at link time (`--wrap`): the wrapper
+  waits for the job on core 1 to end, and refuses a new job until the call
+  returns. A refused job inflates on core 0.
+- **Order and time-out.** `CustomGlyphReader` keeps the order of the messages: a
+  frame behind a stream on core 1 waits in the buffer. A stream that core 1 has
+  not finished after `INFLATE_TIMEOUT_NS` (500 ms) is dropped, the key keeps its
+  image, and an open batch asks the host for the glyph again (task 0063).
+
+### Build
+
+The recipe needs the Arm GNU toolchain 14.x. Homebrew's `arm-none-eabi-gcc` has
+no newlib and fails with `cannot read spec file 'nosys.specs'`. Download
+`arm-gnu-toolchain-14.3.rel1-darwin-arm64-arm-none-eabi.tar.xz` from
+developer.arm.com, unpack it, and put its `bin/` first on the `PATH`. Then, from
+the repo root:
+
+```bash
+make circuitpython-glyphcore
+```
+
+`tools/build_circuitpython.sh` clones CircuitPython 10.2.1 (about 3 GB with the
+submodules of the raspberrypi port) into `../circuitpython-build`, and builds
+`pimoroni_pico_plus2` with `USER_C_MODULES=tools/usermod`. The tree of
+CircuitPython has no patch. The UF2 is copied to
+`firmware/modules/circuitpython-pimoroni_pico_plus2-10.2.1-glyphcore.uf2`. The
+build adds 6 KB of flash (885,112 of 1,044,480 bytes used) and 10 KB of RAM.
+
+### Flash
+
+1. Hold `BOOTSEL`, plug in the board, and copy the UF2 onto the `RP2350` drive.
+   The board restarts as `CIRCUITPY`. The `CIRCUITPY` drive survives the change
+   of the interpreter.
+2. `make flash` copies the firmware.
+3. `import glyphcore` in the REPL confirms the build. To go back to stock
+   CircuitPython, copy `adafruit-circuitpython-pimoroni_pico_plus2-en_US-10.2.1.uf2`
+   the same way.
+
+### Checks without a board
+
+- `cc` compiles `inflate.c` on the host, and `test/test_glyphcore_inflate.py`
+  compares it with `zlib` on 44 streams, damaged ones included.
+- `nm` and `objdump` on `firmware.elf`: `core1_main`, the inflater, and the flash
+  wrappers are at `0x2000....` (RAM), and the only call out of them is `memset`,
+  which is in RAM too.
+
+### Measured figures
+
+Not measured yet. `make glyphcore-spike` prints the time of one inflate on
+core 1, what a compose costs core 0 with and without a job on core 1, the time of
+`gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy
+into a slot (`tools/glyphcore_spike.py`). The figures of `blinksend
+--scenario=icons` come after it.
+
 ## Out of scope
 
 - Click-pattern resolution (single vs. double vs. long press). The host

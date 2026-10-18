@@ -153,7 +153,7 @@ ticked.
 
 - [x] Does the `rp2` port of CircuitPython 10.2.1 already use core 1? — No for this board. Only `common-hal/picodvi/Framebuffer_RP2040.c` (RP2040 only) and `common-hal/usb_host/Port.c` (off by default) call `multicore_launch_core1`. `pico_multicore` is already compiled in (`LIB_PICO_MULTICORE=1`), so the module needs no change to the port.
 - [x] How long does one 32 KB inflate take on core 1, with core 0 busy in PSRAM? — DoD-2: 12.7 ms with core 0 polling. The probe timed the inflate with core 0 polling and the compose with core 1 inflating (50 ms against 44 ms), not the inflate during a compose.
-- [x] Does module memory outside the heap escape the garbage collector scan, and can the DMA push read it directly? — Yes for the scan (2.7 ms for 128 slots). The DMA push reads module slots: `--scenario=cached` ran with the same figures as the heap pool. The owner looked at the panels on 2026-10-18 and the picture is right.
+- [x] Does module memory outside the heap escape the garbage collector scan, and can the DMA push read it directly? — Yes for the scan (2.7 ms for 128 slots). The DMA push reads module slots: `--scenario=cached` ran with the same figures as the heap pool. Not confirmed: on 2026-10-18 the owner saw nothing on the screens when running it; see Notes.
 
 ## Notes
 
@@ -181,7 +181,7 @@ Built by task 0059 on 2026-10-18 (the board was not attached; the measurements a
 Measured by task 0059 on 2026-10-18, on a Pico Plus 2 with the glyphcore build (stream of 3,823 bytes, the icon that compresses worst):
 
 - One inflate: 45.9 ms on core 0, 12.7 to 12.9 ms on core 1. The `submit` call costs core 0 0.8 ms. A compose on core 0 takes 44 ms alone and 50 ms while core 1 inflates, so the two cores share PSRAM with a 6 ms cost. A 32 KB copy into a slot takes 5.9 ms.
-- `gc.collect()` with 128 slots in module memory: 2.62, 2.72, 2.72 ms, against 115 to 150 ms with 128 slots on the heap. The module memory escapes the scan, as the open question hoped. `blinksend --scenario=cached` on the module pool (64 slots in module memory, `FrameCache` copying composed frames into them): six Shows, `six keys in 108.6 ms`, `push span 57.1 ms`, the same as task 0061's 108.6 ms and 58 ms with the pool on the heap. The six pushes ended (`REFRESH_DONE`), so the DMA reads module slots. The owner looked at the panels on 2026-10-18 and the picture is right.
+- `gc.collect()` with 128 slots in module memory: 2.62, 2.72, 2.72 ms, against 115 to 150 ms with 128 slots on the heap. The module memory escapes the scan, as the open question hoped. `blinksend --scenario=cached` on the module pool (64 slots in module memory, `FrameCache` copying composed frames into them): six Shows, `six keys in 108.6 ms`, `push span 57.1 ms`, the same as task 0061's 108.6 ms and 58 ms with the pool on the heap. The six pushes ended (`REFRESH_DONE`), so the DMA reads module slots. Not confirmed: on 2026-10-18 the owner saw nothing on the screens when running it; see Notes.
 - `blinksend --scenario=icons`: 0.80, 0.79, 0.81 s. This is the 150 ms HID gap (see DoD-3), not board work. Compose takes 57 to 72 ms for each key in the traces.
 - `blinksend --scenario=batch`, 15 runs: no time-out, push span 31 to 35 ms.
 - Spike decision rule: the inflate saves 33 ms for each key, under the 40 ms of the rule, but the pool outside the heap cuts the collection from 115 to 150 ms to 2.7 ms, so the rule does not stop the task.

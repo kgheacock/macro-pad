@@ -118,16 +118,23 @@ item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
 - [ ] **DoD-1** — The spike inflates one 32 KB glyph on core 1 and returns pixels equal to `zlib.decompress` on core 0. **Proof:** the figures in this spec's Notes, and the build recipe in `firmware/README.md`.
+  - Not confirmed: needs the board. `tools/glyphcore_spike.py` compares the pixels of core 1 with `zlib.decompress`; the host test `test/test_glyphcore_inflate.py` already compares the C inflater with `zlib` on 44 streams.
 - [ ] **DoD-2** — The spike records the time of one inflate on core 1, the time one key costs core 0 with it, the time of `gc.collect()` with 128 slots in module memory, and the time of a 32 KB copy into a slot. **Proof:** this spec's Notes, with the trace file of `blinksend --scenario=icons`.
+  - Not confirmed: needs the board: `make glyphcore-spike`, then `blinksend --scenario=icons`.
 - [ ] **DoD-3** — Six keys with `blinksend --scenario=icons` take at most 0.65 s on the patched build. **Proof:** the line `six keys in N s`, in three runs, each with N at most 0.65.
-- [ ] **DoD-4** — When `import glyphcore` fails, the firmware inflates on core 0, and the glyph is the same. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test for each path.
-- [ ] **DoD-5** — When core 1 does not answer within the set time, the board drops the glyph, the key keeps its image, and the loop goes on. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a fake module that never answers.
+  - Not confirmed: needs the board with the custom build.
+- [x] **DoD-4** — When `import glyphcore` fails, the firmware inflates on core 0, and the glyph is the same. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a test for each path. `test_without_the_module_the_reader_inflates_on_core_0` and `test_the_glyph_from_core_1_has_the_same_pixels_as_from_core_0` cover the two paths, with `test/fake_glyphcore.py`. 368 tests pass.
+- [x] **DoD-5** — When core 1 does not answer within the set time, the board drops the glyph, the key keeps its image, and the loop goes on. **Proof:** `.venv/bin/pytest test/test_wire.py` passes, with a fake module that never answers. `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_reader_goes_on` (`test/test_wire.py`) and `test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_key_keeps_its_image` (`test/test_app.py`) use a fake module that never answers.
 - [ ] **DoD-6** — Three runs of `blinksend --scenario=icons` in a row report no `TRACE_DROPPED` record and no error. **Proof:** the three JSONL trace files.
+  - Not confirmed: needs the board with the custom build.
 - [ ] **DoD-7** — `firmware/README.md` records the build recipe, the flash steps, and the figures of DoD-2 and DoD-3. **Proof:** `firmware/README.md`.
+  - Not confirmed: `firmware/README.md` has the recipe and the flash steps; the figures of DoD-2 and DoD-3 are not measured yet.
 - [ ] **DoD-8** — With the 128-slot pool in module memory, `gc.collect()` takes at most 10 ms. **Proof:** the probe line in `firmware/README.md`, in three runs.
-- [ ] **DoD-9** — When a batch lacks a key state, the board sends "Batch incomplete" with the right mask, and the host sends that state again. **Proof:** `.venv/bin/pytest test/test_app.py` and `cd driver && go test ./layers -run Resend` pass, each with a test that drops one report.
+  - Not confirmed: needs the board: `make glyphcore-spike` prints the median collection with 128 slots in module memory.
+- [x] **DoD-9** — When a batch lacks a key state, the board sends "Batch incomplete" with the right mask, and the host sends that state again. **Proof:** `.venv/bin/pytest test/test_app.py` and `cd driver && go test ./layers -run Resend` pass, each with a test that drops one report. Task 0063 built the resend, so the proof names changed: `.venv/bin/pytest test/test_app.py -k batch_incomplete` (4 tests) and `cd driver && go test ./transport -run BatchIncomplete` pass. `go test ./layers -run Resend` finds no test, because the code is in `transport`.
 - [ ] **DoD-10** — On the board, 15 runs of `blinksend --scenario=batch` with the 128-slot or 64-slot pool of task 0061 end with no `BATCH_TIMED_OUT` record, and each completes within 1.0 s of its last send. **Proof:** the 15 JSONL trace files.
-- [ ] **DoD-11** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass.
+  - Not confirmed: needs the board. It also needs the module pool in use, and the host `SlotCount` is still 64.
+- [x] **DoD-11** — Both test suites pass. **Proof:** `.venv/bin/pytest test/ -q` and `cd driver && go test ./...` pass. `.venv/bin/pytest test/ -q`: 368 passed. `cd driver && go test ./...`: all packages ok.
 - [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body.
 
 ## Risks
@@ -141,7 +148,7 @@ ticked.
 
 ## Open questions
 
-- [ ] Does the `rp2` port of CircuitPython 10.2.1 already use core 1? — the spike reads `ports/raspberrypi` and answers it.
+- [x] Does the `rp2` port of CircuitPython 10.2.1 already use core 1? — No for this board. Only `common-hal/picodvi/Framebuffer_RP2040.c` (RP2040 only) and `common-hal/usb_host/Port.c` (off by default) call `multicore_launch_core1`. `pico_multicore` is already compiled in (`LIB_PICO_MULTICORE=1`), so the module needs no change to the port.
 - [ ] How long does one 32 KB inflate take on core 1, with core 0 busy in PSRAM? — DoD-2.
 - [ ] Does module memory outside the heap escape the garbage collector scan, and can the DMA push read it directly? — the spike, DoD-2 and DoD-8.
 
@@ -160,3 +167,10 @@ Measured by task 0061 on 2026-10-18, with PR #72's firmware:
 - A pool of 128 `bytearray(32768)` cost the same as 128 `displayio.Bitmap` objects, about 115 ms. The collector scans every live heap block.
 - `blinksend --scenario=batch`, runs that ended with `BATCH_TIMED_OUT`: 0 of 9 with no pool, 0 of 9 with 8 slots, 1 of 12 with 32 slots, 2 of 9 with 128 slots, and 1 of 15 with 64 slots and a collection only while idle. The first failure had payload `0x0400`: the report for key 2 never arrived.
 - The 90th percentile of the compose step was 94 ms with no pool, 101 ms with 8 slots, 128 ms with 32 slots, and 155 ms with 64 slots and an idle-only collection. The maximum was 324 ms with 128 slots.
+
+Built by task 0059 on 2026-10-18 (the board was not attached; the measurements are open):
+
+- The module is a user C module (`tools/usermod/glyphcore/`), built with `USER_C_MODULES`. The tree of CircuitPython has no patch. Homebrew's `arm-none-eabi-gcc` 16.2 has no newlib, so the build uses the Arm GNU toolchain 14.3.rel1. The stock build and the glyphcore build both link: 878,996 and 885,112 of 1,044,480 bytes of flash.
+- `objdump` of `firmware.elf`: `core1_main`, the inflater, and the flash wrappers are in RAM. The only call that leaves them is `memset`, also in RAM. Every caller of `flash_range_erase` and `flash_range_program` in the port goes through the wrapper.
+- The pool uses `SLOT_COUNT = 64` on the board and on the host, as task 0063 set. `glyphcore.alloc(128)` works, and the spike measures `gc.collect()` with 128 slots. A pool of 128 in use needs a host `SlotCount` of 128 and a way for the host to learn the size, which this task does not add.
+- Design choice: the stream is copied into the module (one 32 KB buffer), so the reader frees its frame buffer at once and reads the next frame while core 1 inflates. Each key has two glyph buffers that alternate, and `glyph_view` returns a new `memoryview` on each call, because `display_render` rebuilds a key's frames only when `key_state.pixels` is a different object.

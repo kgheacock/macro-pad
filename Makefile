@@ -130,6 +130,36 @@ slot-probe: check-circuitpy
 	echo "Run 'make flash' to restore the real code.py."; \
 	exit $$status
 
+# `make circuitpython-glyphcore` builds CircuitPython 10.2.1 with the glyphcore
+# module (task 0059) and puts the UF2 in firmware/modules/. It needs the Arm GNU
+# toolchain; see tools/build_circuitpython.sh. To install it, hold BOOTSEL while
+# plugging in the board and drag the UF2 onto the RP2350 drive.
+CIRCUITPYTHON_GLYPHCORE_UF2 := firmware/modules/circuitpython-$(CIRCUITPYTHON_BOARD)-$(CIRCUITPYTHON_VERSION)-glyphcore.uf2
+
+.PHONY: circuitpython-glyphcore
+circuitpython-glyphcore:
+	tools/build_circuitpython.sh $(CIRCUITPYTHON_WORKDIR)
+	mkdir -p firmware/modules
+	cp "$$(tools/build_circuitpython.sh --uf2 $(CIRCUITPYTHON_WORKDIR))" $(CIRCUITPYTHON_GLYPHCORE_UF2)
+	@echo "UF2: $(CIRCUITPYTHON_GLYPHCORE_UF2)"
+
+# `make glyphcore-spike` measures the glyphcore module on the board (task 0059):
+# run it on the custom build, after `make flash`. Like `slot-probe`, it puts a
+# probe code.py on the board, so run `make flash` afterward to restore the real one.
+.PHONY: glyphcore-spike
+glyphcore-spike: check-circuitpy
+	python3 tools/glyphcore_spike.py install $(CIRCUITPY_VOLUME)
+	sync
+	@dev=$$(diskutil info $(CIRCUITPY_VOLUME) | awk '/Device Identifier:/ {print $$3}'); \
+	diskutil unmount $(CIRCUITPY_VOLUME) || exit 1; \
+	echo "Waiting for the board to reload code.py and run the probe."; \
+	sleep 15; \
+	python3 tools/glyphcore_spike.py read; \
+	status=$$?; \
+	diskutil mount /dev/$$dev >/dev/null; \
+	echo "Run 'make flash' to restore the real code.py."; \
+	exit $$status
+
 # `make macropadd` runs the plugin daemon against the board. It needs the
 # real firmware on the board, so run `make flash` first if needed.
 .PHONY: macropadd

@@ -31,6 +31,7 @@
 #define CORE1_STACK_WORDS 1024
 #define CORE1_IDLE_WAIT_MS 500
 #define CANCEL_WAIT_MS 50
+#define FLASH_WAIT_US 500000
 
 enum {
     JOB_IDLE = 0,
@@ -96,11 +97,14 @@ void __wrap_flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t
 static void __no_inline_not_in_flash_func(flash_enter)(void) {
     flash_blocked = 1;
     __dmb();
-    cancel_flag = 1;
-    while (job_state == JOB_QUEUED || job_state == JOB_RUNNING) {
+    // A glyph takes under 100 ms on core 1. Let the job finish, so that its
+    // result is not lost, and give up only for a core 1 that has hung: a flash
+    // write that never starts would hang the board as well.
+    uint32_t start = timer_hw->timerawl;
+    while ((job_state == JOB_QUEUED || job_state == JOB_RUNNING) &&
+           timer_hw->timerawl - start < FLASH_WAIT_US) {
         tight_loop_contents();
     }
-    cancel_flag = 0;
 }
 
 static void __no_inline_not_in_flash_func(flash_leave)(void) {

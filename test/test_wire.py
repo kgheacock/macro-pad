@@ -566,3 +566,212 @@ def test_show_miss_payload_is_the_mask_of_the_missed_keys():
     )
 
     assert bytes(writer.written) == bytes((10, 1, 0, 0b100101))
+
+
+# --- The second core (task 0059) ---------------------------------------------
+
+from fake_glyphcore import FakeGlyphcore  # noqa: E402
+
+
+def _core1_reader(core1, framed, timeout_ns=500_000_000, clock=None):
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(
+        clock=clock or _TickingClock(step_ns=1000), core1=core1, timeout_ns=timeout_ns
+    )
+    return glyph_reader, reader
+
+
+def _feed_until_message(glyph_reader, reader, limit=20):
+    for _ in range(limit):
+        message = glyph_reader.feed(reader)
+        if message is not None:
+            return message
+    raise AssertionError("no message after {} feeds".format(limit))
+
+
+def _framed_store(slot, color, stream):
+    writer = FakeWriter()
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_STORE_FRAME,
+        bytes((slot, color & 0xFF, color >> 8)) + stream,
+    )
+    return bytes(writer.written)
+
+
+def test_without_the_module_the_reader_inflates_on_core_0():
+    """On stock CircuitPython `import glyphcore` fails, and nothing changes."""
+    assert wire.glyphcore is None
+
+    glyph_reader, reader = _read_all(
+        _framed_compressed(3, zlib.compress(_patterned_pixels(), 9))
+    )
+    glyph = glyph_reader.feed(reader)
+
+    assert glyph.key_index == 3
+    assert isinstance(glyph.pixels, bytes)
+    assert glyph.pixels == _patterned_pixels()
+
+
+def test_with_the_module_the_reader_hands_the_stream_to_core_1(monkeypatch):
+    core1 = FakeGlyphcore()
+    monkeypatch.setattr(wire, "glyphcore", core1)
+    framed = _framed_compressed(3, zlib.compress(_patterned_pixels(), 9))
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    assert glyph_reader.feed(reader) is None
+    assert len(core1.submitted) == 1
+
+
+def test_the_glyph_from_core_1_has_the_same_pixels_as_from_core_0():
+    pixels = _patterned_pixels()
+    stream = zlib.compress(pixels, 9)
+
+    on_core_0, reader = _read_all(_framed_compressed(3, stream))
+    expected = on_core_0.feed(reader)
+    on_core_1, reader = _core1_reader(FakeGlyphcore(), _framed_compressed(3, stream))
+    glyph = _feed_until_message(on_core_1, reader)
+
+    assert glyph.key_index == expected.key_index == 3
+    assert glyph.pixels.format == "H"
+    assert bytes(glyph.pixels) == expected.pixels == pixels
+
+
+def test_feed_reads_the_next_frame_while_core_1_inflates():
+    core1 = FakeGlyphcore(polls_before_done=5)
+    stream = zlib.compress(_patterned_pixels(), 9)
+    framed = _framed_compressed(1, stream) + _framed_compressed(2, stream)
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    assert glyph_reader.feed(reader) is None  # key 1 is submitted
+    assert glyph_reader.feed(reader) is None  # key 2 is read and waits
+    assert reader.in_waiting == 0
+    assert len(core1.submitted) == 1
+
+
+def test_messages_leave_in_the_order_they_arrived():
+    core1 = FakeGlyphcore(polls_before_done=2)
+    stream = zlib.compress(_patterned_pixels(), 9)
+    framed = (
+        _framed_compressed(1, stream)
+        + _framed_begin_batch(0b10, 0b10)
+        + _framed_compressed(2, stream)
+    )
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    kinds = []
+    for _ in range(30):
+        message = glyph_reader.feed(reader)
+        if message is not None:
+            kinds.append(type(message).__name__)
+
+    assert kinds == ["CustomGlyph", "BeginBatch", "CustomGlyph"]
+
+
+def test_a_key_inflates_into_the_buffer_it_does_not_draw_from():
+    core1 = FakeGlyphcore(polls_before_done=0)
+    first = _patterned_pixels()
+    second = bytes([0x56, 0x78]) * (wire.CUSTOM_GLYPH_PIXELS_SIZE // 2)
+    framed = _framed_compressed(2, zlib.compress(first, 9)) + _framed_compressed(
+        2, zlib.compress(second, 9)
+    )
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    one = _feed_until_message(glyph_reader, reader)
+    two = _feed_until_message(glyph_reader, reader)
+
+    assert [buffer for _, buffer in core1.submitted] == [4, 5]
+    assert bytes(one.pixels) == first  # still whole after the second glyph
+    assert bytes(two.pixels) == second
+    assert one.pixels is not two.pixels
+
+
+def test_a_third_glyph_for_a_key_returns_to_the_first_buffer_as_a_new_view():
+    core1 = FakeGlyphcore(polls_before_done=0)
+    stream = zlib.compress(_patterned_pixels(), 9)
+    framed = b"".join(_framed_compressed(0, stream) for _ in range(3))
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    views = [_feed_until_message(glyph_reader, reader).pixels for _ in range(3)]
+
+    assert [buffer for _, buffer in core1.submitted] == [0, 1, 0]
+    assert views[0] is not views[2]  # the identity check of display_render sees it
+
+
+def test_a_store_frame_inflates_into_the_staging_buffer():
+    core1 = FakeGlyphcore(polls_before_done=0)
+    pixels = _patterned_pixels()
+    framed = _framed_store(9, 0xF81F, zlib.compress(pixels, 9))
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    message = _feed_until_message(glyph_reader, reader)
+
+    assert isinstance(message, wire.StoreFrame)
+    assert (message.slot, message.color) == (9, 0xF81F)
+    assert bytes(message.pixels) == pixels
+    assert core1.submitted[0][1] == wire._STAGING_BUFFER
+
+
+def test_a_store_frame_without_a_stream_needs_no_inflate():
+    core1 = FakeGlyphcore()
+    glyph_reader, reader = _core1_reader(core1, _framed_store(3, 0x07E0, b""))
+
+    message = glyph_reader.feed(reader)
+
+    assert (message.slot, message.color, message.pixels) == (3, 0x07E0, None)
+    assert core1.submitted == []
+
+
+def test_when_core_1_is_busy_the_reader_inflates_on_core_0():
+    core1 = FakeGlyphcore()
+    core1.refuse = True
+    pixels = _patterned_pixels()
+    glyph_reader, reader = _core1_reader(
+        core1, _framed_compressed(3, zlib.compress(pixels, 9))
+    )
+
+    glyph = glyph_reader.feed(reader)
+
+    assert glyph.key_index == 3
+    assert glyph.pixels == pixels
+    assert core1.submitted == []
+
+
+def test_a_stream_that_core_1_cannot_inflate_raises_and_the_next_frame_decodes():
+    core1 = FakeGlyphcore(polls_before_done=0)
+    good = zlib.compress(_patterned_pixels(), 9)
+    framed = _framed_compressed(1, b"\x78\x9c\xff\xff\xff") + _framed_compressed(2, good)
+    glyph_reader, reader = _core1_reader(core1, framed)
+
+    with pytest.raises(ValueError):
+        _feed_until_message(glyph_reader, reader)
+
+    assert _feed_until_message(glyph_reader, reader).key_index == 2
+
+
+def test_a_glyph_that_core_1_never_finishes_is_dropped_and_the_reader_goes_on():
+    core1 = FakeGlyphcore(never_answers=True)
+    stream = zlib.compress(_patterned_pixels(), 9)
+    framed = _framed_compressed(1, stream) + _framed_begin_batch(0b100, 0)
+    clock = _TickingClock(step_ns=100_000_000)  # 100 ms per call
+    glyph_reader, reader = _core1_reader(core1, framed, timeout_ns=500_000_000, clock=clock)
+
+    messages = []
+    for _ in range(40):
+        message = glyph_reader.feed(reader)
+        if message is not None:
+            messages.append(message)
+
+    assert glyph_reader.dropped == 1
+    assert core1.cancels >= 2  # one when the reader was built, one for the drop
+    # No glyph came out. The frame behind it did, and the reader is free.
+    assert [type(m).__name__ for m in messages] == ["BeginBatch"]
+
+
+def test_the_reader_clears_a_job_that_a_reload_left_in_the_module():
+    core1 = FakeGlyphcore()
+
+    wire.CustomGlyphReader(core1=core1)
+
+    assert core1.cancels == 1

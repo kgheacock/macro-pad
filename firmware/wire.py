@@ -11,6 +11,13 @@ See tasks/ongoing/0022-firmware-main-loop.md for the design decision.
 import time
 import zlib
 
+# The module of the second core (task 0059), in the custom CircuitPython build.
+# Stock CircuitPython has none, and the firmware then inflates on core 0.
+try:
+    import glyphcore
+except ImportError:
+    glyphcore = None
+
 PROTOCOL_VERSION = 1
 
 KEY_STATE_SIZE = 6  # docs/wire-protocol.md's Key state message
@@ -48,6 +55,16 @@ MESSAGE_TYPE_BATCH_INCOMPLETE = 11
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
 # 32 KB frame in about 125 ms on the board (task 0058).
 READ_BUDGET_NS = 8000000
+
+# Core 1 inflates into one of GLYPH_BUFFERS buffers of the glyphcore module:
+# two for each of the first GLYPH_KEYS keys, so a new glyph never overwrites the
+# pixels that the key still draws from, and one to inflate a Store frame into.
+GLYPH_KEYS = 7
+GLYPH_BUFFERS = 2 * GLYPH_KEYS + 1
+_STAGING_BUFFER = 2 * GLYPH_KEYS
+# A glyph that core 1 has not finished after this long is dropped, and the key
+# keeps its image. A glyph takes under 100 ms on core 1.
+INFLATE_TIMEOUT_NS = 500_000_000
 
 PING_KEY_INDEX = 255  # docs/wire-protocol.md's Ping section
 
@@ -252,6 +269,11 @@ def _inflate_glyph(stream):
     return pixels
 
 
+_UNSET = object()
+_GLYPH = 0  # what a pending inflate becomes: a CustomGlyph...
+_STORE = 1  # ...or a StoreFrame
+
+
 class CustomGlyphReader:
     """Incrementally reads one framed CDC message from the host.
 
@@ -265,9 +287,24 @@ class CustomGlyphReader:
     per `MacroPad.step` pass, 140 KB/s (task 0058). The budget bounds how
     long one call can hold up the switch scan. An idle `feed`, with nothing
     in progress and nothing waiting, returns at once.
+
+    With a `core1` (the `glyphcore` module, or a stand-in), a type 6 or type 8
+    stream goes to the second core, and `feed` goes on to read the next frame
+    while core 1 inflates (task 0059). A later `feed` returns the message once
+    core 1 is done. Messages come out in the order they arrived: a frame that
+    arrives behind a stream in progress waits in the buffer until that stream
+    is done. A stream that core 1 does not finish within `timeout_ns` is
+    dropped. Without a `core1`, or when core 1 is busy, `feed` inflates on
+    core 0, as before.
     """
 
-    def __init__(self, clock=None, budget_ns=READ_BUDGET_NS):
+    def __init__(
+        self,
+        clock=None,
+        budget_ns=READ_BUDGET_NS,
+        core1=_UNSET,
+        timeout_ns=None,
+    ):
         self._frame = bytearray(FRAME_HEADER_SIZE + CUSTOM_GLYPH_PAYLOAD_SIZE)
         self._view = memoryview(self._frame)
         self._filled = 0
@@ -279,6 +316,19 @@ class CustomGlyphReader:
         self._bad_length = False
         self._clock = clock if clock is not None else time.monotonic_ns
         self._budget_ns = budget_ns
+        self._core1 = glyphcore if core1 is _UNSET else core1
+        self._timeout_ns = INFLATE_TIMEOUT_NS if timeout_ns is None else timeout_ns
+        # The inflate on core 1 in progress: (kind, info, buffer, started).
+        self._pending = None
+        # True while a complete frame waits in `_frame` behind a pending one.
+        self._stalled = False
+        # Which of a key's two glyph buffers holds its current glyph.
+        self._current = [1] * GLYPH_KEYS
+        # The number of glyphs dropped because core 1 was too slow.
+        self.dropped = 0
+        if self._core1 is not None:
+            # A reload can leave a job from the last run in the module.
+            self._core1.cancel()
 
     def feed(self, reader):
         """Read whatever is available from `reader`.
@@ -292,6 +342,10 @@ class CustomGlyphReader:
         glyph frame of the wrong length is dropped the same way, and then
         raises `ValueError`, so the next frame starts clean.
         """
+        if self._pending is not None or self._stalled:
+            message = self._advance()
+            if message is not None or self._stalled:
+                return message
         if not reader.in_waiting and not self._filled and not self._skip:
             return None
 
@@ -368,29 +422,12 @@ class CustomGlyphReader:
 
     def _finish(self):
         if self._filled:
-            total = self._filled
-            self._filled = 0
-            if self._frame_type == MESSAGE_TYPE_BEGIN_BATCH:
-                return BeginBatch(
-                    glyph_mask=self._frame[FRAME_HEADER_SIZE],
-                    state_mask=self._frame[FRAME_HEADER_SIZE + 1],
-                )
-            if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES:
-                return ShowFrames(slots=bytes(self._frame[FRAME_HEADER_SIZE:total]))
-            if self._frame_type == MESSAGE_TYPE_STORE_FRAME:
-                base = FRAME_HEADER_SIZE
-                stream = self._view[base + STORE_FRAME_HEADER_SIZE : total]
-                pixels = _inflate_glyph(stream) if len(stream) else None
-                return StoreFrame(
-                    slot=self._frame[base],
-                    color=self._frame[base + 1] | (self._frame[base + 2] << 8),
-                    pixels=pixels,
-                )
-            key_index = self._frame[FRAME_HEADER_SIZE]
-            stream = self._view[FRAME_HEADER_SIZE + 1 : total]
-            if self._frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH:
-                return CustomGlyph(key_index=key_index, pixels=bytes(stream))
-            return CustomGlyph(key_index=key_index, pixels=_inflate_glyph(stream))
+            if self._pending is not None:
+                # Behind a stream that core 1 inflates. Hold it, so that the
+                # messages keep their order, and read no more until it is done.
+                self._stalled = True
+                return None
+            return self._dispatch()
         if self._bad_length:
             self._bad_length = False
             raise ValueError(
@@ -399,3 +436,86 @@ class CustomGlyphReader:
                 )
             )
         return None
+
+    def _advance(self):
+        """Move the pending inflate and the held frame on. Returns the message
+        of a finished inflate, or of the held frame once nothing is pending.
+        """
+        if self._pending is not None:
+            message = self._collect()
+            if message is not None or self._pending is not None:
+                return message
+        if self._stalled:
+            self._stalled = False
+            return self._dispatch()
+        return None
+
+    def _dispatch(self):
+        """Turn the complete frame in `_frame` into a message, or start its
+        inflate on core 1 and return `None`."""
+        total = self._filled
+        self._filled = 0
+        base = FRAME_HEADER_SIZE
+        if self._frame_type == MESSAGE_TYPE_BEGIN_BATCH:
+            return BeginBatch(
+                glyph_mask=self._frame[base],
+                state_mask=self._frame[base + 1],
+            )
+        if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES:
+            return ShowFrames(slots=bytes(self._frame[base:total]))
+        if self._frame_type == MESSAGE_TYPE_STORE_FRAME:
+            stream = self._view[base + STORE_FRAME_HEADER_SIZE : total]
+            slot = self._frame[base]
+            color = self._frame[base + 1] | (self._frame[base + 2] << 8)
+            if not len(stream):
+                return StoreFrame(slot=slot, color=color, pixels=None)
+            return self._inflate(_STORE, (slot, color), _STAGING_BUFFER, stream)
+        key_index = self._frame[base]
+        stream = self._view[base + 1 : total]
+        if self._frame_type == MESSAGE_TYPE_SET_CUSTOM_GLYPH:
+            return CustomGlyph(key_index=key_index, pixels=bytes(stream))
+        buffer = _STAGING_BUFFER
+        if key_index < GLYPH_KEYS:
+            buffer = 2 * key_index + 1 - self._current[key_index]
+        return self._inflate(_GLYPH, key_index, buffer, stream)
+
+    def _inflate(self, kind, info, buffer, stream):
+        """Inflate `stream`: on core 1 when it takes the job, else here."""
+        if self._core1 is not None:
+            try:
+                self._core1.submit(stream, buffer)
+            except OSError:
+                # A flash write is on, or the module holds a result. Do it here.
+                pass
+            else:
+                self._pending = (kind, info, buffer, self._clock())
+                return None
+        return self._message(kind, info, _inflate_glyph(stream))
+
+    def _collect(self):
+        """Poll the pending inflate. Returns its message when done, `None`
+        while it runs, and `None` after it dropped a stream that took too long.
+        Raises `ValueError` for a stream that does not inflate.
+        """
+        kind, info, buffer, started = self._pending
+        try:
+            length = self._core1.poll()
+        except ValueError:
+            self._pending = None
+            raise ValueError("compressed custom glyph does not inflate")
+        if length is None:
+            if self._clock() - started >= self._timeout_ns:
+                self._pending = None
+                self._core1.cancel()
+                self.dropped += 1
+            return None
+        self._pending = None
+        if kind == _GLYPH and info < GLYPH_KEYS:
+            self._current[info] = buffer & 1
+        return self._message(kind, info, self._core1.glyph_view(buffer))
+
+    @staticmethod
+    def _message(kind, info, pixels):
+        if kind == _STORE:
+            return StoreFrame(slot=info[0], color=info[1], pixels=pixels)
+        return CustomGlyph(key_index=info, pixels=pixels)

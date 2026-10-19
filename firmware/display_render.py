@@ -151,7 +151,7 @@ def compose_into(frame, scratch, color: int, pixels: bytes) -> None:
 PIP_SHEET_WIDTH = 256
 PIP_SHEET_HEIGHT = 64
 PIP_DISC = 44
-PIP_MARGIN = 4
+PIP_MARGIN = 5
 PIP_BIG_W = 14
 PIP_BIG_H = 20
 PIP_SMALL_W = 10

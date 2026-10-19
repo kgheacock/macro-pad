@@ -27,6 +27,10 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
+`send`, `pipe`, `list`, `count` and `seen` also take `--channel C` in place of
+the `CHANNEL` argument. Give the channel only once: both together exit with
+code 2.
+
 `-h` and `--help` work on `inbox` and on every subcommand, before or after
 other arguments. `--db PATH` on any command overrides `$INBOX_DB`.
 `inbox daemon` is described under "Daemon", below.
@@ -61,6 +65,17 @@ Use `2>&1` when the order matters more than the stream.
 With three or more it exits with code 2 and says to quote the message.
 `inbox send` never reads standard input; `inbox pipe` does, and exits with
 code 2 when standard input is a terminal.
+
+When standard input is a pipe or file and you name no command, `inbox` acts as
+`inbox pipe`. Options may follow, but a channel needs the word `pipe`:
+
+```
+echo "hello" | inbox
+make 2>&1 | inbox --status error
+make 2>&1 | inbox --channel build
+```
+
+On a terminal, `inbox` with no command shows help.
 
 ### Piped input
 

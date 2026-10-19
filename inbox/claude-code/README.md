@@ -1,7 +1,7 @@
-# Claude Code hooks for ai-inbox
+# Claude Code hooks for the ai plugin
 
 Reference copy of the Claude Code setup that reports each session to
-`ai-inbox` (see "ai-inbox" in `../README.md`). The live files are
+`inbox --plugin ai` (see "The ai plugin" in `../README.md`). The live files are
 `~/.claude/hooks/claude-ai-inbox.sh` and the `hooks` key of
 `~/.claude/settings.json`. Task 0070 put them there, in place of the iTerm
 badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
@@ -15,9 +15,9 @@ badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
 | `SessionEnd` | `end` | clears a running or waiting state that would stay stuck |
 
 One channel per project: the path below `~/source` joined by dots, as
-`ai-inbox send` infers it, else the folder name. Sessions in one project share
+`inbox send` infers it, else the folder name. Sessions in one project share
 a channel. The script marks the channel seen on a state change, because
-`ai-inbox` shows the highest status of the *unseen* messages: without it, a
+the ai plugin shows the highest status of the *unseen* messages: without it, a
 `waiting` from a permission prompt would stay yellow after you approve, and a
 `running` would hide the `done`. A press on the channel key goes back to the
 iTerm session that sent the message (the "here").
@@ -31,8 +31,9 @@ jq --slurpfile h inbox/claude-code/settings-hooks.json '.hooks = $h[0].hooks' \
   ~/.claude/settings.json.bak > ~/.claude/settings.json
 ```
 
-This replaces every hook in `settings.json`. Needs `jq` and `ai-inbox` in
-`~/.local/bin` (`inbox/scripts/install.sh --ai`).
+This replaces every hook in `settings.json`. Needs `jq` and `inbox` in
+`~/.local/bin` (set `INBOX_BIN` for another path), and the ai daemon
+(`inbox/scripts/install.sh --plugin ai`).
 
 ## Limits
 

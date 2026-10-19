@@ -1,7 +1,7 @@
 ---
 id: "0071"
 title: "One inbox with plugins: --plugin NAME picks the rules, basic by default, and ai-inbox becomes the ai plugin"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-19"
 updated: "2026-10-19"
 owner: "kgheacock"
@@ -189,6 +189,8 @@ An outside reviewer verifies each item without help from the implementer. Each i
   **Proof:** run the commands; `grep -c ai`
 - [ ] **DoD-9** — Nothing in `inbox/` (code, scripts, completion, README, hooks) names `ai-inbox` as a command,
   `AI_INBOX_DB`, or `--ai`. **Proof:** `grep -rnE 'AI_INBOX_DB|--ai\b|bin/ai-inbox' inbox/` prints nothing
+  - The implementer ran DoD-1 to DoD-9 (all 102 tests pass; script dry runs on Linux). The boxes are left
+    for a reviewer to tick.
 - [ ] **DoD-10** — On the pad, both daemons running from `install.sh` and `install.sh --plugin ai`: the Claude
   Code hooks turn the ai key yellow and green as in 0070, and `inbox send` still changes only the inbox key.
   **Proof:** Keith's check on the board, recorded in Notes

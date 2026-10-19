@@ -1,35 +1,36 @@
 #!/bin/sh
-# Install the inbox command (or with --ai, the ai-inbox command) and start its
-# daemon at login. macOS: a launchd LaunchAgent. Linux: a systemd user unit.
+# Install the inbox command and start the daemon of one plugin at login.
+# macOS: a launchd LaunchAgent. Linux: a systemd user unit.
 
 NAME=install.sh
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--ai] [--port N] [--slot N] [--no-completions] [--dry-run]
+Usage: install.sh [--plugin NAME] [--port N] [--slot N] [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. Run it again
 to upgrade in place: it rewrites the files and restarts the daemon.
 
-  --ai              install ai-inbox, the inbox for AI agents, instead: its own
-                    command, store, service, and key on the pad. It does not
-                    change the inbox install. It installs no completions.
+  --plugin NAME     start the daemon of this plugin (default: basic; see
+                    'inbox plugins'). Each plugin has its own service and key
+                    on the pad, so run it once per plugin you want. They share
+                    the command and the store.
   --port N          macropadd's port (default: 8765)
   --slot N          put the Inbox key in slot N, 0 to 5
   --no-completions  do not install the zsh completions
   --dry-run         print each action; change nothing
   -h, --help        show this text
 
-It writes (with --ai: ai-inbox in place of inbox):
+It writes ([-NAME] and [.NAME] only for a plugin other than basic):
   \$PREFIX/bin/inbox   a wrapper that runs this checkout with the node found
                       now (PREFIX defaults to \$HOME/.local)
   _inbox              a link to inbox/completions/_inbox in the completions
                       directory of oh-my-zsh ($ZSH_CACHE_DIR/completions),
                       when oh-my-zsh is installed. Open a new shell to use it.
-  macOS   ~/Library/LaunchAgents/$LABEL.plist
-          log: ~/Library/Logs/inbox-daemon.log
-  Linux   ~/.config/systemd/user/$UNIT
-          log: journalctl --user -u $UNIT
+  macOS   ~/Library/LaunchAgents/com.kgheacock.macropad.inbox[.NAME].plist
+          log: ~/Library/Logs/inbox-daemon[-NAME].log
+  Linux   ~/.config/systemd/user/inbox-daemon[-NAME].service
+          log: journalctl --user -u inbox-daemon[-NAME].service
 
 Keep this checkout where it is. Run install.sh again after you move it or
 change the Node version. Restart macropadd after you update it: the
@@ -46,19 +47,19 @@ PORT=8765
 SLOT=
 DRY=0
 COMPLETIONS=1
-AI=0
+PLUGIN=basic
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
-    --ai) AI=1 ;;
     --no-completions) COMPLETIONS=0 ;;
-    --assets-dir | --port | --slot)
+    --assets-dir | --port | --slot | --plugin)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
         --assets-dir) printf '%s: --assets-dir is unused: the daemon sends icon text, not picture files; ignoring it\n' "$NAME" >&2 ;;
         --port) PORT=$2 ;;
         --slot) SLOT=$2 ;;
+        --plugin) PLUGIN=$2 ;;
       esac
       shift ;;
     *) printf '%s: unknown option "%s"; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2 ;;
@@ -79,26 +80,30 @@ if [ -n "$SLOT" ]; then
   [ "$SLOT" -le 5 ] || fail "--slot $SLOT is out of range; use 0 to 5"
 fi
 
-# What differs for ai-inbox: the names, the store, and the variable that sets it.
-if [ "$AI" = 1 ]; then
-  CMD=ai-inbox
-  LABEL=com.kgheacock.macropad.ai-inbox
-  UNIT=ai-inbox-daemon.service
-  DESC='ai-inbox daemon: show the state of AI agents on the macro pad'
-  DB_VAR=AI_INBOX_DB
-  DB_OVERRIDE=${AI_INBOX_DB:-}
-  COMPLETIONS=0
-else
-  CMD=inbox
+case $PLUGIN in
+  '' | *[!A-Za-z0-9_-]*)
+    printf '%s: --plugin "%s" is not a plugin name; run '"'"'inbox plugins'"'"' for the list\n' "$NAME" "$PLUGIN" >&2
+    exit 2 ;;
+esac
+
+# What differs per plugin: the service names, and the flag of its daemon.
+CMD=inbox
+if [ "$PLUGIN" = basic ]; then
   LABEL=com.kgheacock.macropad.inbox
   UNIT=inbox-daemon.service
+  LOG_NAME=inbox-daemon
   DESC='Inbox daemon: show unseen inbox messages on the macro pad'
-  DB_VAR=INBOX_DB
-  DB_OVERRIDE=${INBOX_DB:-}
+else
+  LABEL=com.kgheacock.macropad.inbox.$PLUGIN
+  UNIT=inbox-daemon-$PLUGIN.service
+  LOG_NAME=inbox-daemon-$PLUGIN
+  DESC="Inbox daemon, plugin $PLUGIN: show it on the macro pad"
 fi
+DB_VAR=INBOX_DB
+DB_OVERRIDE=${INBOX_DB:-}
 PREFIX=${PREFIX:-$HOME/.local}
 WRAPPER=$PREFIX/bin/$CMD
-DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/$CMD/$CMD.db}
+DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/inbox/inbox.db}
 
 # A service file cannot hold these characters safely, so refuse them.
 plain() {
@@ -123,6 +128,13 @@ NODE_VERSION=$("$NODE" -p 'process.versions.node') || fail "cannot run $NODE --v
 NODE_OK=$("$NODE" -p 'const [a, b] = process.versions.node.split(".").map(Number); a > 22 || (a === 22 && b >= 13)')
 [ "$NODE_OK" = true ] || fail "node $NODE_VERSION is too old; install Node 22.13 or newer"
 
+# The plugin must be one this checkout has.
+PLUGINS=$("$NODE" "$INBOX_DIR/bin/inbox.js" plugins | awk '{print $1}') || fail "cannot run inbox plugins"
+if ! printf '%s\n' "$PLUGINS" | grep -qx "$PLUGIN"; then
+  printf '%s: unknown plugin "%s"; use one of: %s\n' "$NAME" "$PLUGIN" "$(printf '%s' "$PLUGINS" | tr '\n' ' ')" >&2
+  exit 2
+fi
+
 # do_run prints an action in a dry run, and runs it otherwise.
 do_run() {
   if [ "$DRY" = 1 ]; then
@@ -134,6 +146,7 @@ do_run() {
 
 # Daemon flags, as words for the wrapper.
 DAEMON_ARGS="daemon --port $PORT"
+[ "$PLUGIN" = basic ] || DAEMON_ARGS="$DAEMON_ARGS --plugin $PLUGIN"
 [ -z "$SLOT" ] || DAEMON_ARGS="$DAEMON_ARGS --slot $SLOT"
 [ -z "$DB_OVERRIDE" ] || DAEMON_ARGS="$DAEMON_ARGS --db $DB_OVERRIDE"
 
@@ -191,7 +204,7 @@ render() {
 
 write_service() {
   if [ "$DRY" = 1 ]; then
-    printf 'would write: %s\n' "$SERVICE_FILE"
+    printf 'would write: %s (runs: inbox %s)\n' "$SERVICE_FILE" "$DAEMON_ARGS"
     return
   fi
   mkdir -p "$(dirname "$SERVICE_FILE")" || fail "step failed: mkdir -p $(dirname "$SERVICE_FILE")"
@@ -200,7 +213,7 @@ write_service() {
 
 install_macos() {
   SERVICE_FILE=$HOME/Library/LaunchAgents/$LABEL.plist
-  LOG=$HOME/Library/Logs/$CMD-daemon.log
+  LOG=$HOME/Library/Logs/$LOG_NAME.log
   TEMPLATE=$HERE/com.kgheacock.macropad.inbox.plist.tmpl
   ARGS_TEXT=$(plist_args)
   EXEC=
@@ -276,6 +289,7 @@ fi
 printf 'command:  %s (node %s at %s)\n' "$WRAPPER" "$NODE_VERSION" "$NODE"
 printf 'service:  %s\n' "$SERVICE_FILE"
 printf 'log:      %s\n' "$LOG"
+printf 'plugin:   %s\n' "$PLUGIN"
 printf 'store:    %s\n' "$DB"
 printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"

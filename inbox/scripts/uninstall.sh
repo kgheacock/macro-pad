@@ -1,24 +1,25 @@
 #!/bin/sh
-# Stop the inbox daemon (or with --ai, the ai-inbox daemon), and remove its
-# service and its command.
+# Stop the inbox daemon of one plugin and remove its service. The command and
+# the completion go with the last plugin's service.
 
 NAME=uninstall.sh
 
 usage() {
   cat <<USAGE
-Usage: uninstall.sh [--ai] [--purge] [--dry-run]
+Usage: uninstall.sh [--plugin NAME] [--purge] [--dry-run]
 
-Stop the inbox daemon and remove what install.sh made:
-  - the LaunchAgent (macOS) or the systemd user unit (Linux)
-  - the \$PREFIX/bin/inbox wrapper (PREFIX defaults to \$HOME/.local)
-  - the zsh completion link in the oh-my-zsh completions directory
+Stop the inbox daemon of one plugin and remove what install.sh made:
+  - its LaunchAgent (macOS) or systemd user unit (Linux)
+  - the \$PREFIX/bin/inbox wrapper (PREFIX defaults to \$HOME/.local) and
+    the zsh completion link, when no other plugin's service is left
 
 The store (the SQLite file with your messages) stays unless you pass --purge.
 If nothing is installed, it says so and exits 0.
 
-  --ai         remove ai-inbox (its service, command, and store) instead of
-               inbox. The inbox install stays.
-  --purge      also remove the store and its -wal, -shm and pid files
+  --plugin NAME  the plugin whose daemon to remove (default: basic)
+  --purge      also remove the store and its -wal, -shm and pid files. The
+               store holds every plugin, so this is refused while another
+               plugin's service is installed.
   --dry-run    print each action; change nothing
   -h, --help   show this text
 USAGE
@@ -31,11 +32,14 @@ fail() {
 
 PURGE=0
 DRY=0
-AI=0
+PLUGIN=basic
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
-    --ai) AI=1 ;;
+    --plugin)
+      [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
+      PLUGIN=$2
+      shift ;;
     --dry-run) DRY=1 ;;
     --purge) PURGE=1 ;;
     *) printf '%s: unknown option "%s"; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2 ;;
@@ -43,26 +47,50 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ "$AI" = 1 ]; then
-  CMD=ai-inbox
-  LABEL=com.kgheacock.macropad.ai-inbox
-  UNIT=ai-inbox-daemon.service
-  DB_OVERRIDE=${AI_INBOX_DB:-}
-else
-  CMD=inbox
+case $PLUGIN in
+  '' | *[!A-Za-z0-9_-]*)
+    printf '%s: --plugin "%s" is not a plugin name\n' "$NAME" "$PLUGIN" >&2
+    exit 2 ;;
+esac
+
+CMD=inbox
+if [ "$PLUGIN" = basic ]; then
   LABEL=com.kgheacock.macropad.inbox
   UNIT=inbox-daemon.service
-  DB_OVERRIDE=${INBOX_DB:-}
+else
+  LABEL=com.kgheacock.macropad.inbox.$PLUGIN
+  UNIT=inbox-daemon-$PLUGIN.service
 fi
+DB_OVERRIDE=${INBOX_DB:-}
 PREFIX=${PREFIX:-$HOME/.local}
 WRAPPER=$PREFIX/bin/$CMD
-DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/$CMD/$CMD.db}
+DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/inbox/inbox.db}
 
 case $(uname -s) in
-  Darwin) PLATFORM=macos; SERVICE_FILE=$HOME/Library/LaunchAgents/$LABEL.plist ;;
-  Linux) PLATFORM=linux; SERVICE_FILE=$HOME/.config/systemd/user/$UNIT ;;
+  Darwin)
+    PLATFORM=macos
+    SERVICE_DIR=$HOME/Library/LaunchAgents
+    SERVICE_FILE=$SERVICE_DIR/$LABEL.plist
+    ALL_SERVICES="com.kgheacock.macropad.inbox.plist com.kgheacock.macropad.inbox.*.plist" ;;
+  Linux)
+    PLATFORM=linux
+    SERVICE_DIR=$HOME/.config/systemd/user
+    SERVICE_FILE=$SERVICE_DIR/$UNIT
+    ALL_SERVICES="inbox-daemon.service inbox-daemon-*.service" ;;
   *) fail "$(uname -s) is not supported; use macOS or Linux" ;;
 esac
+
+# The service files of the other plugins, one per line. While one is left,
+# the wrapper, the completion, and the store are still in use.
+OTHERS=
+for pattern in $ALL_SERVICES; do
+  for f in "$SERVICE_DIR"/$pattern; do
+    [ -e "$f" ] && [ "$f" != "$SERVICE_FILE" ] && OTHERS="$OTHERS${OTHERS:+ }$(basename "$f")"
+  done
+done
+if [ "$PURGE" = 1 ] && [ -n "$OTHERS" ]; then
+  fail "--purge removes the store of every plugin, and $OTHERS still uses it; uninstall that first, or drop --purge"
+fi
 
 # do_run prints an action in a dry run, and runs it otherwise.
 do_run() {
@@ -79,9 +107,7 @@ ours() {
 }
 
 # The completion link install.sh made: a link to this checkout's _inbox.
-# ai-inbox installs no completion, so there is no link to find.
-COMP_FILE=
-[ "$AI" = 1 ] || COMP_FILE=$("$(dirname "$0")/zsh-completion-dir.sh")
+COMP_FILE=$("$(dirname "$0")/zsh-completion-dir.sh")
 [ -z "$COMP_FILE" ] || COMP_FILE=$COMP_FILE/_inbox
 comp_ours() {
   [ -n "$COMP_FILE" ] && [ -L "$COMP_FILE" ] && case $(readlink "$COMP_FILE") in */inbox/completions/_inbox) true ;; *) false ;; esac
@@ -114,16 +140,20 @@ else
   fi
   if [ -e "$SERVICE_FILE" ]; then do_run rm -f "$SERVICE_FILE"; fi
   [ "$PLATFORM" = linux ] && [ "$DRY" = 0 ] && { systemctl --user daemon-reload >/dev/null 2>&1; }
-  if ours; then
-    do_run rm -f "$WRAPPER"
-  elif [ -e "$WRAPPER" ]; then
-    printf 'kept %s: install.sh did not write it\n' "$WRAPPER"
+  if [ -n "$OTHERS" ]; then
+    printf 'kept %s and the completion: %s still uses them\n' "$WRAPPER" "$OTHERS"
+  else
+    if ours; then
+      do_run rm -f "$WRAPPER"
+    elif [ -e "$WRAPPER" ]; then
+      printf 'kept %s: install.sh did not write it\n' "$WRAPPER"
+    fi
+    if comp_ours; then do_run rm -f "$COMP_FILE"; fi
   fi
-  if comp_ours; then do_run rm -f "$COMP_FILE"; fi
 fi
 
 if [ "$PURGE" = 1 ]; then
-  for f in "$DB" "$DB-wal" "$DB-shm" "$DB.daemon.pid"; do
+  for f in "$DB" "$DB-wal" "$DB-shm" "$DB".*.daemon.pid; do
     if [ -e "$f" ]; then do_run rm -f "$f"; fi
   done
   [ "$DRY" = 1 ] || printf 'removed the store %s\n' "$DB"

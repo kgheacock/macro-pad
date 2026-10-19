@@ -1,5 +1,5 @@
 // The inbox daemon: watch the store, keep macropadd's layer tree in step.
-// startDaemon is the loop; acquirePidFile keeps one daemon per store.
+// startDaemon is the loop; acquirePidFile keeps one daemon per store and plugin.
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -7,7 +7,8 @@ import { DaemonRunningError, StoreError } from './errors.js';
 import { focus as focusHere, parseHere } from './here.js';
 import { decodeMessage } from './protocol.js';
 import { openStore } from './store.js';
-import { INBOX_ID, createRenderer as createInboxRenderer } from './render.js';
+import { getPlugin } from './plugins/index.js';
+import { createRenderer } from './render.js';
 
 export const DEFAULT_PORT = 8765;
 export const DEFAULT_POLL_MS = 500;
@@ -39,11 +40,19 @@ function readPid(pidFile) {
   }
 }
 
-// Creates <db>.daemon.pid with this process's id. Throws DaemonRunningError
-// when a live daemon holds it, and replaces a stale file. Returns a function
-// that removes the file.
-export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive = isAlive } = {}) {
-  const pidFile = `${file}.daemon.pid`;
+// The pid file of the daemon of one plugin on one store.
+export function pidPath(file, plugin) {
+  return `${file}.${plugin}.daemon.pid`;
+}
+
+// Creates <db>.<plugin>.daemon.pid with this process's id. Throws
+// DaemonRunningError when a live daemon holds it, and replaces a stale file.
+// Returns a function that removes the file.
+export function acquirePidFile(
+  file,
+  { plugin = getPlugin().name, log = () => {}, pid = process.pid, alive = isAlive } = {},
+) {
+  const pidFile = pidPath(file, plugin);
   try {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   } catch (e) {
@@ -65,7 +74,7 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
     }
     const other = readPid(pidFile);
     if (other !== null && other !== pid && alive(other)) {
-      throw new DaemonRunningError(`a daemon already runs for ${file} (pid ${other})`);
+      throw new DaemonRunningError(`a ${plugin} daemon already runs for ${file} (pid ${other})`);
     }
     log(`replacing a stale pid file ${pidFile} (pid ${other ?? 'unreadable'} is gone)`);
     try {
@@ -80,10 +89,11 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 // Starts the watch loop and the connection to macropadd. Returns
 // { stop() }; stop() closes everything and resolves when it is done.
 //
-// store     an open Store (a test passes one to count queries); else the
-//           daemon opens `file` and closes it on stop
-// renderer  createRenderer({ slot }), see render.js; its `topId` is the key
-//           whose layer a press is read in (else `inbox`)
+// plugin    the plugin it shows (plugins/index.js): the store rows it reads,
+//           and the rules of its keys. A press is read only in the layer of
+//           its top key.
+// store     an open Store for that plugin (a test passes one to count
+//           queries); else the daemon opens `file` and closes it on stop
 // focus     (here) -> Promise, brings a "here" to the front (here.js); a test
 //           passes a stub
 // onEvent   (event, { active }) for each event from macropadd, after the daemon
@@ -97,15 +107,15 @@ export function startDaemon({
   guardMs = GUARD_MS,
   layerWaitMs = LAYER_WAIT_MS,
   log = () => {},
+  plugin = getPlugin(),
   store,
-  createRenderer = createInboxRenderer,
   focus = focusHere,
   onEvent = () => {},
   WebSocketImpl = globalThis.WebSocket,
 }) {
-  const db = store ?? openStore(file, env);
-  const renderer = createRenderer({ slot });
-  const topId = renderer.topId ?? INBOX_ID;
+  const db = store ?? openStore(file, env, { plugin: plugin.name });
+  const renderer = createRenderer({ slot, rules: plugin.rules });
+  const topId = renderer.topId;
   const url = `ws://127.0.0.1:${port}/`;
 
   let version;

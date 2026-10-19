@@ -4,6 +4,10 @@ Leave short messages per channel in one SQLite file, and read them later.
 Scripts, builds, and agents send; a person (or the daemon, see "Daemon")
 reads. No process must run for a message to be saved.
 
+A plugin decides what the messages mean and how they show on the pad. The
+default, `basic`, counts unseen messages; `ai` shows the state of AI agents.
+Pick one with `--plugin NAME` on any command (see "Plugins").
+
 It is a Node package with no npm dependencies. It uses Node's built-in
 `node:sqlite`, so it needs **Node 22.13 or newer**. No `npm install` is
 needed.
@@ -25,6 +29,7 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox channels [--json]` | Print each channel with unseen messages, its count, and the time of its newest message. |
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |
 | `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
+| `inbox plugins` | Print each plugin and what it shows. See "Plugins". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
 `send`, `pipe`, `list`, `count` and `seen` also take `--channel C` in place of
@@ -33,6 +38,8 @@ code 2.
 
 `-h` and `--help` work on `inbox` and on every subcommand, before or after
 other arguments. `--db PATH` on any command overrides `$INBOX_DB`.
+`--plugin NAME` on any command, before or after the command word, picks the
+plugin; the default is `basic`.
 `inbox daemon` is described under "Daemon", below.
 
 ```
@@ -43,9 +50,10 @@ tail -f build.log | inbox pipe build
 
 ### Status
 
-Every message has a status: letters, digits, `-` and `_`. The default is
-`info`. `--status S` on `send` and `pipe` sets it, and `list` shows it as a
-column (and as `status` in `--json`).
+Every message has a status. In the `basic` plugin it is letters, digits, `-`
+and `_`, and the default is `info`; the `ai` plugin takes three (see
+"Plugins"). `--status S` on `send` and `pipe` sets it, and `list` shows it as
+a column (and as `status` in `--json`).
 
 ### Standard output and standard error
 
@@ -178,20 +186,29 @@ CREATE TABLE messages (
   seen_at    INTEGER,           -- NULL while unseen
   cwd        TEXT    NOT NULL,  -- the sender's working directory
   status     TEXT    NOT NULL DEFAULT 'info', -- added in schema 2
-  here       TEXT                              -- added in schema 3; NULL for none
+  here       TEXT,                             -- added in schema 3; NULL for none
+  plugin     TEXT    NOT NULL DEFAULT 'basic' -- added in schema 4
 );
-CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
-CREATE TABLE channel_here (  -- added in schema 3
-  channel TEXT PRIMARY KEY,
-  here    TEXT NOT NULL
+CREATE INDEX messages_unseen ON messages (plugin, channel, id) WHERE seen_at IS NULL;
+CREATE TABLE channel_here (  -- added in schema 3, keyed by plugin in schema 4
+  plugin  TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  here    TEXT NOT NULL,
+  PRIMARY KEY (plugin, channel)
 );
 ```
 
-`PRAGMA user_version` is the schema version (now 3; version 2 added `status`,
-version 3 added `here` and `channel_here`). An older file is
-migrated in one transaction. A newer file is refused and left unchanged.
+`PRAGMA user_version` is the schema version (now 4; version 2 added `status`,
+version 3 added `here` and `channel_here`, version 4 added `plugin`). An older
+file is migrated in one transaction; its rows belong to `basic`. A newer file
+is refused and left unchanged.
 
-For code that reads the store (`src/store.js`):
+One file holds every plugin. Each row belongs to one plugin, and every command
+reads and writes only the rows of the plugin it runs with, so the same channel
+name can live in two plugins without mixing.
+
+For code that reads the store (`src/store.js`), `openStore(file, env,
+{ plugin })` returns a store bound to one plugin (default `basic`):
 
 - `markSeen(channel, upToId)` marks unseen rows of that channel with
   `id <= upToId` and returns how many changed. A message that lands later
@@ -205,7 +222,6 @@ For code that reads the store (`src/store.js`):
 | Variable | Meaning | Default |
 |---|---|---|
 | `INBOX_DB` | The SQLite file. | `$XDG_DATA_HOME/inbox/inbox.db` |
-| `AI_INBOX_DB` | The SQLite file of `ai-inbox`. | `$XDG_DATA_HOME/ai-inbox/ai-inbox.db` |
 | `INBOX_SOURCE_ROOT` | Root for channel inference. | `~/source` |
 | `XDG_DATA_HOME` | Data directory base. | `~/.local/share` |
 | `INBOX_BUSY_TIMEOUT_MS` | Busy timeout. Tests lower it. | `5000` |
@@ -224,19 +240,21 @@ error adds `run 'inbox COMMAND -h' for help`.
 
 ## Daemon
 
-`inbox daemon` watches the store and shows the unseen messages on the macro
-pad. It is a client of `macropadd`: it sends `setLayerKey` messages over the
+`inbox daemon` watches the store and shows the unseen messages of one plugin
+on the macro pad. This section describes the `basic` plugin; "Plugins" says
+what the `ai` plugin shows instead. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
 and `event` from it. It draws one `inbox` key with the total unseen count,
 and one child key per channel with unseen messages. A press on a child key
 marks that channel's messages seen, then goes to its "here" (see "Here").
 
 ```
-inbox daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+inbox daemon [--plugin NAME] [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
 ```
 
 | Flag | Meaning |
 |---|---|
+| `--plugin NAME` | The plugin to show. Default `basic`. |
 | `--port N` | `macropadd`'s port on 127.0.0.1. Default 8765. |
 | `--assets-dir DIR` | Unused. The daemon sends icon text, not picture files, so it needs no assets directory. The flag is still accepted, with one line on standard error, so a service that passes it starts. |
 | `--slot N` | Put the Inbox key in slot N, 0 to 5. Default: the first free slot. |
@@ -294,9 +312,11 @@ How it behaves:
   the full state, then only changes.
 - While `macropadd` is down it keeps reading the store, and sends only the
   newest state on reconnect.
-- One daemon runs per store. It makes `<db>.daemon.pid`. A second daemon
-  exits with code 3 and `inbox: a daemon already runs for <db> (pid N)`. A pid
-  file whose process is gone is replaced.
+- One daemon runs per store and plugin. It makes `<db>.<plugin>.daemon.pid`.
+  A second daemon of the same plugin exits with code 3 and `inbox: a basic
+  daemon already runs for <db> (pid N)`. A pid file whose process is gone is
+  replaced. The daemons of two plugins run side by side on one `macropadd`;
+  each draws its own key and reads a press only in the layer of its own key.
 - `SIGINT` and `SIGTERM` close the WebSocket and exit 0. The keys stay on the
   pad: `macropadd` keeps them in `layers.json`, and the next daemon start
   corrects them.
@@ -314,12 +334,14 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--ai] [--port N] [--slot N] [--no-completions] [--dry-run]
-inbox/scripts/uninstall.sh [--ai] [--purge] [--dry-run]
+inbox/scripts/install.sh [--plugin NAME] [--port N] [--slot N] [--no-completions] [--dry-run]
+inbox/scripts/uninstall.sh [--plugin NAME] [--purge] [--dry-run]
 ```
 
-`--ai` installs and removes `ai-inbox` instead (see "ai-inbox"). The two installs
-do not touch each other.
+`--plugin NAME` installs or removes the daemon of that plugin (default
+`basic`). Run `install.sh` once per plugin you want on the pad. The plugins
+share the `inbox` command, the completion, and the store; each has its own
+service. `install.sh` checks the name with `inbox plugins`.
 
 `install.sh` needs Node 22.13 or newer. It records the absolute path of the
 `node` it finds, because launchd and systemd do not see your shell's `PATH`
@@ -336,15 +358,18 @@ do not touch each other.
 |---|---|---|
 | Service file | `~/Library/LaunchAgents/com.kgheacock.macropad.inbox.plist` | `~/.config/systemd/user/inbox-daemon.service` |
 | Log | `~/Library/Logs/inbox-daemon.log` | `journalctl --user -u inbox-daemon` |
+| Another plugin | `com.kgheacock.macropad.inbox.NAME.plist`, log `inbox-daemon-NAME.log` | `inbox-daemon-NAME.service` |
 | Restart | `KeepAlive`, 5 s throttle | `Restart=always`, `RestartSec=5` |
 
 Run `install.sh` again to upgrade: it rewrites the files and restarts the
 daemon. Keep the checkout where it is; run the script again after you move it
 or change the Node version. `install.sh` does not start `macropadd`.
 
-`uninstall.sh` stops the daemon, removes the service, the wrapper, and the
-completion link, and keeps the store. `--purge` also removes the store, its `-wal` and `-shm`
-files, and the pid file. With nothing installed it says so and exits 0. Both
+`uninstall.sh` stops the daemon of the plugin and removes its service. It
+removes the wrapper and the completion link only when no other plugin's
+service is left, and keeps the store. `--purge` also removes the store, its
+`-wal` and `-shm` files, and the pid files; the store holds every plugin, so
+`--purge` is refused while another plugin's service is installed. With nothing installed it says so and exits 0. Both
 scripts take `--dry-run` (print each step, change nothing) and `-h`.
 
 ### Completions
@@ -366,34 +391,34 @@ the checkout needs `install.sh` again.
 Exit codes of `inbox daemon`: 0 after a signal, 1 store error, 2 usage error,
 3 a daemon already runs.
 
-## ai-inbox
+## Plugins
 
-`ai-inbox` is the inbox for AI agents. It is the same program with another
-profile (`src/profiles.js`): its own command, its own store, its own key on the
-pad, and three statuses in place of a count. Agents send; a person looks at the
-pad. `inbox` is unchanged.
+A plugin holds only what one kind of inbox does differently: the statuses
+`--status` accepts and its default, the key on the pad (id and icon), what
+the key and the channel keys show, the order of the channel keys, and a
+paragraph of help. The store, the commands, "here", the daemon, and the
+install are shared. The plugins live in `src/plugins/`; to add one, write
+`src/plugins/NAME.js` and list it in `src/plugins/index.js`.
 
 ```
-ai-inbox send --status waiting macro-pad.driver "needs a decision"
-ai-inbox send --status running macro-pad.driver "running the tests"
-ai-inbox send macro-pad.driver "tests passed"        # status done
-ai-inbox seen macro-pad.driver
+inbox plugins
+inbox --plugin ai send --status waiting macro-pad.driver "needs a decision"
+inbox --plugin ai send --status running macro-pad.driver "running the tests"
+inbox send --plugin ai macro-pad.driver "tests passed"        # status done
+inbox --plugin ai seen macro-pad.driver
 ```
 
-Every command of `inbox` works as `ai-inbox COMMAND`, with these differences:
-
-| | `inbox` | `ai-inbox` |
+| | `basic` (default) | `ai` |
 |---|---|---|
-| Store | `$INBOX_DB`, else `~/.local/share/inbox/inbox.db` | `$AI_INBOX_DB`, else `~/.local/share/ai-inbox/ai-inbox.db` |
 | `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. |
 | Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` |
 | Colors | yellow when a message is unseen | blue, green, or yellow, by status |
 | Pip | the unseen messages | the channels that wait |
+| Channel order | newest unseen message first | highest status first, then newest |
 
-Errors start with `ai-inbox:`. The package installs the command with
-`install.sh --ai`; `npm link` links both commands.
+### The ai plugin
 
-### Statuses
+The inbox for AI agents. Agents send; a person looks at the pad.
 
 | Status | Color | Pad status | Meaning |
 |---|---|---|---|
@@ -419,27 +444,25 @@ seen. A message with a stored status outside the three counts as `done`.
   newest unseen message. A channel past the fifth counts in the key's status
   and pip.
 - **A press on a channel key** marks the messages it showed seen, then goes
-  to their "here", as for `inbox`. The keys do not move while the layer is
+  to their "here", as for `basic`. The keys do not move while the layer is
   open; a seen channel keeps its place, with no color, until you leave.
 
 An old `waiting` message keeps the key yellow until it is seen, also after the
-agent went on. Press the channel, or run `ai-inbox seen CHANNEL`.
+agent went on. Press the channel, or run `inbox --plugin ai seen CHANNEL`.
 
-### Daemon
+Run its daemon beside the `basic` one:
 
 ```
-ai-inbox daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+inbox --plugin ai daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+inbox/scripts/install.sh --plugin ai
 ```
 
-The flags and the behavior are those of `inbox daemon`. It makes its own
-`<db>.daemon.pid`, so it runs beside the `inbox` daemon, and both connect to
-one `macropadd`. Each reads a press only in the layer of its own key. Give the
-two keys different slots with `--slot` if you want them in fixed places;
-otherwise each takes the first free slot.
+Give the two keys different slots with `--slot` if you want them in fixed
+places; otherwise each takes the first free slot.
 
 ### Claude Code
 
 `inbox/claude-code/` holds the hooks that report each Claude Code session to
-`ai-inbox`: running while it works, waiting when it needs you, done when the
+the ai plugin: running while it works, waiting when it needs you, done when the
 turn ends. See `inbox/claude-code/README.md` for the events, the install
 steps, and the limits.

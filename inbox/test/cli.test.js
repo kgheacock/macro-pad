@@ -230,6 +230,47 @@ test('TestHelpFlags', (t) => {
   assert.equal(run([], { sc }).status, 2);
 });
 
+test('TestPipeIsTheDefaultForPipedInput', (t) => {
+  const sc = scratch(t);
+  const outside = sc.dir;
+
+  // No command and standard input is a pipe: same as 'inbox pipe'.
+  let r = run([], { sc, cwd: subdir(sc, 'proj'), input: 'hello\nworld\n' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(rows(sc).map((m) => [m.channel, m.body]), [['proj', 'hello'], ['proj', 'world']]);
+
+  // Options before any command are pipe options. A channel needs the word 'pipe'.
+  r = run(['--status', 'warn'], { sc, cwd: subdir(sc, 'proj2'), input: 'w\n' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(rows(sc).filter((m) => m.channel === 'proj2').map((m) => m.status), ['warn']);
+
+  // Outside the source root the channel is still required.
+  r = run([], { sc, cwd: outside, input: 'hi\n' });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('no channel'), r.stderr);
+  assert.match(r.stderr, /run 'inbox pipe -h' for help/);
+
+  // Help still works, and an unknown word is still an unknown command.
+  assert.equal(run(['-h'], { sc, input: 'x\n' }).status, 0);
+  assert.equal(run(['lst'], { sc, input: 'x\n' }).status, 2);
+});
+
+test('TestNoCommandOnATerminalShowsHelp', async (t) => {
+  const sc = scratch(t);
+  const { main } = await import('../src/cli.js');
+  let err = '';
+  const code = await main([], {
+    stdin: { isTTY: true },
+    stdout: { write() {} },
+    stderr: { write: (s) => (err += s) },
+    env: { INBOX_DB: sc.db, INBOX_SOURCE_ROOT: sc.root },
+    cwd: () => sc.root,
+    process,
+  });
+  assert.equal(code, 2);
+  assert.ok(err.startsWith('inbox - leave short messages'), err);
+});
+
 test('TestErrorMessages', async (t) => {
   const sc = scratch(t);
   const first = (r) => r.stderr.split('\n')[0];
@@ -535,4 +576,36 @@ test('TestChannelFallback', (t) => {
   // Usage errors.
   assert.equal(run(['here', '--clear'], { sc }).status, 2);
   assert.equal(run(['here', 'bad channel!', fallback], { sc }).status, 2);
+});
+
+test('TestChannelOption', (t) => {
+  const sc = scratch(t);
+  const outside = sc.dir;
+  const channels = () => rows(sc).map((m) => `${m.channel}:${m.body}`);
+
+  assert.equal(run(['send', '--channel', 'a', 'one'], { sc, cwd: outside }).status, 0);
+  assert.equal(run(['send', 'one', '--channel=b'], { sc, cwd: outside }).status, 0);
+  assert.equal(run(['pipe', '--channel', 'c'], { sc, cwd: outside, input: 'two\n' }).status, 0);
+  // Piped input with no command takes it too.
+  assert.equal(run(['--channel', 'd'], { sc, cwd: outside, input: 'three\n' }).status, 0);
+  assert.deepEqual(channels(), ['a:one', 'b:one', 'c:two', 'd:three']);
+
+  assert.equal(run(['count', '--channel', 'a'], { sc, cwd: outside }).stdout, '1\n');
+  assert.ok(run(['list', '--channel', 'c'], { sc, cwd: outside }).stdout.includes('two'));
+  assert.equal(run(['seen', '--channel', 'a'], { sc, cwd: outside }).stdout, '1\n');
+  assert.equal(run(['count', '--channel', 'a'], { sc, cwd: outside }).stdout, '0\n');
+
+  // The channel twice, or with --all-channels, is a usage error.
+  for (const args of [
+    ['send', '--channel', 'a', 'b', 'msg'],
+    ['pipe', '--channel', 'a', 'b'],
+    ['count', '--channel', 'a', 'b'],
+    ['count', '--channel', 'a', '--all-channels'],
+  ]) {
+    const r = run(args, { sc, cwd: outside, input: 'x\n' });
+    assert.equal(r.status, 2, args.join(' '));
+  }
+  assert.equal(run(['send', '--channel', 'a'], { sc, cwd: outside }).status, 2);
+  assert.equal(run(['send', '--channel', 'bad channel!', 'm'], { sc, cwd: outside }).status, 2);
+  assert.equal(run(['channels', '--channel', 'a'], { sc }).status, 2);
 });

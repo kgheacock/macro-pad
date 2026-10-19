@@ -21,6 +21,7 @@ const CHANNEL_RULES = `How the channel is chosen:
   macro-pad.driver. Outside the root, pass the channel.`;
 
 const DB_OPTION = `  --db PATH   use this SQLite file instead of $INBOX_DB`;
+const CHANNEL_OPTION = `  --channel C  the CHANNEL, as an option instead of an argument`;
 const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
 const HERE_OPTION = `  --here H    where a press on the channel key goes: iterm2:UUID, app:BUNDLE_ID, or
               url:URL (default: $INBOX_HERE, else the iTerm session you are in)`;
@@ -32,6 +33,8 @@ const HELP = {
   inbox: `inbox - leave short messages per channel, and read them later
 
 Usage: inbox COMMAND [ARGUMENTS] [--db PATH]
+       COMMAND | inbox [OPTIONS]            (same as: inbox pipe [OPTIONS])
+       COMMAND | inbox --channel debug
 
 Commands:
   send       send one message
@@ -47,16 +50,18 @@ Commands:
 Examples:
   inbox send debug "build done"
   my_cmd 2>&1 | inbox pipe debug
+  echo "hello" | inbox                 (same as: inbox pipe)
 
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
 
-  send: `Usage: inbox send [--status STATUS] [--here HERE] [CHANNEL] MESSAGE
+  send: `Usage: inbox send [--status STATUS] [--here HERE] [--channel CHANNEL | CHANNEL] MESSAGE
 
 Send one message.
 
   CHANNEL   where the message goes, such as "debug" or "macro-pad.driver"
   MESSAGE   the text; quote it when it has spaces
+${CHANNEL_OPTION}
 ${STATUS_OPTION}
 ${HERE_OPTION}
 ${DB_OPTION}
@@ -68,7 +73,7 @@ Examples:
   inbox send --status error debug "build failed"
   inbox send "tests passed"        (in ~/source/macro-pad: channel macro-pad)`,
 
-  pipe: `Usage: inbox pipe [--status STATUS] [--here HERE] [CHANNEL]
+  pipe: `Usage: inbox pipe [--status STATUS] [--here HERE] [--channel CHANNEL | CHANNEL]
 
 Read standard input and send each line as one message. Empty lines are
 skipped. A line longer than 64 KiB is cut. Messages are saved while the pipe
@@ -76,6 +81,7 @@ is still open, within 200 ms. SIGINT and SIGTERM save what was read, then
 exit 0.
 
   CHANNEL   where the messages go
+${CHANNEL_OPTION}
 ${STATUS_OPTION}
 ${HERE_OPTION}
 ${DB_OPTION}
@@ -90,13 +96,13 @@ Examples:
   my_cmd 2>&1 | inbox pipe debug
   tail -f build.log | inbox pipe`,
 
-  list: `Usage: inbox list [CHANNEL | --all-channels] [--unseen] [--json] [-n N]
+  list: `Usage: inbox list [CHANNEL | --channel C | --all-channels] [--unseen] [--json] [-n N]
 
 List messages, oldest first. A leading "*" marks the ones not seen yet.
 Each line is: time, status, then the channel (with --all-channels), then the
 message.
 
-  CHANNEL         list this channel
+  CHANNEL         list this channel (or --channel C)
   --all-channels  list every channel
   --unseen        list only the messages that are not seen yet
   --json          print a JSON array of {id, channel, body, created_at,
@@ -111,11 +117,11 @@ Examples:
   inbox list debug
   inbox list --all-channels --json`,
 
-  count: `Usage: inbox count [CHANNEL | --all-channels]
+  count: `Usage: inbox count [CHANNEL | --channel C | --all-channels]
 
 Print how many messages are not seen yet.
 
-  CHANNEL         count this channel
+  CHANNEL         count this channel (or --channel C)
   --all-channels  count every channel
 ${DB_OPTION}
 
@@ -136,12 +142,12 @@ ${DB_OPTION}
 Example:
   inbox channels`,
 
-  seen: `Usage: inbox seen [CHANNEL | --all-channels]
+  seen: `Usage: inbox seen [CHANNEL | --channel C | --all-channels]
 
 Mark the unseen messages seen. Print how many changed. A message that lands
 after the command reads the inbox stays unseen.
 
-  CHANNEL         mark this channel
+  CHANNEL         mark this channel (or --channel C)
   --all-channels  mark every channel
 ${DB_OPTION}
 
@@ -200,6 +206,7 @@ Example:
 const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
+const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen'];
 const OPTIONS = {
   send: { status: { type: 'string' }, here: { type: 'string' } },
   pipe: { status: { type: 'string' }, here: { type: 'string' } },
@@ -251,7 +258,11 @@ function parseOptions(command, args) {
   try {
     return parseArgs({
       args,
-      options: { ...SHARED_OPTIONS, ...OPTIONS[command] },
+      options: {
+        ...SHARED_OPTIONS,
+        ...(CHANNEL_OPTION_COMMANDS.includes(command) && { channel: { type: 'string' } }),
+        ...OPTIONS[command],
+      },
       allowPositionals: true,
       strict: true,
     });
@@ -669,6 +680,10 @@ async function dispatch(argv, io) {
     out(io, HELP[command]);
     return 0;
   }
+  // Input is piped in and no command is named: read it as a pipe.
+  if (!io.stdin.isTTY && (argv.length === 0 || argv[0].startsWith('-'))) {
+    return await runCommand('pipe', argv, io);
+  }
   if (argv.length === 0) {
     io.stderr.write(`${HELP.inbox}\n`);
     return 2;
@@ -689,8 +704,28 @@ async function dispatch(argv, io) {
     }
     throw unknownCommand(command);
   }
+  return await runCommand(command, rest, io);
+}
+
+// --channel C is the same as the CHANNEL argument: for send it goes before the
+// MESSAGE, for the others it is the only argument.
+function mergeChannelOption(command, parsed) {
+  const { values, positionals } = parsed;
+  if (values.channel === undefined) return parsed;
+  const channel = values.channel;
+  const limit = command === 'send' ? 1 : 0;
+  if (positionals.length > limit) {
+    throw new UsageError('give the channel once, as --channel or as an argument');
+  }
+  return {
+    values,
+    positionals: command === 'send' && positionals.length === 0 ? [] : [channel, ...positionals],
+  };
+}
+
+async function runCommand(command, args, io) {
   try {
-    return await RUNNERS[command](io, parseOptions(command, rest));
+    return await RUNNERS[command](io, mergeChannelOption(command, parseOptions(command, args)));
   } catch (e) {
     if (e instanceof UsageError) e.command = command;
     throw e;

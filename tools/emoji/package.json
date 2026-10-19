@@ -1,0 +1,13 @@
+{
+  "name": "build-emoji-assets",
+  "private": true,
+  "description": "Draws assets/emoji/*.png from assets/emoji/set.txt (task 0073)",
+  "type": "module",
+  "scripts": {
+    "build": "node build_emoji_assets.mjs"
+  },
+  "dependencies": {
+    "@lobehub/fluent-emoji-flat": "1.1.0",
+    "@resvg/resvg-js": "2.6.2"
+  }
+}

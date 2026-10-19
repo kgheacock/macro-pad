@@ -1,0 +1,82 @@
+[
+  {
+    "input": "channel:debug",
+    "codepoints": "1f9ed"
+  },
+  {
+    "input": "channel:macro-pad",
+    "codepoints": "1f353"
+  },
+  {
+    "input": "channel:macro-pad.driver",
+    "codepoints": "1f98f"
+  },
+  {
+    "input": "channel:macro-pad.inbox",
+    "codepoints": "1f992"
+  },
+  {
+    "input": "channel:github.com.kgheacock.macro-pad",
+    "codepoints": "1f4da"
+  },
+  {
+    "input": "channel:chat",
+    "codepoints": "1f347"
+  },
+  {
+    "input": "channel:build",
+    "codepoints": "1f4a1"
+  },
+  {
+    "input": "channel:a",
+    "codepoints": "1f9a5"
+  },
+  {
+    "input": "channel:_",
+    "codepoints": "1f42c"
+  },
+  {
+    "input": "channel:work.notes",
+    "codepoints": "1f319"
+  },
+  {
+    "input": "session:3f2a91c0",
+    "codepoints": "1f998"
+  },
+  {
+    "input": "session:00000000",
+    "codepoints": "1f41e"
+  },
+  {
+    "input": "session:ffffffff",
+    "codepoints": "1f344"
+  },
+  {
+    "input": "session:deadbeef",
+    "codepoints": "1f42f"
+  },
+  {
+    "input": "session:0123abcd",
+    "codepoints": "1f680"
+  },
+  {
+    "input": "session:9a8b7c6d",
+    "codepoints": "1f982"
+  },
+  {
+    "input": "session:5e5e5e5e",
+    "codepoints": "1f968"
+  },
+  {
+    "input": "session:c0ffee00",
+    "codepoints": "1f950"
+  },
+  {
+    "input": "session:12345678",
+    "codepoints": "1f984"
+  },
+  {
+    "input": "session:abcdef01",
+    "codepoints": "2693"
+  }
+]

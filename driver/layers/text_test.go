@@ -24,7 +24,7 @@ import (
 // textTile renders a text icon with no count and decodes it.
 func textTile(t *testing.T, text string) *image.NRGBA {
 	t.Helper()
-	data, err := renderIcon(assetsDir, "", text, 0, ColorError)
+	data, err := renderIcon(assetsDir, "", text, "", 0, ColorError)
 	if err != nil {
 		t.Fatalf("%q: %v", text, err)
 	}
@@ -200,7 +200,7 @@ func TestIconTextFit(t *testing.T) {
 // no letter.
 func TestIconTextPip(t *testing.T) {
 	plain := textTile(t, "parent\nname")
-	data, err := renderIcon(assetsDir, "", "parent\nname", 42, ColorDone)
+	data, err := renderIcon(assetsDir, "", "parent\nname", "", 42, ColorDone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestIconTextPersist(t *testing.T) {
 // TestInboxTextIcon checks that the text `inbox` sends for a channel, with a
 // count pip, draws and decodes for the board (task 0066, now by text).
 func TestInboxTextIcon(t *testing.T) {
-	data, err := renderIcon(assetsDir, "", "macro-pad\ndriver", 3, StatusColor(StatusWarn))
+	data, err := renderIcon(assetsDir, "", "macro-pad\ndriver", "", 3, StatusColor(StatusWarn))
 	if err != nil {
 		t.Fatalf("renderIcon: %v", err)
 	}

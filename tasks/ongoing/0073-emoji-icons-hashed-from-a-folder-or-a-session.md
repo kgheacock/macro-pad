@@ -1,13 +1,13 @@
 ---
 id: "0073"
 title: "An open emoji set under assets/emoji/, a stable emoji per folder and session, and a key that shows the folder name over both"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-19"
 updated: "2026-10-19"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/93"
 branch: "claude/project-thread-dlib2h"
 related: ["0034", "0038", "0046", "0055", "0062", "0069", "0070", "0071", "0072"]
 tags: ["assets", "inbox", "plugin", "emoji", "driver", "layers"]
@@ -88,7 +88,7 @@ one every time, so a key and a terminal can be matched by eye.
 
 #### Approach A — Commit a curated set of PNGs, built once by a script (chosen)
 
-A committed script, `tools/build_emoji_assets.mjs`, reads a pinned npm package,
+A committed script, `tools/emoji/build_emoji_assets.mjs`, reads a pinned npm package,
 renders each emoji in `assets/emoji/set.txt` with `@resvg/resvg-js`, scales it to
 fit radius 50, and writes `assets/emoji/<codepoints>.png`. The PNGs are committed.
 
@@ -128,19 +128,19 @@ the script takes `--set twemoji` and writes the same file names.
 ### Design
 
 - `assets/emoji/set.txt`: one emoji per line, `<codepoints> <name>`, in a fixed
-  order, comments with `#`. The v1 set is 128 emoji from the categories animals,
-  plants, food, objects, transport, and sport. Rules for a line:
+  order, comments with `#`. The v1 set is 149 emoji from the categories animals,
+  plants, food, objects, transport, nature, and sport. Rules for a line:
   - one code point, or one plus U+FE0F; no skin tone, flag, keycap, or ZWJ;
   - no face, hand, person, or heart: they look alike at 128 px;
   - no weapon, flag, religious, or political symbol, and no 🍆 🍑 💩;
   - no near twin of an emoji already in the set (🐶 and 🐕, 🍊 and 🍑, 🌕 and 🌝);
   - not mostly white, which vanishes on the round (☁️, 🥚, 🦷), and not mostly
     the RUNNING blue.
-- `tools/build_emoji_assets.mjs` (Node 22, run with `npx`, not part of `inbox`):
-  pinned `@lobehub/fluent-emoji-flat@1.1.0` and `@resvg/resvg-js@2.6.2`. Per line:
-  render at 512 px, crop to the alpha box, scale with premultiplied Lanczos so the
-  farthest pixel of alpha 0x80 or more is 50 px from the centre, centre on a
-  transparent 128x128, write `assets/emoji/<cp>.png` (lower-case hex joined by `-`,
+- `tools/emoji/build_emoji_assets.mjs` (Node 22, its own `package.json` and lock
+  file, not part of `inbox`): pinned `@lobehub/fluent-emoji-flat@1.1.0` and
+  `@resvg/resvg-js@2.6.2`. Per line: render at 512 px to find the box and the
+  reach of the pixels of alpha 0x80 or more, then render again at 128x128 with a
+  viewBox that puts the farthest of them 50 px from the centre, write `assets/emoji/<cp>.png` (lower-case hex joined by `-`,
   as in the npm packages). It also writes `assets/emoji/LICENSE` (the set's licence
   text) and `assets/emoji/README.md` (source, version, the command). A run with no
   change to `set.txt` gives byte-identical files.
@@ -223,7 +223,7 @@ a session never meet by chance.
 - `inbox/test/emoji-vectors.json`: 20 inputs and their emoji. `emoji.test.js`
   checks them, and a later Go copy must pass the same file.
 
-**inbox.** `render.js` splits a channel. When its last segment is 8 hex digits (a
+**inbox.** `render.js` splits a channel of the ai plugin. When its last segment is 8 hex digits (a
 `PROJECT.SID` channel from 0072), the folder is `PROJECT` and the session is
 `SID`; otherwise the folder is the whole channel and there is no session. A child
 gets (Part 3):
@@ -231,7 +231,7 @@ gets (Part 3):
 - `iconText`: the last segment of the folder, one line (`macro-pad.driver` gives `driver`);
 - `iconEmoji`: `[emoji of channel:<folder>, emoji of session:<SID>]`, or the first alone.
 
-Both plugins get this from the renderer; their rules do not change. The top keys
+Both plugins get this from the renderer; the ai plugin's rules add `sessions: true`. The top keys
 keep `gmail.png` and `ai.png`. So a session key, that session's status line, and
 every key of the same folder show the same folder emoji, and the round lets the
 status color show again.
@@ -240,6 +240,10 @@ status color show again.
 With no flag it uses the current folder. It prints `🦊` by default. It needs no
 store and no daemon, so a Claude Code status line can call it on every refresh.
 `-h/--help` and the zsh completion cover it.
+
+The renderer reads PROJECT.SID only for a plugin whose rules say
+`sessions: true` (the ai plugin), so a basic channel that ends in 8 hex digits
+stays one folder.
 
 **Go.** No Go copy of the hash in this task (the driver only draws what it is sent). When 0055 lands, its helper API gets
 `EmojiFor(kind, value)` that reads the same `set.txt` and passes
@@ -306,11 +310,12 @@ joined by `\n`. The color is in the key, since the round shows it.
 Files to change:
 
 - new `assets/emoji/*.png`, `assets/emoji/set.txt`, `assets/emoji/LICENSE`, `assets/emoji/README.md`
-- new `tools/build_emoji_assets.mjs`
+- new `tools/emoji/build_emoji_assets.mjs`, `tools/emoji/package.json`, `tools/emoji/package-lock.json`
 - `driver/layers/pip_test.go` — check `assets/emoji/` in `TestIconRound`
 - new `inbox/src/emoji.js`, `inbox/test/emoji.test.js`, `inbox/test/emoji-vectors.json`
 - `driver/layers/doc.go`, `controller.go`, `frames.go`, `render.go`, new `emoji.go` — `iconEmoji`, check, caption, `frameKey`
 - `driver/plugin/protocol.go`, `driver/plugin/server.go` — `iconEmoji` in the payload
+- `inbox/src/plugins/ai.js` — `sessions: true`; `inbox/src/channel.js` — `folderChannel`
 - `inbox/src/render.js`, `inbox/src/cli.js`, `inbox/completions/_inbox`, `inbox/test/render.test.js`, `inbox/test/daemon.test.js`
 - `inbox/README.md`, `driver/README.md`
 
@@ -320,7 +325,7 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is ticked.
 
 - [ ] **DoD-1** — `assets/emoji/` holds one 128x128 RGBA PNG per line of `set.txt`, at least 128, plus `LICENSE` and `README.md`. **Proof:** `file assets/emoji/*.png | grep -vc '128 x 128, 8-bit/color RGBA'` prints 0; `wc -l` of the non-comment lines of `set.txt` equals the PNG count.
-- [ ] **DoD-2** — The script rebuilds the set byte for byte. **Proof:** `npx node tools/build_emoji_assets.mjs && git status --porcelain assets/emoji` prints nothing.
+- [ ] **DoD-2** — The script rebuilds the set byte for byte. **Proof:** `(cd tools/emoji && npm ci && npm run build) && git status --porcelain assets/emoji` prints nothing.
 - [ ] **DoD-3** — Every emoji lies inside the round: no pixel of alpha 0x80 or more past 57.5 px from the centre. **Proof:** `go test ./layers -run TestIconRound` (now globbing `assets/emoji/`).
 - [ ] **DoD-4** — `{"kind":"setLayerKey","setLayerKey":{"id":"t","iconRef":"emoji/1f98a.png"}}` shows the fox on the white round. **Proof:** a golden `driver/layers/testdata/icon-emoji.png` from `TestIconEmoji`.
 - [ ] **DoD-5** — `set.txt` has no skin tone, flag, keycap, ZWJ, face, hand, or person. **Proof:** `node --test inbox/test/emoji.test.js` (a check of each line against those code point ranges).
@@ -330,7 +335,7 @@ item names its proof. The task moves to `complete/` only when every box is ticke
 - [ ] **DoD-12** — `iconEmoji` with a caption draws as the mock-up: a key with `iconText: "macro-pad"` and two emoji, with and without a count. **Proof:** `go test ./layers -run TestIconEmoji` compares with `testdata/icon-emoji-caption.png` and `icon-emoji-caption-pip.png`.
 - [ ] **DoD-13** — Three refs, a ref outside `emoji/`, `iconEmoji` with `iconRef`, and a two-line or 17-rune caption are rejected and change nothing. **Proof:** `go test ./layers -run TestIconEmojiInvalid`
 - [ ] **DoD-14** — The same caption and emoji on two colors use two slots; a count change stores no frame; `iconEmoji` survives a `layers.json` save and load. **Proof:** `go test ./layers -run 'TestIconEmojiFrames|TestIconEmojiPersist'`
-- [ ] **DoD-9** — `inbox emoji --session 3F2A91C0-…` prints the emoji of `session:3f2a91c0`, the same one `--plugin ai` sends for channel `macro-pad.3f2a91c0`, and exits 0 with no store file; a bad UUID exits 2 with a usage line; `--help` lists the command. **Proof:** `inbox/test/cli.test.js`
+- [ ] **DoD-9** — `inbox emoji --session 3F2A91C0-…` prints the emoji of `session:3f2a91c0`, the same one `--plugin ai` sends for channel `macro-pad.3f2a91c0`, and exits 0 with no store file; a bad UUID exits 2 with a usage line; `--help` lists the command. **Proof:** `TestEmojiCommand` in `inbox/test/emoji.test.js`
 - [ ] **DoD-10** — `inbox/README.md` and `driver/README.md` describe `emoji/<cp>.png`, the set's source and licence, the hash, and `inbox emoji`. **Proof:** `grep -n "emoji" inbox/README.md driver/README.md`
 - [ ] **DoD-11** — On the board, each Claude Code session key shows its folder name over the folder and session emoji, with the status color around the round, and the owner can tell 5 children apart. **Proof:** the owner's note in this spec's Notes.
 
@@ -360,5 +365,8 @@ Settled by the owner on 2026-10-19 in the project thread.
 
 ## Notes
 
+- On linux/amd64, `TestIconText` (task 0069) fails on main by one level at
+  (42, 50) of `icon-text.png`: the font rounds differently from the owner's Mac.
+  The new goldens of this task allow 2 levels per channel (`checkGoldenNear`).
 - Spike files (not committed): `render.mjs` and `sheet.py` rendered the contact
   sheet; `two.py` and `three.py` rendered the two-emoji mock-ups.

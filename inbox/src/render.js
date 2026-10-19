@@ -15,24 +15,16 @@ export const INBOX_ICON = 'gmail.png';
 export const INBOX_ID = 'inbox';
 export const MAX_CHILDREN = 5;
 
-// macropadd takes at most 32 runes of icon text on two lines. A channel is
-// letters, digits, - and _ joined by dots, so a long one is cut here to
-// leave room for the line break; macropadd cuts what is still too wide.
-const MAX_SEGMENT = 15;
-const MAX_NAME = 16;
+// macropadd takes at most 32 runes of icon text, and cuts what is too wide for
+// the key.
+const MAX_TEXT = 32;
 
-function clip(segment, limit) {
-  const runes = [...segment];
-  return runes.length <= limit ? segment : `${runes.slice(0, limit - 1).join('')}…`;
-}
-
-// The icon text of a channel: its last segment, and the segment before it as
-// a line above. `macro-pad.driver` gives "macro-pad\ndriver".
+// The icon text of a channel: its last segment, so `kgheacock.macro-pad` shows
+// `macro-pad`. The segments before it are left off.
 export function channelText(channel) {
-  const segments = channel.split('.');
-  const name = segments.at(-1);
-  if (segments.length === 1) return clip(name, MAX_SEGMENT + 1 + MAX_NAME);
-  return `${clip(segments.at(-2), MAX_SEGMENT)}\n${clip(name, MAX_NAME)}`;
+  const name = channel.split('.').at(-1);
+  const runes = [...name];
+  return runes.length <= MAX_TEXT ? name : `${runes.slice(0, MAX_TEXT - 1).join('')}…`;
 }
 
 export function createRenderer({ slot } = {}) {

@@ -32,10 +32,12 @@ const noSlot = transport.SlotUnchanged
 
 // frameKey is what one frame on the board shows: one picture over one color.
 // A glyph is the icon at ref under the assets directory, if ref is not empty,
-// on a white round. The count pip is not part of it: the board stamps the pip
-// on a copy of the frame (task 0062).
+// on a white round, or the words in text on a white tile (task 0069). The count
+// pip is not part of it: the board stamps the pip on a copy of the frame (task
+// 0062).
 type frameKey struct {
 	ref   string
+	text  string
 	color uint16
 }
 
@@ -45,11 +47,24 @@ func frameKeyOf(w view) frameKey {
 	if w.kind == kindBlank || w.kind == kindUnknown {
 		return frameKey{}
 	}
+	if w.iconText != "" {
+		// The tile of a text icon is opaque, so the key color cannot change the
+		// frame, and two keys with one text share a slot (task 0069).
+		return frameKey{text: w.iconText}
+	}
 	return frameKey{ref: w.iconRef, color: w.color}
 }
 
 // hasGlyph reports whether the frame has a picture over its color.
-func (k frameKey) hasGlyph() bool { return k.ref != "" }
+func (k frameKey) hasGlyph() bool { return k.ref != "" || k.text != "" }
+
+// label names the picture of the frame in a log line.
+func (k frameKey) label() string {
+	if k.text != "" {
+		return k.text
+	}
+	return k.ref
+}
 
 // frameTable is the host's record of the board's slots: which frame each one
 // holds, and how recently it was used. The host owns the slot numbers, and the
@@ -148,21 +163,21 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	var png []byte
 	if k.hasGlyph() {
 		var err error
-		png, err = renderGlyph(c.assetsDir, k.ref, 0, k.color)
+		png, err = renderIcon(c.assetsDir, k.ref, k.text, 0, k.color)
 		if err != nil {
 			// A glyph that cannot be drawn leaves the color alone, rather than
 			// nothing.
-			c.logf("layers: draw %q: %v", k.ref, err)
+			c.logf("layers: draw %q: %v", k.label(), err)
 			png = nil
 		}
 	}
 	start := time.Now()
 	if err := c.frameOut.StoreFrame(slot, k.color, png); err != nil {
 		c.frames.release(slot)
-		c.logf("layers: store frame %q in slot %d: %v", k.ref, slot, err)
+		c.logf("layers: store frame %q in slot %d: %v", k.label(), slot, err)
 		return 0, false
 	}
-	c.logf("layers: stored frame %q in slot %d in %s", k.ref, slot, time.Since(start).Round(time.Millisecond))
+	c.logf("layers: stored frame %q in slot %d in %s", k.label(), slot, time.Since(start).Round(time.Millisecond))
 	return slot, true
 }
 

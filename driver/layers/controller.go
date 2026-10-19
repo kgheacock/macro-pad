@@ -64,6 +64,8 @@ type Update struct {
 	Status  string
 	Count   int
 	IconRef string
+	// IconText is words drawn as the icon instead of IconRef (task 0069).
+	IconText string
 }
 
 // ErrSlotTaken is returned for an update that names a slot another id
@@ -89,7 +91,9 @@ type view struct {
 	color   uint16
 	icon    byte
 	iconRef string
-	count   int
+	// iconText is the words of a text icon, in place of iconRef.
+	iconText string
+	count    int
 }
 
 // Controller owns the object, draws it, and saves it.
@@ -237,7 +241,7 @@ func (c *Controller) SetKey(u Update) error {
 }
 
 func applyUpdate(d *Doc, u Update) error {
-	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, IconRef: u.IconRef}
+	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, IconRef: u.IconRef, IconText: u.IconText}
 	if u.ID == "" {
 		return errors.New("layers: update has no id")
 	}
@@ -437,7 +441,7 @@ func desired(d Doc) [KeyCount]view {
 }
 
 func nodeView(n *Node) view {
-	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, count: n.Count}
+	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, iconText: n.IconText, count: n.Count}
 }
 
 // keyDraw is one key to send: its key state, and the glyph that goes before
@@ -512,10 +516,10 @@ func (c *Controller) prepare(key byte, w view) keyDraw {
 		d.state.Color, d.state.EmojiID = 0, 0
 		return d
 	}
-	if w.iconRef != "" || w.count > 0 {
-		png, err := renderGlyph(c.assetsDir, w.iconRef, w.count, w.color)
+	if w.iconRef != "" || w.iconText != "" || w.count > 0 {
+		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.count, w.color)
 		if err != nil {
-			c.logf("layers: key %d: draw %q: %v", key, w.iconRef, err)
+			c.logf("layers: key %d: draw %q: %v", key, w.iconRef+w.iconText, err)
 		} else {
 			d.png = png
 			d.state.EmojiID = transport.CustomGlyphSentinelEmojiID

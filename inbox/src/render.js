@@ -9,14 +9,33 @@
 // children an earlier daemon left on the pad.
 
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
-import { writeChannelImage } from './png.js';
 
-// A picture under the assets directory (see `--assets-dir`).
+// A picture under macropadd's assets directory.
 export const INBOX_ICON = 'gmail.png';
 export const INBOX_ID = 'inbox';
 export const MAX_CHILDREN = 5;
 
-export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = writeChannelImage } = {}) {
+// macropadd takes at most 32 runes of icon text on two lines. A channel is
+// letters, digits, - and _ joined by dots, so a long one is cut here to
+// leave room for the line break; macropadd cuts what is still too wide.
+const MAX_SEGMENT = 15;
+const MAX_NAME = 16;
+
+function clip(segment, limit) {
+  const runes = [...segment];
+  return runes.length <= limit ? segment : `${runes.slice(0, limit - 1).join('')}…`;
+}
+
+// The icon text of a channel: its last segment, and the segment before it as
+// a line above. `macro-pad.driver` gives "macro-pad\ndriver".
+export function channelText(channel) {
+  const segments = channel.split('.');
+  const name = segments.at(-1);
+  if (segments.length === 1) return clip(name, MAX_SEGMENT + 1 + MAX_NAME);
+  return `${clip(segments.at(-2), MAX_SEGMENT)}\n${clip(name, MAX_NAME)}`;
+}
+
+export function createRenderer({ slot } = {}) {
   // The last values sent per node, as JSON, so only a change is sent again.
   const sent = new Map();
   // The channels macropadd holds as children of `inbox`, in its order.
@@ -25,25 +44,11 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
   // may hold children this renderer never sent.
   let known = false;
   let leftovers = [];
-  const icons = new Map();
   // The newest unseen id each child showed when it was last planned. A press
   // marks up to this id, so a message that landed since stays unseen.
   const shownIds = new Map();
   // The "here" of that same message, or null.
   const shownHere = new Map();
-
-  const iconFor = (channel) => {
-    if (!icons.has(channel)) {
-      let ref = '';
-      try {
-        ref = drawImage(assetsDir, channel);
-      } catch (e) {
-        log(`cannot draw the picture for ${channel}: ${e.message}`);
-      }
-      icons.set(channel, ref);
-    }
-    return icons.get(channel);
-  };
 
   // Adds the node to out when its values differ from the last ones sent.
   const set = (out, key, fields) => {
@@ -62,7 +67,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
       parent: INBOX_ID,
       status: count > 0 ? 'WARN' : '',
       count,
-      iconRef: iconFor(channel),
+      iconText: channelText(channel),
     });
   };
 

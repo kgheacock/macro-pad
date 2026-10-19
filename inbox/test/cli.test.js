@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -461,6 +462,47 @@ test('TestSecondDaemonRefused', async (t) => {
   assert.equal((await third.exited).status, 0);
 });
 
+test('TestDaemonAssetsDirIsUnused', async (t) => {
+  const sc = scratch(t);
+  const d = start(['daemon', '--port', '1', '--assets-dir', '/x'], { sc });
+  t.after(() => d.child.kill('SIGKILL'));
+  let seen = '';
+  d.child.stderr.on('data', (chunk) => {
+    seen += chunk;
+  });
+  await stderrHas(d.child, 'daemon started');
+  assert.equal(seen.split('--assets-dir is unused').length - 1, 1, seen);
+  d.child.kill('SIGTERM');
+  assert.equal((await d.exited).status, 0);
+
+  // Without the flag there is no such line.
+  const quiet = start(['daemon', '--port', '1'], { sc });
+  t.after(() => quiet.child.kill('SIGKILL'));
+  let quietSeen = '';
+  quiet.child.stderr.on('data', (chunk) => {
+    quietSeen += chunk;
+  });
+  await stderrHas(quiet.child, 'daemon started');
+  assert.ok(!quietSeen.includes('unused'), quietSeen);
+  quiet.child.kill('SIGTERM');
+  assert.equal((await quiet.exited).status, 0);
+});
+
+test('TestInstallDryRunHasNoAssetsDir', (t) => {
+  const sc = scratch(t);
+  const script = path.join(import.meta.dirname, '..', 'scripts', 'install.sh');
+  for (const extra of [[], ['--assets-dir', '/x']]) {
+    const r = spawnSync('sh', [script, '--dry-run', '--no-completions', ...extra], {
+      env: { ...process.env, HOME: sc.dir, PREFIX: path.join(sc.dir, 'prefix') },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes('dry run: nothing changed'), r.stdout);
+    assert.ok(!r.stdout.includes('--assets-dir'), r.stdout);
+    assert.ok(!existsSync(path.join(sc.dir, 'prefix')), 'a dry run wrote files');
+  }
+});
+
 test('TestStalePidFileIsReplaced', async (t) => {
   const sc = scratch(t);
   mkdirSync(path.dirname(sc.db), { recursive: true });
@@ -507,10 +549,6 @@ test('TestDaemonBadFlags', () => {
     [['--slot', '7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
     [['--port', 'x'], 'inbox: --port x is out of range; use 1 to 65535\n'],
     [['--poll', '5'], 'inbox: --poll 5 is not a duration; use a number and a unit, such as 500ms or 2s\n'],
-    [
-      ['--assets-dir', 'assets'],
-      'inbox: assets dir "assets" is relative; pass an absolute path, as macropadd sees it\n',
-    ],
   ];
   for (const [flags, message] of cases) {
     const r = run(['daemon', ...flags], { sc });

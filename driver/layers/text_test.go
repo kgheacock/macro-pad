@@ -304,7 +304,7 @@ func TestIconTextPersist(t *testing.T) {
 // TestInboxTextIcon checks that the text `inbox` sends for a channel, with a
 // count pip, draws and decodes for the board (task 0066, now by text).
 func TestInboxTextIcon(t *testing.T) {
-	data, err := renderIcon(assetsDir, "", "driver", 3, StatusColor(StatusWarn))
+	data, err := renderIcon(assetsDir, "", "macro-pad\ndriver", 3, StatusColor(StatusWarn))
 	if err != nil {
 		t.Fatalf("renderIcon: %v", err)
 	}

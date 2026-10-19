@@ -249,8 +249,8 @@ The keys:
   is 0. It stays on the pad at 0.
 - A press on `inbox` opens a layer with one key per channel that has unseen
   messages, each with its own count. The key shows the channel's last name
-  segment in black letters on a plain white tile; the segments before the
-  last dot are left off (`kgheacock.macro-pad` shows `macro-pad`).
+  segment in black letters on a plain white tile, and the segment before it in
+  gray letters above (`macro-pad.driver` shows `macro-pad` over `driver`).
   There are at most five, the channels with the newest unseen messages. A
   channel past the fifth counts in the `inbox` total, and `inbox channels`
   lists it.
@@ -273,9 +273,9 @@ The keys:
   bundle ID, a missing Automation permission) is logged with the channel and
   the kind, and the mark stands.
 - `macropadd` draws the text. The daemon sends each channel as `iconText`
-  (the last segment of the channel), and writes no file. A name of more than
-  32 characters is cut with `…` before it is sent, and `macropadd` cuts what is
-  still too wide for the key. Older versions wrote
+  (`<parent>\n<name>`, or the name alone), and writes no file. A segment of
+  more than 15 characters (16 for the name) is cut with `…` before it is sent,
+  and `macropadd` cuts what is still too wide for the key. Older versions wrote
   pictures to `<assets-dir>/.generated/inbox/`; those files are no longer used,
   and you can delete that directory.
 - The daemon sends a key only when its values changed. On every connect it

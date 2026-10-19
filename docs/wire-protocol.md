@@ -391,8 +391,8 @@ the buffer. It does not change the slot, so a slot never holds a pip, and one
 picture on one color is one slot whatever its count. The pip is the disc for the
 slot's color, or disc `0` when the sheet has none for it, then the characters of
 the count centred on the disc: the big cells for `1` to `99`, and the small `9`,
-`9`, and `+` for `99+`. The disc is at `(80, 80)`, 4 pixels from the bottom-right
-corner of the panel. The characters sit in the middle of it, in cells side by
+`9`, and `+` for `99+`. The sprite lands at `(79, 79)`, 5 px from the bottom-right
+corner of the panel (`PIP_MARGIN` in the firmware, `pipMargin` in `driver/layers/pip.go`). The characters sit in the middle of it, in cells side by
 side with no gap. A key with a count of 0 shows the slot's own frame, as Show
 frames does.
 

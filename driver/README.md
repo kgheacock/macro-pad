@@ -199,7 +199,7 @@ the poller used is not read any more; delete it.
   color. No status blinks.
 - `iconRef` is a PNG under the assets directory, 128×128. A path that is
   absolute or leaves the directory, with `..` or a symbolic link, is
-  rejected. The icon sits on an opaque white round of radius 60
+  rejected. The icon sits on an opaque white round of radius 58
   (`iconRoundRadius`), centred on the key, and the round's edge is blended
   against the key color. Transparent pixels outside the round show the key
   color. If `iconRef` is empty, `icon` is a built-in Emoji ID; firmware has no

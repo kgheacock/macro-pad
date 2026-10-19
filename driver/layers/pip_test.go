@@ -160,6 +160,11 @@ func TestPip(t *testing.T) {
 		t.Error("a count of 0 drew a pip")
 	}
 
+	// The firmware lands the sprite at the same place (PIP_MARGIN, task 0069).
+	if got, want := pipDiscRect(), image.Rect(79, 79, 123, 123); got != want {
+		t.Errorf("the pip sprite is at %v, want %v", got, want)
+	}
+
 	draw99 := func(count int) *image.NRGBA {
 		img := blankCanvas()
 		if err := DrawPip(img, ColorDone, count); err != nil {
@@ -229,6 +234,22 @@ func TestIconRound(t *testing.T) {
 		f.Close()
 		if err != nil {
 			t.Fatal(err)
+		}
+		// Task 0069: no solid icon pixel lies outside the round, and the two
+		// icons with a dark disc of their own keep 3 px of white around it.
+		reach := 0.0
+		for y := 0; y < transport.CustomGlyphHeight; y++ {
+			for x := 0; x < transport.CustomGlyphWidth; x++ {
+				if _, _, _, ia := icon.At(x, y).RGBA(); ia >= 0x8000 {
+					reach = math.Max(reach, math.Hypot(float64(x)+0.5-centre, float64(y)+0.5-centre))
+				}
+			}
+		}
+		if reach > iconRoundRadius-0.5 {
+			t.Errorf("%s: a solid pixel lies %.1f px from the centre, past the round of %d", ref, reach, iconRoundRadius)
+		}
+		if (ref == "github.png" || ref == "create.png") && reach > iconRoundRadius-3 {
+			t.Errorf("%s: its dark disc reaches %.1f px, want at most %d to leave 3 px of white round", ref, reach, iconRoundRadius-3)
 		}
 		data, err := renderGlyph(assetsDir, ref, 0, ColorError)
 		if err != nil {

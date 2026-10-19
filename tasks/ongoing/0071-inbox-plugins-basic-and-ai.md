@@ -7,7 +7,7 @@ updated: "2026-10-19"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/91"
 branch: "claude/inbox-plugins-d6tc63"
 related: ["0064", "0065", "0066", "0067", "0068", "0069", "0070"]
 tags: ["inbox", "daemon", "agents", "plugin"]

@@ -17,13 +17,14 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 
 | Command | Meaning |
 |---|---|
-| `inbox send [--status S] CHANNEL MESSAGE` | Send one message to `CHANNEL`. |
-| `inbox send [--status S] MESSAGE` | Send one message to the channel of the working directory. |
-| `inbox pipe [--status S] [CHANNEL]` | Send each line of standard input as one message. |
+| `inbox send [--status S] [--here H] CHANNEL MESSAGE` | Send one message to `CHANNEL`. |
+| `inbox send [--status S] [--here H] MESSAGE` | Send one message to the channel of the working directory. |
+| `inbox pipe [--status S] [--here H] [CHANNEL]` | Send each line of standard input as one message. |
 | `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | List messages, oldest first, seen and unseen (a leading `*` marks the unseen). `--unseen` lists only the unseen. `-n N` keeps the newest N. Each line is: time, status, the channel (with `--all-channels` or outside the root), then the message. Default scope: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Print the unseen count. Same default scope as `list`. |
 | `inbox channels [--json]` | Print each channel with unseen messages, its count, and the time of its newest message. |
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |
+| `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
 `-h` and `--help` work on `inbox` and on every subcommand, before or after
@@ -74,6 +75,52 @@ code 2 when standard input is a terminal.
   without a newline is dropped on a signal, and kept at end of input.
 - The channel is resolved before the first line is read.
 
+## Here
+
+A message can carry a "here": where a press on its channel key in the Inbox
+layer takes you (see "Daemon"). The press still marks the channel seen. A
+"here" is `KIND:VALUE`, and only these kinds are accepted:
+
+| Value | Meaning | What the daemon runs |
+|---|---|---|
+| `iterm2:UUID` | An iTerm session. `UUID` is the session's `unique id`. | `osascript` selects the window, tab, and session, then activates iTerm. |
+| `app:BUNDLE_ID` | A macOS app, such as `com.tinyspeck.slackmacgap`. | `open -b BUNDLE_ID` |
+| `url:URL` | A deep link. The scheme is `slack`, `msteams`, `ms-outlook`, or `https`. | `open URL` |
+
+`send` and `pipe` take the first of these that gives a value:
+
+1. `--here VALUE`
+2. `$INBOX_HERE`
+3. The iTerm session you are in: `$TERM_PROGRAM` is `iTerm.app`, `$TMUX` is
+   unset, and `$ITERM_SESSION_ID` is `w0t0p0:UUID`. The value is `iterm2:UUID`.
+4. None. The message has no "here", and a press only marks it seen.
+
+`pipe` finds the value once, before the first line, so every line of a run
+carries the same one. A bad value exits with code 2. Where detection cannot
+work (tmux, ssh, cron), pass `--here` or set `INBOX_HERE`.
+
+```
+inbox here                                   # print the value that step 3 finds
+inbox send --here app:com.tinyspeck.slackmacgap chat "reply to Sam"
+inbox here chat app:com.tinyspeck.slackmacgap   # a fallback for a channel
+inbox here chat                              # print it
+inbox here --clear chat                      # remove it
+```
+
+A channel's fallback is used for a message with no "here". A "here" on the
+message wins over it. A key goes to the "here" of the channel's newest unseen
+message. Nothing is run as a shell command: the daemon checks the value again
+when it reads it, and runs `osascript` or `open` with an argument list. macOS
+only.
+
+The first `osascript` call needs the macOS **Automation** permission for
+iTerm. The permission belongs to the `node` that runs the daemon, so a new
+Node path may ask again. Allow it in System Settings, Privacy & Security,
+Automation. Until you do, the call waits for about 5 s, then the daemon logs
+where to allow it. A press on a key whose iTerm session is closed logs
+`no iTerm session UUID`; the channel is still marked seen, and iTerm is not
+brought forward.
+
 ## Channels
 
 A channel is one or more segments joined by dots. A segment holds letters,
@@ -108,12 +155,18 @@ CREATE TABLE messages (
   created_at INTEGER NOT NULL,  -- Unix milliseconds
   seen_at    INTEGER,           -- NULL while unseen
   cwd        TEXT    NOT NULL,  -- the sender's working directory
-  status     TEXT    NOT NULL DEFAULT 'info'  -- added in schema 2
+  status     TEXT    NOT NULL DEFAULT 'info', -- added in schema 2
+  here       TEXT                              -- added in schema 3; NULL for none
 );
 CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
+CREATE TABLE channel_here (  -- added in schema 3
+  channel TEXT PRIMARY KEY,
+  here    TEXT NOT NULL
+);
 ```
 
-`PRAGMA user_version` is the schema version (now 2; version 2 added `status`). An older file is
+`PRAGMA user_version` is the schema version (now 3; version 2 added `status`,
+version 3 added `here` and `channel_here`). An older file is
 migrated in one transaction. A newer file is refused and left unchanged.
 
 For code that reads the store (`src/store.js`):
@@ -122,7 +175,8 @@ For code that reads the store (`src/store.js`):
   `id <= upToId` and returns how many changed. A message that lands later
   stays unseen.
 - `unseen()` returns, per channel with unseen rows, `{channel, count,
-  newestId, createdAt}`.
+  newestId, createdAt, here}`. `here` is that of the newest unseen row, else
+  the channel's fallback, else `null`.
 
 ## Environment
 
@@ -152,7 +206,7 @@ pad. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
 and `event` from it. It draws one `inbox` key with the total unseen count,
 and one child key per channel with unseen messages. A press on a child key
-marks that channel's messages seen.
+marks that channel's messages seen, then goes to its "here" (see "Here").
 
 ```
 inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500ms]
@@ -190,6 +244,11 @@ The keys:
   `inbox list CHANNEL` still shows the messages, and a failed mark is logged
   and tried again on the next press. A double or long press on a channel key
   marks it too, on its first press-down.
+- After the mark, and after the new counts go out, a press on a channel key
+  brings the "here" of its newest unseen message to the front. A channel with
+  no "here" only marks. A "here" that fails (a closed iTerm session, a wrong
+  bundle ID, a missing Automation permission) is logged with the channel and
+  the kind, and the mark stands.
 - The daemon draws the pictures. It writes one 128x128 PNG per channel to
   `<assets-dir>/.generated/inbox/<channel>.png`, only when the file does not
   exist. Delete a file to draw it again. If the daemon cannot write there, it

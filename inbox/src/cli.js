@@ -39,6 +39,7 @@ Commands:
   list       list messages, seen and unseen
   count      print how many messages are not seen yet
   channels   list channels that have unseen messages
+  channel    print the channel of the working directory
   seen       mark messages as seen
   here       show or set where a press on a channel key goes
   daemon     watch the inbox and show it on the macro pad
@@ -147,6 +148,17 @@ ${DB_OPTION}
 Example:
   inbox channels`,
 
+  channel: `Usage: inbox channel
+
+Print the channel that send and pipe infer from the working directory: the
+path below the source root ($INBOX_SOURCE_ROOT, default ~/source) joined by
+dots. Outside the source root, or for a folder name that cannot be a channel
+segment, it prints an error and exits 2. Scripts use it to name channels the
+same way inbox does.
+
+Example:
+  cd ~/source/macro-pad/driver && inbox channel   # macro-pad.driver`,
+
   seen: `Usage: inbox seen [CHANNEL | --channel C | --all-channels]
 
 Mark the unseen messages seen. Print how many changed. A message that lands
@@ -244,7 +256,7 @@ function helpText(command, plugin) {
   return text;
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon', 'plugins'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen'];
@@ -259,6 +271,7 @@ const OPTIONS = {
   },
   count: { 'all-channels': { type: 'boolean' } },
   channels: { json: { type: 'boolean' } },
+  channel: {},
   seen: { 'all-channels': { type: 'boolean' } },
   here: { clear: { type: 'boolean' } },
   plugins: {},
@@ -626,6 +639,12 @@ function runSeen(io, { values, positionals }) {
   return 0;
 }
 
+function runChannel(io, { positionals }) {
+  if (positionals.length) throw new UsageError('channel takes no arguments');
+  out(io, requireChannel(io, undefined, 'inbox send CHANNEL MESSAGE'));
+  return 0;
+}
+
 function runPlugins(io, { positionals }) {
   if (positionals.length) throw new UsageError('plugins takes no arguments');
   for (const line of pluginList()) out(io, line);
@@ -742,6 +761,7 @@ const RUNNERS = {
   list: runList,
   count: runCount,
   channels: runChannels,
+  channel: runChannel,
   seen: runSeen,
   here: runHere,
   daemon: runDaemon,

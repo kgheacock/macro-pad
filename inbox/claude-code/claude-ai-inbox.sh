@@ -9,8 +9,8 @@
 #        done      Stop              the turn ended               -> done
 #        end       SessionEnd        the session closed           -> marks it seen, so its key goes
 #
-# One channel per session: PROJECT.SID. PROJECT is the path below ~/source
-# joined by dots, as `inbox send` infers it (else the folder name); SID is the
+# One channel per session: PROJECT.SID. PROJECT is the channel `inbox channel`
+# prints in the project folder (the path below ~/source joined by dots); SID is the
 # first 8 characters of the session id, from `session_id` in the hook payload,
 # else $CLAUDE_CODE_SESSION_ID. Without a session id the channel is PROJECT.
 #
@@ -27,15 +27,11 @@ payload="$(cat)"
 inbox="${INBOX_BIN:-$HOME/.local/bin/inbox}"
 { [ -x "$inbox" ] && command -v jq >/dev/null 2>&1; } || exit 0
 
+# The project channel is what `inbox send` would infer in the project folder,
+# so both name it the same way. Outside the source root inbox infers nothing,
+# and the session is not reported.
 proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
-proj="$(cd "${proj:-$PWD}" 2>/dev/null && pwd -P)" || exit 0
-root="$(cd "${INBOX_SOURCE_ROOT:-$HOME/source}" 2>/dev/null && pwd -P)"
-case "$proj" in
-  "$root"/*) rel="${proj#"$root"/}"; project="${rel//\//.}" ;;
-  *) project="$(basename "$proj")" ;;
-esac
-# A channel holds letters, digits, - and _ between dots.
-project="$(printf '%s' "$project" | tr -c 'A-Za-z0-9_.-' '-' | sed -E 's/\.+/./g; s/^\.//; s/\.$//')"
+project="$(cd "${proj:-$PWD}" 2>/dev/null && "$inbox" channel 2>/dev/null)" || exit 0
 [ -n "$project" ] || exit 0
 
 # The full session id; only letters, digits, - and _ are kept.

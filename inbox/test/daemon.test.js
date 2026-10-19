@@ -7,6 +7,7 @@ import { DaemonRunningError } from '../src/errors.js';
 import ai from '../src/plugins/ai.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
+import { emojiFor } from '../src/emoji.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
 
 // Starts a daemon on sc's store against `server`, with a fast poll.
@@ -52,7 +53,8 @@ test('TestChangeReachesPad', async (t) => {
   const last = server.received.findLast((m) => m.setLayerKey?.id === 'inbox').setLayerKey;
   assert.equal(last.status, 'WARN');
   assert.equal(last.iconRef, 'gmail.png');
-  // The channel arrives as a child, named by text, and no file is written.
+  // The channel arrives as a child with its name over its emoji (task 0073),
+  // and no file is written.
   const child = server.received.find((m) => m.setLayerKey?.id === 'debug').setLayerKey;
   assert.deepEqual(child, {
     id: 'debug',
@@ -60,6 +62,7 @@ test('TestChangeReachesPad', async (t) => {
     status: 'WARN',
     count: 1,
     iconText: 'debug',
+    iconEmoji: [emojiFor('channel:debug').iconRef],
   });
   assert.ok(!existsSync(path.join(sc.dir, 'assets')), 'the daemon wrote under the assets directory');
 });

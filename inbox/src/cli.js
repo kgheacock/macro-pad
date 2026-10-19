@@ -1,9 +1,11 @@
 // Subcommands, help text, and error messages. main() takes an io object so
 // a test can run the CLI in process; bin/inbox.js passes the real streams.
 
+import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
+import { folderChannel, inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
+import { channelInput, emojiFor, sessionInput } from './emoji.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
 import { DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
@@ -43,6 +45,7 @@ Commands:
   here       show or set where a press on a channel key goes
   daemon     watch the inbox and show it on the macro pad
   plugins    list the plugins
+  emoji      print the emoji of a folder or a Claude Code session
   help       show help for a command
 
 @PLUGINS@
@@ -186,6 +189,28 @@ Examples:
   inbox here chat app:com.tinyspeck.slackmacgap
   inbox here --clear chat`,
 
+  emoji: `Usage: inbox emoji [CHANNEL | --channel C | --folder DIR] [--session ID] [--format F]
+
+Print the emoji a key shows for a folder, a session, or both (task 0073). The
+same input always gives the same emoji, on every machine. It reads no store,
+so a status line can run it often.
+
+  CHANNEL        the emoji of this channel (or --channel C)
+  --folder DIR   the emoji of this folder: the emoji of the channel it gives
+  --session ID   the emoji of this Claude Code session (its first 8 hex digits)
+  --format F     char (default), name, ref (the file under assets/), or json
+
+With no CHANNEL, --folder, or --session, the folder is the current directory.
+With a folder and a session, it prints the folder's emoji, then the session's,
+as a session key shows them.
+
+${CHANNEL_RULES}
+
+Examples:
+  inbox emoji
+  inbox emoji --folder ~/source/macro-pad --session "$CLAUDE_CODE_SESSION_ID"
+  inbox emoji macro-pad.driver --format name`,
+
   plugins: `Usage: inbox plugins
 
 Print each plugin and what it shows. Pick one with --plugin NAME on any
@@ -244,10 +269,10 @@ function helpText(command, plugin) {
   return text;
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon', 'plugins'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon', 'plugins', 'emoji'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
-const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen'];
+const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen', 'emoji'];
 const OPTIONS = {
   send: { status: { type: 'string' }, here: { type: 'string' } },
   pipe: { status: { type: 'string' }, here: { type: 'string' } },
@@ -262,6 +287,7 @@ const OPTIONS = {
   seen: { 'all-channels': { type: 'boolean' } },
   here: { clear: { type: 'boolean' } },
   plugins: {},
+  emoji: { folder: { type: 'string' }, session: { type: 'string' }, format: { type: 'string' } },
   daemon: {
     port: { type: 'string' },
     'assets-dir': { type: 'string' },
@@ -632,6 +658,29 @@ function runPlugins(io, { positionals }) {
   return 0;
 }
 
+const EMOJI_FORMATS = ['char', 'name', 'ref', 'json'];
+
+function runEmoji(io, { values, positionals }) {
+  if (positionals.length > 1) throw new UsageError('emoji takes at most one CHANNEL');
+  if (positionals.length && values.folder !== undefined) {
+    throw new UsageError('give a CHANNEL or --folder, not both');
+  }
+  const format = values.format ?? 'char';
+  if (!EMOJI_FORMATS.includes(format)) {
+    throw new UsageError(`bad format "${format}"; use one of: ${EMOJI_FORMATS.join(', ')}`);
+  }
+  const inputs = [];
+  const root = sourceRoot(io.env);
+  if (positionals.length) inputs.push(channelInput(validateChannel(positionals[0])));
+  else if (values.folder !== undefined) inputs.push(channelInput(folderChannel(path.resolve(io.cwd(), values.folder), root)));
+  else if (values.session === undefined) inputs.push(channelInput(folderChannel(io.cwd(), root)));
+  if (values.session !== undefined) inputs.push(sessionInput(values.session));
+  const emoji = inputs.map((input) => ({ input, ...emojiFor(input) }));
+  if (format === 'json') out(io, JSON.stringify(emoji));
+  else out(io, emoji.map((e) => (format === 'char' ? e.char : format === 'name' ? e.name : e.iconRef)).join(' '));
+  return 0;
+}
+
 function runHere(io, { values, positionals }) {
   if (positionals.length > 2) throw new UsageError('here takes at most CHANNEL and HERE');
   if (values.clear) {
@@ -746,6 +795,7 @@ const RUNNERS = {
   here: runHere,
   daemon: runDaemon,
   plugins: runPlugins,
+  emoji: runEmoji,
 };
 
 function wantsHelp(argv) {

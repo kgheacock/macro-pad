@@ -61,3 +61,17 @@ export function inferChannel(cwd, root) {
   }
   return parts.join('.');
 }
+
+// The channel of a folder as the Claude Code hook names it
+// (inbox/claude-code/claude-ai-inbox.sh): the inferred channel under the source
+// root, else the folder name with every other character made a dash.
+export function folderChannel(dir, root) {
+  const inferred = inferChannel(dir, root);
+  if (inferred !== null) return inferred;
+  const name = path
+    .basename(resolveLinks(dir))
+    .replace(/[^A-Za-z0-9_.-]/g, '-')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '');
+  return validateChannel(name);
+}

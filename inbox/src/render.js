@@ -2,7 +2,7 @@
 // and one child per channel with unseen messages, at most five. A renderer has
 //   plan({ unseen, active }) -> the messages to send macropadd now
 //   reset(channels)          -> forget what it sent (called on every connect)
-//   target(position)         -> { channel, shownId } for the child at that
+//   target(position)         -> { channel, shownId, here } for the child at that
 //                               position (0 to 4), or null
 // where `unseen` is Store.unseen(), `active` is the open layer's id or null,
 // and `channels` is every channel the store has ever held, so reset can clear
@@ -29,6 +29,8 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
   // The newest unseen id each child showed when it was last planned. A press
   // marks up to this id, so a message that landed since stays unseen.
   const shownIds = new Map();
+  // The "here" of that same message, or null.
+  const shownHere = new Map();
 
   const iconFor = (channel) => {
     if (!icons.has(channel)) {
@@ -54,6 +56,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
   const setChild = (out, channel, row) => {
     const count = row?.count ?? 0;
     shownIds.set(channel, row?.newestId ?? 0);
+    shownHere.set(channel, row?.here ?? null);
     set(out, channel, {
       id: channel,
       parent: INBOX_ID,
@@ -72,6 +75,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
     reset(channels = []) {
       sent.clear();
       shownIds.clear();
+      shownHere.clear();
       shown = [];
       known = false;
       leftovers = channels;
@@ -80,7 +84,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
     target(position) {
       const channel = shown[position];
       if (channel === undefined) return null;
-      return { channel, shownId: shownIds.get(channel) ?? 0 };
+      return { channel, shownId: shownIds.get(channel) ?? 0, here: shownHere.get(channel) ?? null };
     },
 
     plan({ unseen, active }) {

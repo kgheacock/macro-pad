@@ -1,6 +1,6 @@
 ---
 id: "0073"
-title: "An open emoji set under assets/emoji/, and a stable emoji for each folder and Claude Code session"
+title: "An open emoji set under assets/emoji/, a stable emoji per folder and session, and a key that shows the folder name over both"
 status: "backlog"
 created: "2026-10-19"
 updated: "2026-10-19"
@@ -10,14 +10,15 @@ issue_url: null
 pr: null
 branch: "claude/project-thread-dlib2h"
 related: ["0034", "0038", "0046", "0055", "0062", "0069", "0070", "0071", "0072"]
-tags: ["assets", "inbox", "plugin", "emoji", "driver"]
+tags: ["assets", "inbox", "plugin", "emoji", "driver", "layers"]
 ---
 
 # 0073 — An open emoji set, and a stable emoji per folder and session
 
-The spec has two parts. Part 1 adds emoji pictures to the asset library. Part 2
+The spec has three parts. Part 1 adds emoji pictures to the asset library. Part 2
 picks one of them, always the same one, for a folder or a Claude Code session.
-They share one spec because Part 2 is only as good as the set Part 1 draws.
+Part 3 lets one key show the folder name over two emoji, the folder's and the
+session's. They share one spec because each part is only useful with the others.
 
 ## Problem
 
@@ -32,6 +33,7 @@ Emoji would do it, but the pad has no emoji a layer can use:
 - `macrodriver emoji` (task 0034) renders one emoji with Pillow and Apple Color
   Emoji. It runs only on macOS, needs Python and Pillow, and sends a custom glyph
   to one key, not a layer node. Apple's glyphs may not be copied into the repo.
+- A node shows `iconRef` or `iconText`, never both (0069), and one picture at most.
 - `iconText` draws with `gobold`, which has no emoji: `😀` shows `?` (0069, DoD-4).
 - `golang.org/x/image/font/sfnt` cannot read color emoji tables (CBDT, COLR, sbix).
 
@@ -45,9 +47,11 @@ one every time, so a key and a terminal can be matched by eye.
 - The emoji are open licensed, committed as PNGs, and rebuilt by a committed script.
 - One function maps a string to an emoji. The same input gives the same emoji on
   every machine, in every run, and after the set grows by a few emoji.
-- An inbox channel child shows an emoji: its session's for a Claude Code session
-  key, else its channel's. `inbox emoji` prints the emoji of a folder or a
-  session, the same one the key shows, for a status line or a badge.
+- A Claude Code session key shows the folder name as one line of text on top,
+  and two emoji under it: the folder's on the left, the session's on the right
+  (owner, 2026-10-19). Any other channel child shows its name over its one emoji.
+- `inbox emoji` prints the emoji of a folder or a session, the same ones the key
+  shows, for a status line or a badge.
 
 ## Non-goals
 
@@ -198,8 +202,7 @@ Chosen: **Approach A — rendezvous hashing with SHA-256**.
 
 It is the only approach where an emoji follows the input alone and survives a
 growing set. The task accepts that two shown children share an emoji about 1 time
-in 13, and keeps the channel name on the key to tell them apart (see the open
-question on the layout).
+in 13; the folder name on the key (Part 3) tells them apart.
 
 ### Design
 
@@ -220,22 +223,85 @@ a session never meet by chance.
 - `inbox/test/emoji-vectors.json`: 20 inputs and their emoji. `emoji.test.js`
   checks them, and a later Go copy must pass the same file.
 
-**inbox.** A plugin's rules get `emoji(channel)`, which returns the input to hash.
-`basic` returns `channel:<channel>`. `ai` returns `session:<SID>` when the last
-segment of the channel is 8 hex digits (a `PROJECT.SID` channel from 0072), else
-`channel:<channel>`. `render.js` `setChild` sends that emoji as `iconRef` (and
-the name as decided below). The top keys keep `gmail.png` and `ai.png`. So a
-session key and that session's status line show the same emoji. Because the round lets the key color show, a channel
-child shows its status color again.
+**inbox.** `render.js` splits a channel. When its last segment is 8 hex digits (a
+`PROJECT.SID` channel from 0072), the folder is `PROJECT` and the session is
+`SID`; otherwise the folder is the whole channel and there is no session. A child
+gets (Part 3):
+
+- `iconText`: the last segment of the folder, one line (`macro-pad.driver` gives `driver`);
+- `iconEmoji`: `[emoji of channel:<folder>, emoji of session:<SID>]`, or the first alone.
+
+Both plugins get this from the renderer; their rules do not change. The top keys
+keep `gmail.png` and `ai.png`. So a session key, that session's status line, and
+every key of the same folder show the same folder emoji, and the round lets the
+status color show again.
 
 **CLI.** `inbox emoji [--channel NAME | --folder PATH | --session UUID] [--format char|name|ref|json]`.
 With no flag it uses the current folder. It prints `🦊` by default. It needs no
 store and no daemon, so a Claude Code status line can call it on every refresh.
 `-h/--help` and the zsh completion cover it.
 
-**Go.** No Go copy in this task. When 0055 lands, its helper API gets
+**Go.** No Go copy of the hash in this task (the driver only draws what it is sent). When 0055 lands, its helper API gets
 `EmojiFor(kind, value)` that reads the same `set.txt` and passes
 `emoji-vectors.json`.
+
+## Part 3 — The folder name over two emoji on one key
+
+### Facts that decide it
+
+- Mock-up, 2026-10-19 (`/mnt/project-files/specs/0073-text-two-emoji.png`): a line
+  of `DejaVuSans-Bold` at 12 to 20 px on top (y 20..40), two emoji of radius 24
+  centred at (38, 74) and (90, 74). The owner asked for this layout.
+- The pip lands at 79..123 (0069), so it covers the lower right of the session
+  emoji when the count is above 0.
+- The inbox has no PNG encoder since 0069, and pre-drawn pairs would be 128 × 128 files.
+
+### Approaches considered
+
+#### Approach A — A new `iconEmoji` field, drawn by the driver (chosen)
+
+`setLayerKey` and `layers.Node` get `iconEmoji`, a list of one or two refs under
+`emoji/`. `renderIcon` draws the round, then the emoji in fixed spots, then
+`iconText` as one caption line on top, then the pip.
+
+- Good, because one draw routine serves every client, as `iconText` does.
+- Good, because each ref still passes `ValidateIconRef` and the `emoji/` prefix.
+- Bad, because a field goes into `layers.Node`, `SetLayerKeyPayload`, `view`, `frameKey`, and `layers.json`, as `iconText` did.
+- Bad, because `iconText` gets a second look (a caption) next to its plain tile.
+
+#### Approach B — The inbox composes a PNG again
+
+- Good, because the driver does not change.
+- Bad, because it brings back what 0069 removed: a PNG encoder in Node, generated files, and a shared assets path.
+
+#### Approach C — A general list of positioned layers (ref, x, y, size)
+
+- Good, because any layout is possible later.
+- Bad, because every client then owns layout and sizes, and the frame cache key is a whole scene.
+
+### Decision
+
+Chosen: **Approach A — `iconEmoji`, with the caption from `iconText`**. The task
+accepts a second field in four structs and one fixed layout.
+
+### Design
+
+**Check** (`Node.validate`): `iconEmoji` has 0, 1, or 2 refs, each passing
+`ValidateIconRef` and starting with `emoji/`. `iconEmoji` and `iconRef` are
+exclusive. `iconText` with `iconEmoji` is a caption: one line, at most 16 runes.
+
+**Draw** (`renderIcon`, new `drawIconEmoji` in `driver/layers/emoji.go`):
+
+- the white round over the key color, as for `iconRef`;
+- two emoji: each PNG scaled from 128 to 48 px (premultiplied, `x/image/draw`
+  `CatmullRom`), centred at (38, 74) and (90, 74); one emoji: 64 px at (64, 74);
+- the caption: `gobold`, black, the largest of 20, 18, 16, 14, 12 px that fits
+  84 px, centred at y 30, cut with `…` at 12 px (the round is narrow at the top);
+- with no caption the emoji move up to y 64;
+- the pip as today.
+
+**Cache.** `frameKey` becomes `{ref, text, emoji, color}` with `emoji` the two refs
+joined by `\n`. The color is in the key, since the round shows it.
 
 Files to change:
 
@@ -243,7 +309,8 @@ Files to change:
 - new `tools/build_emoji_assets.mjs`
 - `driver/layers/pip_test.go` — check `assets/emoji/` in `TestIconRound`
 - new `inbox/src/emoji.js`, `inbox/test/emoji.test.js`, `inbox/test/emoji-vectors.json`
-- `inbox/src/plugins/basic.js`, `inbox/src/plugins/ai.js` — `emoji(channel)`
+- `driver/layers/doc.go`, `controller.go`, `frames.go`, `render.go`, new `emoji.go` — `iconEmoji`, check, caption, `frameKey`
+- `driver/plugin/protocol.go`, `driver/plugin/server.go` — `iconEmoji` in the payload
 - `inbox/src/render.js`, `inbox/src/cli.js`, `inbox/completions/_inbox`, `inbox/test/render.test.js`, `inbox/test/daemon.test.js`
 - `inbox/README.md`, `driver/README.md`
 
@@ -255,39 +322,43 @@ item names its proof. The task moves to `complete/` only when every box is ticke
 - [ ] **DoD-1** — `assets/emoji/` holds one 128x128 RGBA PNG per line of `set.txt`, at least 128, plus `LICENSE` and `README.md`. **Proof:** `file assets/emoji/*.png | grep -vc '128 x 128, 8-bit/color RGBA'` prints 0; `wc -l` of the non-comment lines of `set.txt` equals the PNG count.
 - [ ] **DoD-2** — The script rebuilds the set byte for byte. **Proof:** `npx node tools/build_emoji_assets.mjs && git status --porcelain assets/emoji` prints nothing.
 - [ ] **DoD-3** — Every emoji lies inside the round: no pixel of alpha 0x80 or more past 57.5 px from the centre. **Proof:** `go test ./layers -run TestIconRound` (now globbing `assets/emoji/`).
-- [ ] **DoD-4** — `{"kind":"setLayerKey","setLayerKey":{"id":"t","iconRef":"emoji/1f98a.png"}}` shows the fox on the white round with no driver change. **Proof:** `git diff main...HEAD --stat -- driver/layers/*.go` lists only `pip_test.go`; a golden `driver/layers/testdata/icon-emoji.png` from `TestIconEmoji`.
+- [ ] **DoD-4** — `{"kind":"setLayerKey","setLayerKey":{"id":"t","iconRef":"emoji/1f98a.png"}}` shows the fox on the white round. **Proof:** a golden `driver/layers/testdata/icon-emoji.png` from `TestIconEmoji`.
 - [ ] **DoD-5** — `set.txt` has no skin tone, flag, keycap, ZWJ, face, hand, or person. **Proof:** `node --test inbox/test/emoji.test.js` (a check of each line against those code point ranges).
 - [ ] **DoD-6** — `emojiFor` gives the emoji in `emoji-vectors.json` for all 20 inputs, and the same emoji for `--folder ~/source/macro-pad/driver` and `--channel macro-pad.driver`. **Proof:** `node --test inbox/test/emoji.test.js`
 - [ ] **DoD-7** — Adding one emoji to the end of the set moves fewer than 3 % of 10 000 random inputs; removing one moves only the inputs that had it. **Proof:** the stability case in `inbox/test/emoji.test.js`.
-- [ ] **DoD-8** — The inbox sends each channel child its emoji as `iconRef`, and the top keys keep `gmail.png` and `ai.png`. **Proof:** `cd inbox && npm test` (`render.test.js`, `daemon.test.js`).
+- [ ] **DoD-8** — For channel `macro-pad.3f2a91c0` the inbox sends `iconText: "macro-pad"` and `iconEmoji` with the emoji of `channel:macro-pad` then `session:3f2a91c0`; for `macro-pad.driver` it sends `iconText: "driver"` and one emoji; the top keys keep `gmail.png` and `ai.png`. **Proof:** `cd inbox && npm test` (`render.test.js`, `daemon.test.js`).
+- [ ] **DoD-12** — `iconEmoji` with a caption draws as the mock-up: a key with `iconText: "macro-pad"` and two emoji, with and without a count. **Proof:** `go test ./layers -run TestIconEmoji` compares with `testdata/icon-emoji-caption.png` and `icon-emoji-caption-pip.png`.
+- [ ] **DoD-13** — Three refs, a ref outside `emoji/`, `iconEmoji` with `iconRef`, and a two-line or 17-rune caption are rejected and change nothing. **Proof:** `go test ./layers -run TestIconEmojiInvalid`
+- [ ] **DoD-14** — The same caption and emoji on two colors use two slots; a count change stores no frame; `iconEmoji` survives a `layers.json` save and load. **Proof:** `go test ./layers -run 'TestIconEmojiFrames|TestIconEmojiPersist'`
 - [ ] **DoD-9** — `inbox emoji --session 3F2A91C0-…` prints the emoji of `session:3f2a91c0`, the same one `--plugin ai` sends for channel `macro-pad.3f2a91c0`, and exits 0 with no store file; a bad UUID exits 2 with a usage line; `--help` lists the command. **Proof:** `inbox/test/cli.test.js`
 - [ ] **DoD-10** — `inbox/README.md` and `driver/README.md` describe `emoji/<cp>.png`, the set's source and licence, the hash, and `inbox emoji`. **Proof:** `grep -n "emoji" inbox/README.md driver/README.md`
-- [ ] **DoD-11** — On the board, the channel children of `inbox` and `ai-inbox` show their emoji on the round with the status color around it, and the owner can tell 5 children apart. **Proof:** the owner's note in this spec's Notes.
+- [ ] **DoD-11** — On the board, each Claude Code session key shows its folder name over the folder and session emoji, with the status color around the round, and the owner can tell 5 children apart. **Proof:** the owner's note in this spec's Notes.
 
 ## Risks
 
-- Two shown children share an emoji about 1 time in 13 → the name stays on the key
-  (open question 2); if it bites, a later task adds `inbox icon CHANNEL EMOJI` to pin one.
+- Two shown children share an emoji about 1 time in 13 → the folder name stays on
+  the key; if it bites, a later task adds `inbox icon CHANNEL EMOJI` to pin one.
 - Fluent is a Microsoft set whose npm copy is a third-party repackage → the script
   pins the version and the README names the upstream repo
   (`microsoft/fluentui-emoji`, MIT); Twemoji is the fallback.
 - A future upstream redraw changes the pictures, not the mapping → the version is
   pinned; a bump is its own commit, and the codepoints, so the hash, stay.
+- The pip covers part of the session emoji when the count is above 0 → accepted
+  for the mock-up; if it hides too much, move the pair up or the session emoji left.
+- A stale `macropadd` ignores `iconEmoji` and shows only the caption → restart
+  `macropadd` before the inbox daemon, as for 0069.
 - 128 new frames could crowd the board's 64 slots (task 0063) → only shown keys
   use slots, and the frame cache is keyed by ref, as today.
 
-## Open questions
+## Decisions on the open questions
 
-1. ~~**Set (owner):** Fluent flat, Twemoji, or Noto?~~ Settled 2026-10-19: the
-   owner picked **Fluent flat** after the contact sheet.
-2. **Layout of a channel child (owner):** the emoji alone (default: no driver
-   change, the status color shows again), or the emoji with the channel name in
-   one small line under it? The second needs `iconRef` and `iconText` together,
-   which 0069 made exclusive, and a new text box below the emoji.
-3. **What a session key hashes (owner):** the session (default: each session its
-   own emoji, matching its status line), or the folder (every session of one
-   project shares an emoji, and the sessions are told apart by the name only)?
+Settled by the owner on 2026-10-19 in the project thread.
+
+- **Set:** Microsoft Fluent Emoji, flat.
+- **A session key:** two emoji, the folder's and the session's, with the folder
+  name above them as text (the side-by-side layout of the mock-up).
 
 ## Notes
 
-- Spike files (not committed): `render.mjs` and `sheet.py` rendered the contact sheet.
+- Spike files (not committed): `render.mjs` and `sheet.py` rendered the contact
+  sheet; `two.py` and `three.py` rendered the two-emoji mock-ups.

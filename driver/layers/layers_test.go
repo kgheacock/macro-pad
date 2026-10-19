@@ -332,6 +332,33 @@ func TestPressWithoutChildren(t *testing.T) {
 	}
 }
 
+// ai-inbox (task 0070) shows a key with count 0 when no channel waits, and a
+// press on it must still list the channels: only children open a layer.
+func TestPressOpensLayerAtZeroCount(t *testing.T) {
+	out := newFakeOut()
+	c := open(t, "", out)
+	for _, u := range []Update{
+		{ID: "ai-inbox", Status: StatusDone, IconRef: "ai.png"},
+		{ID: "agent", Parent: "ai-inbox", Status: StatusDone, IconText: "agent"},
+	} {
+		if err := c.SetKey(u); err != nil {
+			t.Fatalf("SetKey %+v: %v", u, err)
+		}
+	}
+	if got := out.take()[0]; got.Color != ColorDone {
+		t.Fatalf("top key %+v, want the DONE color", got)
+	}
+
+	c.Press(0)
+
+	if a := c.Active(); a == nil || *a != "ai-inbox" {
+		t.Fatalf("active %v, want ai-inbox", a)
+	}
+	if got := out.take()[0]; got.Color != ColorDone {
+		t.Errorf("child key %+v, want the DONE color", got)
+	}
+}
+
 func TestOnlyChangedKeysAreSent(t *testing.T) {
 	out := newFakeOut()
 	c := open(t, "", out)

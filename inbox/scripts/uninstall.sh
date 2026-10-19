@@ -1,13 +1,12 @@
 #!/bin/sh
-# Stop the inbox daemon, and remove its service and the inbox command.
+# Stop the inbox daemon (or with --ai, the ai-inbox daemon), and remove its
+# service and its command.
 
 NAME=uninstall.sh
-LABEL=com.kgheacock.macropad.inbox
-UNIT=inbox-daemon.service
 
 usage() {
   cat <<USAGE
-Usage: uninstall.sh [--purge] [--dry-run]
+Usage: uninstall.sh [--ai] [--purge] [--dry-run]
 
 Stop the inbox daemon and remove what install.sh made:
   - the LaunchAgent (macOS) or the systemd user unit (Linux)
@@ -17,6 +16,8 @@ Stop the inbox daemon and remove what install.sh made:
 The store (the SQLite file with your messages) stays unless you pass --purge.
 If nothing is installed, it says so and exits 0.
 
+  --ai         remove ai-inbox (its service, command, and store) instead of
+               inbox. The inbox install stays.
   --purge      also remove the store and its -wal, -shm and pid files
   --dry-run    print each action; change nothing
   -h, --help   show this text
@@ -30,9 +31,11 @@ fail() {
 
 PURGE=0
 DRY=0
+AI=0
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
+    --ai) AI=1 ;;
     --dry-run) DRY=1 ;;
     --purge) PURGE=1 ;;
     *) printf '%s: unknown option "%s"; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2 ;;
@@ -40,9 +43,20 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+if [ "$AI" = 1 ]; then
+  CMD=ai-inbox
+  LABEL=com.kgheacock.macropad.ai-inbox
+  UNIT=ai-inbox-daemon.service
+  DB_OVERRIDE=${AI_INBOX_DB:-}
+else
+  CMD=inbox
+  LABEL=com.kgheacock.macropad.inbox
+  UNIT=inbox-daemon.service
+  DB_OVERRIDE=${INBOX_DB:-}
+fi
 PREFIX=${PREFIX:-$HOME/.local}
-WRAPPER=$PREFIX/bin/inbox
-DB=${INBOX_DB:-${XDG_DATA_HOME:-$HOME/.local/share}/inbox/inbox.db}
+WRAPPER=$PREFIX/bin/$CMD
+DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/$CMD/$CMD.db}
 
 case $(uname -s) in
   Darwin) PLATFORM=macos; SERVICE_FILE=$HOME/Library/LaunchAgents/$LABEL.plist ;;
@@ -61,11 +75,13 @@ do_run() {
 
 # Only remove the wrapper if install.sh wrote it.
 ours() {
-  [ -f "$WRAPPER" ] && grep -q 'bin/inbox.js' "$WRAPPER"
+  [ -f "$WRAPPER" ] && grep -q "bin/$CMD.js" "$WRAPPER"
 }
 
 # The completion link install.sh made: a link to this checkout's _inbox.
-COMP_FILE=$("$(dirname "$0")/zsh-completion-dir.sh")
+# ai-inbox installs no completion, so there is no link to find.
+COMP_FILE=
+[ "$AI" = 1 ] || COMP_FILE=$("$(dirname "$0")/zsh-completion-dir.sh")
 [ -z "$COMP_FILE" ] || COMP_FILE=$COMP_FILE/_inbox
 comp_ours() {
   [ -n "$COMP_FILE" ] && [ -L "$COMP_FILE" ] && case $(readlink "$COMP_FILE") in */inbox/completions/_inbox) true ;; *) false ;; esac

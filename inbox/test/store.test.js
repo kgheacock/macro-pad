@@ -41,8 +41,8 @@ test('TestUnseen', (t) => {
   const a2 = store.insert('a', 'two', '/x', { now: 2000 });
   const b1 = store.insert('b', 'three', '/x', { now: 3000 });
   assert.deepEqual(store.unseen(), [
-    { channel: 'a', count: 2, newestId: a2, createdAt: 2000, here: null },
-    { channel: 'b', count: 1, newestId: b1, createdAt: 3000, here: null },
+    { channel: 'a', count: 2, byStatus: { info: 2 }, newestId: a2, createdAt: 2000, here: null },
+    { channel: 'b', count: 1, byStatus: { info: 1 }, newestId: b1, createdAt: 3000, here: null },
   ]);
   assert.equal(store.count(), 3);
   assert.equal(store.count('a'), 2);
@@ -54,6 +54,19 @@ test('TestUnseen', (t) => {
   assert.equal(store.markAllSeen(), 1);
   assert.deepEqual(store.unseen(), []);
   store.close();
+});
+
+test('TestUnseenByStatus', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db);
+  t.after(() => store.close());
+  const w = store.insert('a', 'one', '/x', { status: 'waiting' });
+  store.insert('a', 'two', '/x', { status: 'done' });
+  store.insert('a', 'three', '/x', { status: 'done' });
+  assert.deepEqual(store.unseen()[0].byStatus, { waiting: 1, done: 2 });
+  // A seen message leaves the counts.
+  store.markSeen('a', w);
+  assert.deepEqual(store.unseen()[0].byStatus, { done: 2 });
 });
 
 test('TestChannels', (t) => {

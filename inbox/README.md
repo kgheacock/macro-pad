@@ -205,6 +205,7 @@ For code that reads the store (`src/store.js`):
 | Variable | Meaning | Default |
 |---|---|---|
 | `INBOX_DB` | The SQLite file. | `$XDG_DATA_HOME/inbox/inbox.db` |
+| `AI_INBOX_DB` | The SQLite file of `ai-inbox`. | `$XDG_DATA_HOME/ai-inbox/ai-inbox.db` |
 | `INBOX_SOURCE_ROOT` | Root for channel inference. | `~/source` |
 | `XDG_DATA_HOME` | Data directory base. | `~/.local/share` |
 | `INBOX_BUSY_TIMEOUT_MS` | Busy timeout. Tests lower it. | `5000` |
@@ -313,9 +314,12 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--port N] [--slot N] [--no-completions] [--dry-run]
-inbox/scripts/uninstall.sh [--purge] [--dry-run]
+inbox/scripts/install.sh [--ai] [--port N] [--slot N] [--no-completions] [--dry-run]
+inbox/scripts/uninstall.sh [--ai] [--purge] [--dry-run]
 ```
+
+`--ai` installs and removes `ai-inbox` instead (see "ai-inbox"). The two installs
+do not touch each other.
 
 `install.sh` needs Node 22.13 or newer. It records the absolute path of the
 `node` it finds, because launchd and systemd do not see your shell's `PATH`
@@ -361,3 +365,81 @@ the checkout needs `install.sh` again.
 
 Exit codes of `inbox daemon`: 0 after a signal, 1 store error, 2 usage error,
 3 a daemon already runs.
+
+## ai-inbox
+
+`ai-inbox` is the inbox for AI agents. It is the same program with another
+profile (`src/profiles.js`): its own command, its own store, its own key on the
+pad, and three statuses in place of a count. Agents send; a person looks at the
+pad. `inbox` is unchanged.
+
+```
+ai-inbox send --status waiting macro-pad.driver "needs a decision"
+ai-inbox send --status running macro-pad.driver "running the tests"
+ai-inbox send macro-pad.driver "tests passed"        # status done
+ai-inbox seen macro-pad.driver
+```
+
+Every command of `inbox` works as `ai-inbox COMMAND`, with these differences:
+
+| | `inbox` | `ai-inbox` |
+|---|---|---|
+| Store | `$INBOX_DB`, else `~/.local/share/inbox/inbox.db` | `$AI_INBOX_DB`, else `~/.local/share/ai-inbox/ai-inbox.db` |
+| `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. |
+| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` |
+| Colors | yellow when a message is unseen | blue, green, or yellow, by status |
+| Pip | the unseen messages | the channels that wait |
+
+Errors start with `ai-inbox:`. The package installs the command with
+`install.sh --ai`; `npm link` links both commands.
+
+### Statuses
+
+| Status | Color | Pad status | Meaning |
+|---|---|---|---|
+| `waiting` | yellow | `WARN` | The agent waits for a person. |
+| `running` | blue | `RUNNING` | The agent works. |
+| `done` | green | `DONE` | The agent finished. |
+
+A seen message does not count. The daemon reads the unseen messages on every
+change, so the colors and the pip are calculated again each time a message is
+seen. A message with a stored status outside the three counts as `done`.
+
+- **A channel** shows the highest status of its unseen messages, in the order
+  `waiting`, then `running`, then `done`. A channel with no unseen message is
+  not on the pad.
+- **The `ai-inbox` key** shows the highest status of all channels. It has no
+  color when every message is seen, and it stays on the pad.
+- **The pip** on the `ai-inbox` key is the number of channels that have an
+  unseen `waiting` message. The pip on a channel key is the number of its
+  unseen `waiting` messages. A count of 0 draws no pip.
+- **A press** on the `ai-inbox` key opens the list of channels with unseen
+  messages, also when there is no pip: a green or blue key with no pip still
+  lists its channels. At most five show: the highest status first, then the
+  newest unseen message. A channel past the fifth counts in the key's status
+  and pip.
+- **A press on a channel key** marks the messages it showed seen, then goes
+  to their "here", as for `inbox`. The keys do not move while the layer is
+  open; a seen channel keeps its place, with no color, until you leave.
+
+An old `waiting` message keeps the key yellow until it is seen, also after the
+agent went on. Press the channel, or run `ai-inbox seen CHANNEL`.
+
+### Daemon
+
+```
+ai-inbox daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+```
+
+The flags and the behavior are those of `inbox daemon`. It makes its own
+`<db>.daemon.pid`, so it runs beside the `inbox` daemon, and both connect to
+one `macropadd`. Each reads a press only in the layer of its own key. Give the
+two keys different slots with `--slot` if you want them in fixed places;
+otherwise each takes the first free slot.
+
+### Claude Code
+
+`inbox/claude-code/` holds the hooks that report each Claude Code session to
+`ai-inbox`: running while it works, waiting when it needs you, done when the
+turn ends. See `inbox/claude-code/README.md` for the events, the install
+steps, and the limits.

@@ -116,6 +116,13 @@ export function openStore(file, env = process.env) {
   return new Store(db, file, limit);
 }
 
+// "done,waiting,done" -> { done: 2, waiting: 1 }. A status holds no comma.
+function countStatuses(list) {
+  const counts = {};
+  for (const status of list.split(',')) counts[status] = (counts[status] ?? 0) + 1;
+  return counts;
+}
+
 function busyError(file, limitMs) {
   return new StoreError(
     `inbox at ${file} is busy (another writer held it for ${limitMs / 1000} s); try again`,
@@ -207,25 +214,25 @@ export class Store {
     });
   }
 
-  // Per channel with unseen rows: the count, the newest unseen id, its
-  // created_at, and its here (else the channel's fallback, else null).
-  // Ordered by channel.
+  // Per channel with unseen rows: the count, the unseen count per status
+  // (byStatus), the newest unseen id, its created_at, and its here (else the
+  // channel's fallback, else null). Ordered by channel.
   unseen(channel = null) {
     return this.#guard(() => {
       const clause = channel === null ? '' : 'AND channel = ?';
       const rows = this.#db
         .prepare(
-          `SELECT m.channel AS channel, c.count AS count, m.id AS newestId, m.created_at AS createdAt,
-                  COALESCE(m.here, h.here) AS here
+          `SELECT m.channel AS channel, c.count AS count, c.statuses AS statuses, m.id AS newestId,
+                  m.created_at AS createdAt, COALESCE(m.here, h.here) AS here
              FROM messages m
-             JOIN (SELECT channel, COUNT(*) AS count, MAX(id) AS newest
+             JOIN (SELECT channel, COUNT(*) AS count, MAX(id) AS newest, GROUP_CONCAT(status) AS statuses
                      FROM messages WHERE seen_at IS NULL ${clause} GROUP BY channel) c
                ON m.id = c.newest
              LEFT JOIN channel_here h ON h.channel = m.channel
             ORDER BY m.channel`,
         )
         .all(...(channel === null ? [] : [channel]));
-      return rows.map((row) => ({ ...row }));
+      return rows.map(({ statuses, ...row }) => ({ ...row, byStatus: countStatuses(statuses) }));
     });
   }
 

@@ -8,7 +8,8 @@
     "node": ">=22.13"
   },
   "bin": {
-    "inbox": "bin/inbox.js"
+    "inbox": "bin/inbox.js",
+    "ai-inbox": "bin/ai-inbox.js"
   },
   "scripts": {
     "test": "node --test"

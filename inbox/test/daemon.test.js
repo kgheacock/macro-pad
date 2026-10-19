@@ -14,7 +14,6 @@ function launch(t, sc, server, extra = {}) {
   const daemon = startDaemon({
     file: sc.db,
     port: server.port,
-    assetsDir: path.join(sc.dir, 'assets'),
     pollMs: 20,
     log: (line) => logs.push(line),
     ...extra,
@@ -52,16 +51,16 @@ test('TestChangeReachesPad', async (t) => {
   const last = server.received.findLast((m) => m.setLayerKey?.id === 'inbox').setLayerKey;
   assert.equal(last.status, 'WARN');
   assert.equal(last.iconRef, 'gmail.png');
-  // The channel arrives as a child, with a picture drawn under the assets dir.
+  // The channel arrives as a child, named by text, and no file is written.
   const child = server.received.find((m) => m.setLayerKey?.id === 'debug').setLayerKey;
   assert.deepEqual(child, {
     id: 'debug',
     parent: 'inbox',
     status: 'WARN',
     count: 1,
-    iconRef: '.generated/inbox/debug.png',
+    iconText: 'debug',
   });
-  assert.ok(existsSync(path.join(sc.dir, 'assets', '.generated', 'inbox', 'debug.png')));
+  assert.ok(!existsSync(path.join(sc.dir, 'assets')), 'the daemon wrote under the assets directory');
 });
 
 test('TestChildrenFollowLayer', async (t) => {

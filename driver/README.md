@@ -184,7 +184,8 @@ the poller used is not read any more; delete it.
 {"version": 1, "active": null,
  "keys": [{"id": "github", "icon": 0, "status": "RUNNING", "count": 3,
            "iconRef": "github.png",
-           "children": [{"id": "build", "status": "ERROR", "count": 1}]},
+           "children": [{"id": "build", "status": "ERROR", "count": 1,
+                         "iconText": "github\nbuild"}]},
           null, null, null, null, null]}
 ```
 
@@ -205,7 +206,19 @@ the poller used is not read any more; delete it.
   color. If `iconRef` is empty, `icon` is a built-in Emoji ID; firmware has no
   glyph table, so it draws only the color. Every icon in `assets/` is dark, so
   it shows on the white round; a white part of an icon (`gmail.png` has some)
-  merges with the round.
+  merges with the round. Every icon lies inside the round (task 0069).
+- `iconText` is words drawn as the icon instead of a PNG (task 0069), and it
+  excludes `iconRef`. It has at most 32 runes on at most two lines (one `\n`),
+  and no control character other than the line break. A message that breaks
+  one of these rules is dropped. The text goes in black and gray on a plain
+  white tile, with no round and no transparent pixel, so the key color does
+  not show around it. The last line is the name, in black; a first line is the
+  parent, in gray above it. Each line is set in Go Bold at the
+  largest size that fits 112 px: 44, 36, 28, 22, or 18 px for a text of one
+  line, and 28, 22, 18, or 14 px for each line of a text of two lines. A line
+  that is still too wide ends in `…`. A rune that Go Bold lacks, such as an
+  emoji, draws as `?`. The text stays above the count pip. Two keys with the
+  same text share one frame on the board, whatever their colors.
 - `count` is drawn as a pip, a red disc with a white ring and a white number,
   in the bottom-right corner of the image (see "Count pip," above). A count of
   0 has no pip, and a count above 99 shows `99+`.
@@ -249,7 +262,7 @@ in order while a redraw runs, up to 16.
 A layer change sends only the keys whose image or color changed. With task
 0058's compressed glyphs, a change with six icons takes about 0.8 s.
 
-A key with no status, icon, count, `iconRef`, or children is a reserved slot.
+A key with no status, icon, count, `iconRef`, `iconText`, or children is a reserved slot.
 The daemon does not draw it, and clears it only if it drew it before.
 
 ### Saving
@@ -417,7 +430,7 @@ Every message on the connection is JSON, shaped by
 
   ```json
   {"kind": "setLayerKey", "setLayerKey": {"id": "github", "status": "ERROR", "count": 1, "iconRef": "github.png"}}
-  {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR"}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR", "iconText": "github\nbuild"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
   ```
 

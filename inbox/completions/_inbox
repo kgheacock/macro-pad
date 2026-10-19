@@ -41,9 +41,11 @@ _inbox() {
       case $line[1] in
         send)
           _arguments "$db" "$here" '--status=[the status of the message]:status:' \
+            '--channel=[the channel]:channel:_inbox_channels' \
             '1::channel:_inbox_channels' && ret=0 ;;
         pipe)
           _arguments "$db" "$here" '--status=[the status of the message]:status:' \
+            '--channel=[the channel]:channel:_inbox_channels' \
             '1::channel:_inbox_channels' && ret=0 ;;
         here)
           _arguments "$db" '--clear[remove the fallback of the channel]' \
@@ -54,10 +56,12 @@ _inbox() {
             '--unseen[list only the unseen]' \
             '--json[print JSON]' \
             '-n+[keep the newest N]:count:' \
+            '--channel=[the channel]:channel:_inbox_channels' \
             '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
         count | seen)
           _arguments "$db" \
             '(--all-channels 1)--all-channels[every channel]' \
+            '--channel=[the channel]:channel:_inbox_channels' \
             '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
         channels)
           _arguments "$db" '--json[print JSON]' && ret=0 ;;

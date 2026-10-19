@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAiRenderer } from '../src/ai-render.js';
+import ai from '../src/plugins/ai.js';
+import { createRenderer } from '../src/render.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
 
@@ -18,6 +19,7 @@ function keys(messages) {
   return Object.fromEntries(messages.filter((m) => m.setLayerKey).map((m) => [m.setLayerKey.id, m.setLayerKey]));
 }
 const order = (messages) => messages.filter((m) => m.setLayerKey?.parent).map((m) => m.setLayerKey.id);
+const createAiRenderer = () => createRenderer({ rules: ai.rules });
 const plan = (unseen, active = null) => createAiRenderer().plan({ unseen, active });
 
 test('TestAiPlan', () => {
@@ -56,7 +58,7 @@ test('TestAiPriority', () => {
 
 test('TestAiSeenRecalculates', (t) => {
   const { db } = scratch(t);
-  const store = openStore(db);
+  const store = openStore(db, undefined, { plugin: 'ai' });
   t.after(() => store.close());
   const w = store.insert('a', 'needs input', '/x', { status: 'waiting' });
   store.insert('a', 'step 2', '/x', { status: 'done' });

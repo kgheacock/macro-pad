@@ -7,8 +7,10 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const DEFAULT_STATUS = 'info';
+// The plugin of a store opened without one, and of every row older than schema 4.
+export const DEFAULT_PLUGIN = 'basic';
 
 // MIGRATIONS[n] takes a file from user_version n to n + 1.
 const MIGRATIONS = [
@@ -24,6 +26,19 @@ const MIGRATIONS = [
   `ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '${DEFAULT_STATUS}';`,
   `ALTER TABLE messages ADD COLUMN here TEXT;
    CREATE TABLE channel_here (channel TEXT PRIMARY KEY, here TEXT NOT NULL);`,
+  // Every row belongs to one plugin (plugins/index.js). Older rows are basic.
+  `ALTER TABLE messages ADD COLUMN plugin TEXT NOT NULL DEFAULT 'basic';
+   DROP INDEX messages_unseen;
+   CREATE INDEX messages_unseen ON messages (plugin, channel, id) WHERE seen_at IS NULL;
+   CREATE TABLE channel_here_new (
+     plugin  TEXT NOT NULL,
+     channel TEXT NOT NULL,
+     here    TEXT NOT NULL,
+     PRIMARY KEY (plugin, channel)
+   );
+   INSERT INTO channel_here_new (plugin, channel, here) SELECT 'basic', channel, here FROM channel_here;
+   DROP TABLE channel_here;
+   ALTER TABLE channel_here_new RENAME TO channel_here;`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -93,7 +108,9 @@ function migrate(db, file) {
   }
 }
 
-export function openStore(file, env = process.env) {
+// The store holds every plugin; the Store it returns reads and writes only
+// the rows of `plugin`.
+export function openStore(file, env = process.env, { plugin = DEFAULT_PLUGIN } = {}) {
   const limit = busyTimeoutMs(env);
   let db;
   try {
@@ -113,7 +130,7 @@ export function openStore(file, env = process.env) {
       `cannot open inbox at ${file}: ${e.message}. Set INBOX_DB or pass --db to use another file.`,
     );
   }
-  return new Store(db, file, limit);
+  return new Store(db, file, limit, plugin);
 }
 
 // "done,waiting,done" -> { done: 2, waiting: 1 }. A status holds no comma.
@@ -133,11 +150,17 @@ export class Store {
   #db;
   #file;
   #limit;
+  #plugin;
 
-  constructor(db, file, limitMs) {
+  constructor(db, file, limitMs, plugin) {
     this.#db = db;
     this.#file = file;
     this.#limit = limitMs;
+    this.#plugin = plugin;
+  }
+
+  get plugin() {
+    return this.#plugin;
   }
 
   #guard(fn) {
@@ -172,9 +195,9 @@ export class Store {
     return this.#guard(() => {
       const result = this.#db
         .prepare(
-          'INSERT INTO messages (channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO messages (plugin, channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(channel, body, now, cwd, status, here);
+        .run(this.#plugin, channel, body, now, cwd, status, here);
       return Number(result.lastInsertRowid);
     });
   }
@@ -184,9 +207,9 @@ export class Store {
     return this.#guard(() =>
       this.#inTransaction(() => {
         const stmt = this.#db.prepare(
-          'INSERT INTO messages (channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO messages (plugin, channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?, ?)',
         );
-        for (const body of bodies) stmt.run(channel, body, now, cwd, status, here);
+        for (const body of bodies) stmt.run(this.#plugin, channel, body, now, cwd, status, here);
         return bodies.length;
       }),
     );
@@ -196,14 +219,14 @@ export class Store {
   // newest N.
   list({ channel = null, includeSeen = false, limit = null } = {}) {
     return this.#guard(() => {
-      const where = [];
-      const params = [];
+      const where = ['plugin = ?'];
+      const params = [this.#plugin];
       if (channel !== null) {
         where.push('channel = ?');
         params.push(channel);
       }
       if (!includeSeen) where.push('seen_at IS NULL');
-      const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const clause = `WHERE ${where.join(' AND ')}`;
       const select = `SELECT id, channel, body, created_at, seen_at, cwd, status, here FROM messages ${clause}`;
       const sql =
         limit === null
@@ -226,12 +249,12 @@ export class Store {
                   m.created_at AS createdAt, COALESCE(m.here, h.here) AS here
              FROM messages m
              JOIN (SELECT channel, COUNT(*) AS count, MAX(id) AS newest, GROUP_CONCAT(status) AS statuses
-                     FROM messages WHERE seen_at IS NULL ${clause} GROUP BY channel) c
+                     FROM messages WHERE plugin = ? AND seen_at IS NULL ${clause} GROUP BY channel) c
                ON m.id = c.newest
-             LEFT JOIN channel_here h ON h.channel = m.channel
+             LEFT JOIN channel_here h ON h.plugin = m.plugin AND h.channel = m.channel
             ORDER BY m.channel`,
         )
-        .all(...(channel === null ? [] : [channel]));
+        .all(this.#plugin, ...(channel === null ? [] : [channel]));
       return rows.map(({ statuses, ...row }) => ({ ...row, byStatus: countStatuses(statuses) }));
     });
   }
@@ -240,8 +263,8 @@ export class Store {
   channels() {
     return this.#guard(() =>
       this.#db
-        .prepare('SELECT DISTINCT channel FROM messages ORDER BY channel')
-        .all()
+        .prepare('SELECT DISTINCT channel FROM messages WHERE plugin = ? ORDER BY channel')
+        .all(this.#plugin)
         .map((row) => row.channel),
     );
   }
@@ -249,7 +272,9 @@ export class Store {
   // The fallback "here" of a channel, or null.
   channelHere(channel) {
     return this.#guard(
-      () => this.#db.prepare('SELECT here FROM channel_here WHERE channel = ?').get(channel)?.here ?? null,
+      () => this.#db
+          .prepare('SELECT here FROM channel_here WHERE plugin = ? AND channel = ?')
+          .get(this.#plugin, channel)?.here ?? null,
     );
   }
 
@@ -257,16 +282,21 @@ export class Store {
     this.#guard(() => {
       this.#db
         .prepare(
-          'INSERT INTO channel_here (channel, here) VALUES (?, ?) ON CONFLICT (channel) DO UPDATE SET here = excluded.here',
+          'INSERT INTO channel_here (plugin, channel, here) VALUES (?, ?, ?) ON CONFLICT (plugin, channel) DO UPDATE SET here = excluded.here',
         )
-        .run(channel, here);
+        .run(this.#plugin, channel, here);
     });
   }
 
   // Returns true when the channel had a fallback.
   clearChannelHere(channel) {
     return this.#guard(
-      () => Number(this.#db.prepare('DELETE FROM channel_here WHERE channel = ?').run(channel).changes) > 0,
+      () =>
+        Number(
+          this.#db
+            .prepare('DELETE FROM channel_here WHERE plugin = ? AND channel = ?')
+            .run(this.#plugin, channel).changes,
+        ) > 0,
     );
   }
 
@@ -285,9 +315,9 @@ export class Store {
     return this.#guard(() => {
       const result = this.#db
         .prepare(
-          'UPDATE messages SET seen_at = ? WHERE channel = ? AND id <= ? AND seen_at IS NULL',
+          'UPDATE messages SET seen_at = ? WHERE plugin = ? AND channel = ? AND id <= ? AND seen_at IS NULL',
         )
-        .run(now, channel, upToId);
+        .run(now, this.#plugin, channel, upToId);
       return Number(result.changes);
     });
   }

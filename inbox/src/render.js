@@ -1,6 +1,6 @@
 // The renderer the daemon uses: one top key, and one child per channel with
-// unseen messages, at most five. What the keys show comes from a set of rules
-// (see INBOX_RULES); ai-render.js has another set. A renderer has
+// unseen messages, at most five. What the keys show comes from the rules of a
+// plugin (see plugins/index.js). A renderer has
 //   topId                    -> the id of the top key
 //   plan({ unseen, active }) -> the messages to send macropadd now
 //   reset(channels)          -> forget what it sent (called on every connect)
@@ -12,9 +12,6 @@
 
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
 
-// A picture under macropadd's assets directory.
-export const INBOX_ICON = 'gmail.png';
-export const INBOX_ID = 'inbox';
 export const MAX_CHILDREN = 5;
 
 // macropadd takes at most 32 runes of icon text on two lines. A channel is
@@ -37,27 +34,14 @@ export function channelText(channel) {
   return `${clip(segments.at(-2), MAX_SEGMENT)}\n${clip(name, MAX_NAME)}`;
 }
 
-// What the top key and the children show. `unseen` is Store.unseen().
+// `rules` is a plugin's rules: what the top key and the children show.
+// `unseen` is Store.unseen().
 //   id               the id of the top key
 //   top(unseen)      the fields of the top key, besides id and slot
 //   child(row)       the fields of a child, besides id and parent; row is
 //                    undefined for a channel that has no unseen message now
 //   before(a, b)     orders two rows; the first five show
-export const INBOX_RULES = {
-  id: INBOX_ID,
-  top(unseen) {
-    const total = unseen.reduce((sum, row) => sum + row.count, 0);
-    return { status: total > 0 ? 'WARN' : '', count: total, iconRef: INBOX_ICON };
-  },
-  child(row) {
-    const count = row?.count ?? 0;
-    return { status: count > 0 ? 'WARN' : '', count };
-  },
-  // Newest unseen message first.
-  before: (a, b) => b.newestId - a.newestId,
-};
-
-export function createRenderer({ slot, rules = INBOX_RULES } = {}) {
+export function createRenderer({ slot, rules }) {
   // The last values sent per node, as JSON, so only a change is sent again.
   const sent = new Map();
   // The channels macropadd holds as children of `inbox`, in its order.

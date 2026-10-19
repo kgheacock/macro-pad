@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import basic from '../src/plugins/basic.js';
 import { channelText, createRenderer } from '../src/render.js';
 
 const row = (channel, count, newestId) => ({ channel, count, newestId, createdAt: newestId });
-const renderer = (extra = {}) => createRenderer(extra);
+const renderer = (extra = {}) => createRenderer({ rules: basic.rules, ...extra });
 
 // The setLayerKey and removeLayerKey messages of a plan, as short strings.
 function brief(messages) {

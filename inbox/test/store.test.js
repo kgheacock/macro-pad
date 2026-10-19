@@ -167,8 +167,69 @@ test('TestMigrateToHere', (t) => {
   assert.equal(store.unseen()[0].here, 'app:com.tinyspeck.slackmacgap');
   store.close();
   const check = new DatabaseSync(db);
-  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   check.close();
+});
+
+test('TestMigrateToPlugins', (t) => {
+  const { db } = scratch(t);
+  mkdirSync(path.dirname(db), { recursive: true });
+  const raw = new DatabaseSync(db);
+  raw.exec(`CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, body TEXT NOT NULL,
+    created_at INTEGER NOT NULL, seen_at INTEGER, cwd TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'info', here TEXT);
+    CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
+    CREATE TABLE channel_here (channel TEXT PRIMARY KEY, here TEXT NOT NULL);
+    INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x');
+    INSERT INTO channel_here (channel, here) VALUES ('a', 'app:com.tinyspeck.slackmacgap');
+    PRAGMA user_version = 3;`);
+  raw.close();
+  // Rows and fallbacks of a schema 3 file belong to basic.
+  const basic = openStore(db);
+  assert.deepEqual(basic.list().map((m) => m.body), ['old']);
+  assert.equal(basic.channelHere('a'), 'app:com.tinyspeck.slackmacgap');
+  basic.close();
+  const ai = openStore(db, undefined, { plugin: 'ai' });
+  assert.deepEqual(ai.list(), []);
+  assert.equal(ai.channelHere('a'), null);
+  ai.close();
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 4);
+  check.close();
+});
+
+test('TestPluginScope', (t) => {
+  const { db } = scratch(t);
+  const basic = openStore(db);
+  const ai = openStore(db, undefined, { plugin: 'ai' });
+  t.after(() => {
+    basic.close();
+    ai.close();
+  });
+  // One channel name in both plugins.
+  const b = basic.insert('a', 'mine', '/x');
+  ai.insertMany('a', ['agent 1', 'agent 2'], '/x', { status: 'waiting' });
+  assert.deepEqual(basic.list().map((m) => m.body), ['mine']);
+  assert.deepEqual(ai.list().map((m) => m.body), ['agent 1', 'agent 2']);
+  assert.equal(basic.count(), 1);
+  assert.equal(ai.count(), 2);
+  assert.deepEqual(ai.unseen().map((r) => [r.channel, r.count]), [['a', 2]]);
+  assert.deepEqual(basic.channels(), ['a']);
+
+  // A mark in one plugin leaves the other, even past its ids.
+  assert.equal(ai.markSeen('a', b + 10), 2);
+  assert.equal(basic.count(), 1);
+  assert.equal(basic.markAllSeen(), 1);
+  assert.equal(ai.count(), 0);
+
+  // A fallback "here" belongs to one plugin.
+  ai.setChannelHere('a', 'app:com.tinyspeck.slackmacgap');
+  assert.equal(basic.channelHere('a'), null);
+  basic.setChannelHere('a', 'url:https://example.com/');
+  assert.equal(ai.channelHere('a'), 'app:com.tinyspeck.slackmacgap');
+  assert.equal(basic.clearChannelHere('a'), true);
+  assert.equal(ai.channelHere('a'), 'app:com.tinyspeck.slackmacgap');
 });
 
 test('TestChannelFallback', (t) => {

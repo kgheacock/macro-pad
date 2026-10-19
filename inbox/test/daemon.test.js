@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { createAiRenderer } from '../src/ai-render.js';
 import { acquirePidFile, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
 import { openStore } from '../src/store.js';
@@ -239,6 +240,26 @@ test('TestPressMarksChannelKeyMap', async (t) => {
   press(server, 5);
   await waitFor(() => counts(writer).e === undefined, 1000, 'e seen');
   assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1 });
+});
+
+test('TestAiDaemonReadsOwnLayer', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  writer.insert('a', 'needs input', sc.root, { status: 'waiting' });
+  launch(t, sc, server, { pollMs: 10_000, createRenderer: createAiRenderer });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'the child');
+  // The inbox daemon's layer is open, not ours: a press on key 0 marks nothing.
+  server.layerChanged('inbox');
+  press(server, 0);
+  await pause(150);
+  assert.deepEqual(counts(writer), { a: 1 });
+  // Our layer is open: the same press marks the channel.
+  server.layerChanged('ai-inbox');
+  press(server, 0);
+  await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
+  await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'ai-inbox')?.setLayerKey.status === '', 1000, 'the top key cleared');
 });
 
 test('TestOpenPressMarksNothing', async (t) => {

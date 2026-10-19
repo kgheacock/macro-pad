@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '../src/store.js';
-import { run, scratch, start } from '../testlib/helpers.js';
+import { run, runAi, scratch, start } from '../testlib/helpers.js';
 
 function rows(sc) {
   const store = openStore(sc.db);
@@ -706,4 +706,63 @@ test('TestListSurvivesAClosedStdout', async (t) => {
   const { status, stderr } = await exited;
   assert.equal(stderr, '');
   assert.equal(status, 0);
+});
+
+test('TestAiSeparateStore', (t) => {
+  const sc = scratch(t);
+  assert.equal(runAi(['send', 'agent', 'needs input', '--status', 'waiting'], { sc }).status, 0);
+  assert.equal(run(['send', 'mine', 'hello'], { sc }).status, 0);
+
+  // ai-inbox wrote to AI_INBOX_DB, and inbox to INBOX_DB. Neither sees the other.
+  assert.deepEqual(rows({ db: sc.aiDb }).map((m) => [m.channel, m.status]), [['agent', 'waiting']]);
+  assert.deepEqual(rows(sc).map((m) => [m.channel, m.status]), [['mine', 'info']]);
+  assert.equal(run(['list', '--all-channels'], { sc }).stdout.includes('needs input'), false);
+  assert.equal(runAi(['list', '--all-channels'], { sc }).stdout.includes('hello'), false);
+  assert.equal(runAi(['count', '--all-channels'], { sc }).stdout, '1\n');
+
+  // Seen in ai-inbox does not touch inbox.
+  assert.equal(runAi(['seen', 'agent'], { sc }).stdout, '1\n');
+  assert.equal(run(['count', '--all-channels'], { sc }).stdout, '1\n');
+});
+
+test('TestAiDefaultStorePath', (t) => {
+  const sc = scratch(t);
+  const data = path.join(sc.dir, 'xdg');
+  const env = { AI_INBOX_DB: '', INBOX_DB: '', XDG_DATA_HOME: data };
+  assert.equal(runAi(['send', 'agent', 'hi'], { sc, env }).status, 0);
+  assert.ok(existsSync(path.join(data, 'ai-inbox', 'ai-inbox.db')));
+  assert.equal(existsSync(path.join(data, 'inbox')), false);
+});
+
+test('TestAiStatus', (t) => {
+  const sc = scratch(t);
+  let r = runAi(['send', '--status', 'error', 'x', 'y'], { sc });
+  assert.equal(r.status, 2);
+  for (const word of ['waiting', 'running', 'done']) assert.ok(r.stderr.includes(word), r.stderr);
+  assert.ok(r.stderr.startsWith('ai-inbox: '), r.stderr);
+  r = runAi(['pipe', '--status', 'info', 'x'], { sc, input: 'a\n' });
+  assert.equal(r.status, 2);
+  assert.equal(existsSync(sc.aiDb), false, 'a rejected send must not create the store');
+
+  // No status: done. The three names are accepted.
+  assert.equal(runAi(['send', 'x', 'plain'], { sc }).status, 0);
+  for (const status of ['waiting', 'running', 'done']) {
+    assert.equal(runAi(['send', '--status', status, 'x', status], { sc }).status, 0);
+  }
+  assert.deepEqual(rows({ db: sc.aiDb }).map((m) => m.status), ['done', 'waiting', 'running', 'done']);
+  // inbox itself still takes any status.
+  assert.equal(run(['send', '--status', 'error', 'x', 'y'], { sc }).status, 0);
+});
+
+test('TestAiHelp', (t) => {
+  const sc = scratch(t);
+  const top = runAi(['-h'], { sc });
+  assert.equal(top.status, 0);
+  assert.ok(top.stdout.startsWith('ai-inbox - '), top.stdout);
+  assert.ok(top.stdout.includes('waiting, running, done'));
+  const send = runAi(['send', '-h'], { sc }).stdout;
+  assert.ok(send.includes('Usage: ai-inbox send'), send);
+  assert.ok(send.includes('waiting | running | done'), send);
+  assert.ok(send.includes('$AI_INBOX_DB'), send);
+  assert.equal(runAi(['bogus'], { sc }).stderr.includes("Run 'ai-inbox -h'"), true);
 });

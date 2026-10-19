@@ -1,17 +1,39 @@
 #compdef inbox
 # zsh completion for the inbox command. scripts/install.sh links it into
-# oh-my-zsh's completions directory. Channel names come from `inbox channels`,
-# so only channels with unseen messages are offered.
+# oh-my-zsh's completions directory. Channel names come from `inbox channels`
+# of the plugin on the line, so only channels with unseen messages are offered.
+
+# The --plugin words of the whole line. _inbox_line keeps the line from
+# before _arguments narrows $words to the command's own words.
+_inbox_plugin() {
+  local i
+  reply=()
+  for ((i = 1; i <= $#_inbox_line; i++)); do
+    case $_inbox_line[i] in
+      --plugin) reply=(--plugin $_inbox_line[i+1]) ;;
+      --plugin=*) reply=($_inbox_line[i]) ;;
+    esac
+  done
+}
 
 _inbox_channels() {
-  local -a channels db
+  local -a channels db reply
   [[ -n ${opt_args[--db]} ]] && db=(--db ${opt_args[--db]})
-  channels=(${(f)"$(command ${words[1]} channels $db 2>/dev/null | awk '{print $1}')"})
+  _inbox_plugin
+  channels=(${(f)"$(command $_inbox_line[1] channels $db $reply 2>/dev/null | awk '{print $1}')"})
   _describe -t channels 'channel' channels
+}
+
+_inbox_plugins() {
+  local -a plugins
+  plugins=(${(f)"$(command $_inbox_line[1] plugins 2>/dev/null | awk '{print $1}')"})
+  _describe -t plugins 'plugin' plugins
 }
 
 _inbox() {
   local curcontext="$curcontext" state line ret=1
+  local -a _inbox_line
+  _inbox_line=($words)
   typeset -A opt_args
   local -a commands
   commands=(
@@ -23,13 +45,16 @@ _inbox() {
     'seen:mark messages as seen'
     'here:show or set where a press on a channel key goes'
     'daemon:watch the inbox and show it on the macro pad'
+    'plugins:list the plugins'
     'help:show help for a command'
   )
   local here='--here=[where a press goes: iterm2:UUID, app:BUNDLE_ID, or url:URL]:here:'
   local db='--db[use this SQLite file instead of $INBOX_DB]:file:_files'
+  local plugin='--plugin=[the plugin (default: basic)]:plugin:_inbox_plugins'
 
   _arguments -C \
     '(-h --help)'{-h,--help}'[show help]' \
+    "$plugin" \
     '1: :->command' \
     '*:: :->args' && ret=0
 
@@ -40,18 +65,18 @@ _inbox() {
     args)
       case $line[1] in
         send)
-          _arguments "$db" "$here" '--status=[the status of the message]:status:' \
+          _arguments "$db" "$plugin" "$here" '--status=[the status of the message]:status:' \
             '--channel=[the channel]:channel:_inbox_channels' \
             '1::channel:_inbox_channels' && ret=0 ;;
         pipe)
-          _arguments "$db" "$here" '--status=[the status of the message]:status:' \
+          _arguments "$db" "$plugin" "$here" '--status=[the status of the message]:status:' \
             '--channel=[the channel]:channel:_inbox_channels' \
             '1::channel:_inbox_channels' && ret=0 ;;
         here)
-          _arguments "$db" '--clear[remove the fallback of the channel]' \
+          _arguments "$db" "$plugin" '--clear[remove the fallback of the channel]' \
             '1::channel:_inbox_channels' '2::here:' && ret=0 ;;
         list)
-          _arguments "$db" \
+          _arguments "$db" "$plugin" \
             '(--all-channels 1)--all-channels[list every channel]' \
             '--unseen[list only the unseen]' \
             '--json[print JSON]' \
@@ -59,18 +84,20 @@ _inbox() {
             '--channel=[the channel]:channel:_inbox_channels' \
             '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
         count | seen)
-          _arguments "$db" \
+          _arguments "$db" "$plugin" \
             '(--all-channels 1)--all-channels[every channel]' \
             '--channel=[the channel]:channel:_inbox_channels' \
             '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
         channels)
-          _arguments "$db" '--json[print JSON]' && ret=0 ;;
+          _arguments "$db" "$plugin" '--json[print JSON]' && ret=0 ;;
         daemon)
-          _arguments "$db" \
+          _arguments "$db" "$plugin" \
             '--port=[macropadd port on 127.0.0.1]:port:' \
             '--assets-dir=[unused: the daemon sends icon text]:directory:_directories' \
             '--slot=[put the Inbox key in this slot]:slot:(0 1 2 3 4 5)' \
             '--poll=[how often to look for a change]:duration:' && ret=0 ;;
+        plugins)
+          _arguments "$plugin" && ret=0 ;;
         help)
           _describe -t commands 'inbox command' commands && ret=0 ;;
       esac

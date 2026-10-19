@@ -4,13 +4,15 @@ import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore } from '../src/store.js';
+import { SCHEMA_VERSION, openStore } from '../src/store.js';
 import { run, runAi, scratch, start } from '../testlib/helpers.js';
 
+// Every row of the store, of every plugin, oldest first.
 function rows(sc) {
-  const store = openStore(sc.db);
-  const all = store.list({ includeSeen: true });
-  store.close();
+  if (!existsSync(sc.db)) return [];
+  const db = new DatabaseSync(sc.db);
+  const all = db.prepare('SELECT * FROM messages ORDER BY id').all().map((row) => ({ ...row }));
+  db.close();
   return all;
 }
 
@@ -386,7 +388,7 @@ test('TestErrorMessages', async (t) => {
   raw.exec('PRAGMA user_version = 9');
   raw.close();
   expect(run(['count', '--all-channels'], { sc }), 1,
-    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to 3\\. Update the inbox checkout\\.$`));
+    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to ${SCHEMA_VERSION}\\. Update the inbox checkout\\.$`));
 });
 
 test('TestSymlinkedWorkingDirectory', (t) => {
@@ -449,7 +451,7 @@ test('TestSecondDaemonRefused', async (t) => {
   assert.equal(second.status, 3);
   assert.equal(
     second.stderr,
-    `inbox: a daemon already runs for ${sc.db} (pid ${first.child.pid})\n`,
+    `inbox: a basic daemon already runs for ${sc.db} (pid ${first.child.pid})\n`,
   );
 
   // After the first one stops, a new daemon can start.
@@ -506,7 +508,7 @@ test('TestInstallDryRunHasNoAssetsDir', (t) => {
 test('TestStalePidFileIsReplaced', async (t) => {
   const sc = scratch(t);
   mkdirSync(path.dirname(sc.db), { recursive: true });
-  writeFileSync(`${sc.db}.daemon.pid`, '2147483646\n');
+  writeFileSync(`${sc.db}.basic.daemon.pid`, '2147483646\n');
   const d = start(['daemon', '--port', '1'], { sc });
   t.after(() => d.child.kill('SIGKILL'));
   await stderrHas(d.child, 'daemon started');
@@ -527,7 +529,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     const { status } = await d.exited;
     assert.equal(status, 0);
     assert.ok(Date.now() - sent < 1000, `took ${Date.now() - sent} ms`);
-    assert.equal(existsSync(`${sc.db}.daemon.pid`), false);
+    assert.equal(existsSync(`${sc.db}.basic.daemon.pid`), false);
   });
 }
 
@@ -708,30 +710,59 @@ test('TestListSurvivesAClosedStdout', async (t) => {
   assert.equal(status, 0);
 });
 
-test('TestAiSeparateStore', (t) => {
+test('TestPluginsShareOneStore', (t) => {
   const sc = scratch(t);
   assert.equal(runAi(['send', 'agent', 'needs input', '--status', 'waiting'], { sc }).status, 0);
   assert.equal(run(['send', 'mine', 'hello'], { sc }).status, 0);
 
-  // ai-inbox wrote to AI_INBOX_DB, and inbox to INBOX_DB. Neither sees the other.
-  assert.deepEqual(rows({ db: sc.aiDb }).map((m) => [m.channel, m.status]), [['agent', 'waiting']]);
-  assert.deepEqual(rows(sc).map((m) => [m.channel, m.status]), [['mine', 'info']]);
+  // One file holds both, each row with its plugin.
+  assert.deepEqual(rows(sc).map((m) => [m.plugin, m.channel, m.status]), [
+    ['ai', 'agent', 'waiting'],
+    ['basic', 'mine', 'info'],
+  ]);
+  // Each plugin reads only its own.
   assert.equal(run(['list', '--all-channels'], { sc }).stdout.includes('needs input'), false);
   assert.equal(runAi(['list', '--all-channels'], { sc }).stdout.includes('hello'), false);
   assert.equal(runAi(['count', '--all-channels'], { sc }).stdout, '1\n');
+  assert.equal(runAi(['channels'], { sc }).stdout.startsWith('agent '), true);
 
-  // Seen in ai-inbox does not touch inbox.
+  // Seen in ai does not touch basic.
   assert.equal(runAi(['seen', 'agent'], { sc }).stdout, '1\n');
   assert.equal(run(['count', '--all-channels'], { sc }).stdout, '1\n');
 });
 
-test('TestAiDefaultStorePath', (t) => {
+test('TestPluginFlag', (t) => {
   const sc = scratch(t);
-  const data = path.join(sc.dir, 'xdg');
-  const env = { AI_INBOX_DB: '', INBOX_DB: '', XDG_DATA_HOME: data };
-  assert.equal(runAi(['send', 'agent', 'hi'], { sc, env }).status, 0);
-  assert.ok(existsSync(path.join(data, 'ai-inbox', 'ai-inbox.db')));
-  assert.equal(existsSync(path.join(data, 'inbox')), false);
+  // Before the command, after it, and with =.
+  assert.equal(run(['--plugin', 'ai', 'send', 'a', 'one'], { sc }).status, 0);
+  assert.equal(run(['send', '--plugin', 'ai', 'a', 'two'], { sc }).status, 0);
+  assert.equal(run(['send', 'a', 'three', '--plugin=ai'], { sc }).status, 0);
+  assert.equal(run(['--plugin', 'basic', 'send', 'a', 'four'], { sc }).status, 0);
+  assert.equal(runAi(['count', 'a'], { sc }).stdout, '3\n');
+  assert.equal(run(['count', 'a'], { sc }).stdout, '1\n');
+  // A pipe with no command word.
+  assert.equal(run(['--plugin', 'ai', '--channel', 'a'], { sc, input: 'five\n' }).status, 0);
+  assert.equal(runAi(['list', '--all-channels', '--json'], { sc }).stdout.includes('five'), true);
+  // After --, the words are the message.
+  assert.equal(run(['send', '--', 'b', '--plugin'], { sc }).status, 0);
+  assert.equal(run(['list', 'b'], { sc }).stdout.includes('--plugin'), true);
+
+  let r = run(['--plugin', 'nope', 'list'], { sc });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai\n');
+  r = run(['list', '--plugin'], { sc });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('--plugin needs a NAME'), r.stderr);
+  r = run(['--plugin', 'ai', 'list', '--plugin', 'basic'], { sc });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('give --plugin once'), r.stderr);
+
+  r = run(['plugins'], { sc });
+  assert.equal(r.status, 0);
+  const lines = r.stdout.trimEnd().split('\n');
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0].startsWith('basic ') && lines[0].endsWith('(default)'), lines[0]);
+  assert.ok(lines[1].startsWith('ai ') && !lines[1].endsWith('(default)'), lines[1]);
 });
 
 test('TestAiStatus', (t) => {
@@ -739,30 +770,41 @@ test('TestAiStatus', (t) => {
   let r = runAi(['send', '--status', 'error', 'x', 'y'], { sc });
   assert.equal(r.status, 2);
   for (const word of ['waiting', 'running', 'done']) assert.ok(r.stderr.includes(word), r.stderr);
-  assert.ok(r.stderr.startsWith('ai-inbox: '), r.stderr);
+  assert.ok(r.stderr.startsWith('inbox: '), r.stderr);
   r = runAi(['pipe', '--status', 'info', 'x'], { sc, input: 'a\n' });
   assert.equal(r.status, 2);
-  assert.equal(existsSync(sc.aiDb), false, 'a rejected send must not create the store');
+  assert.equal(existsSync(sc.db), false, 'a rejected send must not create the store');
 
   // No status: done. The three names are accepted.
   assert.equal(runAi(['send', 'x', 'plain'], { sc }).status, 0);
   for (const status of ['waiting', 'running', 'done']) {
     assert.equal(runAi(['send', '--status', status, 'x', status], { sc }).status, 0);
   }
-  assert.deepEqual(rows({ db: sc.aiDb }).map((m) => m.status), ['done', 'waiting', 'running', 'done']);
-  // inbox itself still takes any status.
+  // basic still takes any status, and defaults to info.
   assert.equal(run(['send', '--status', 'error', 'x', 'y'], { sc }).status, 0);
+  assert.equal(run(['send', 'x', 'z'], { sc }).status, 0);
+  assert.deepEqual(rows(sc).map((m) => [m.plugin, m.status]), [
+    ['ai', 'done'], ['ai', 'waiting'], ['ai', 'running'], ['ai', 'done'], ['basic', 'error'], ['basic', 'info'],
+  ]);
 });
 
-test('TestAiHelp', (t) => {
+test('TestPluginHelp', (t) => {
   const sc = scratch(t);
   const top = runAi(['-h'], { sc });
   assert.equal(top.status, 0);
-  assert.ok(top.stdout.startsWith('ai-inbox - '), top.stdout);
+  assert.ok(top.stdout.startsWith('inbox - '), top.stdout);
   assert.ok(top.stdout.includes('waiting, running, done'));
   const send = runAi(['send', '-h'], { sc }).stdout;
-  assert.ok(send.includes('Usage: ai-inbox send'), send);
-  assert.ok(send.includes('waiting | running | done'), send);
-  assert.ok(send.includes('$AI_INBOX_DB'), send);
-  assert.equal(runAi(['bogus'], { sc }).stderr.includes("Run 'ai-inbox -h'"), true);
+  assert.ok(send.includes('Usage: inbox send'), send);
+  assert.ok(send.includes('waiting | running | done (default: done)'), send);
+  assert.ok(send.includes('counts the channels that wait'), send);
+
+  const basicTop = run(['-h'], { sc }).stdout;
+  for (const word of ['--plugin NAME', 'basic', 'ai ', 'plugins']) assert.ok(basicTop.includes(word), word);
+  assert.ok(!basicTop.includes('counts the channels that wait'));
+  assert.ok(run(['send', '-h'], { sc }).stdout.includes('letters, digits, - and _ (default: info)'));
+  assert.ok(runAi(['bogus'], { sc }).stderr.includes("Run 'inbox -h'"));
+  for (const r of [top, runAi(['send', '-h'], { sc }), runAi(['bogus'], { sc }), run(['plugins', '-h'], { sc })]) {
+    assert.ok(!`${r.stdout}${r.stderr}`.includes('ai-inbox'), r.stdout + r.stderr);
+  }
 });

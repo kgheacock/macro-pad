@@ -4,6 +4,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DaemonRunningError, StoreError } from './errors.js';
+import { focus as focusHere, parseHere } from './here.js';
 import { decodeMessage } from './protocol.js';
 import { openStore } from './store.js';
 import { INBOX_ID, createRenderer as createInboxRenderer } from './render.js';
@@ -82,6 +83,8 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 // store     an open Store (a test passes one to count queries); else the
 //           daemon opens `file` and closes it on stop
 // renderer  createRenderer({ slot, assetsDir, log }), see render.js
+// focus     (here) -> Promise, brings a "here" to the front (here.js); a test
+//           passes a stub
 // onEvent   (event, { active }) for each event from macropadd, after the daemon
 //           has acted on it
 export function startDaemon({
@@ -96,6 +99,7 @@ export function startDaemon({
   log = () => {},
   store,
   createRenderer = createInboxRenderer,
+  focus = focusHere,
   onEvent = () => {},
   WebSocketImpl = globalThis.WebSocket,
 }) {
@@ -160,10 +164,21 @@ export function startDaemon({
     push();
   };
 
+  // Goes to the "here" of a pressed key. A failure is logged and changes
+  // nothing else; the mark has already happened.
+  const goHere = async (child) => {
+    const kind = parseHere(child.here)?.kind ?? 'invalid';
+    try {
+      await focus(child.here);
+    } catch (e) {
+      log(`cannot go to the ${kind} "here" of ${child.channel}: ${e.message}`);
+    }
+  };
+
   // A press on a channel key of the open Inbox layer marks the messages that
-  // key showed as seen. macropadd sends the event before it handles the press,
-  // so `active` is the layer the person saw. The press that opens Inbox
-  // arrives while `active` is still null.
+  // key showed as seen, then goes to their "here". macropadd sends the event
+  // before it handles the press, so `active` is the layer the person saw. The
+  // press that opens Inbox arrives while `active` is still null.
   const onPress = (keyIndex) => {
     if (active !== INBOX_ID || keyIndex === UP_KEY) return;
     const position = CHILD_KEYS[keyIndex];
@@ -181,11 +196,11 @@ export function startDaemon({
       unseen = db.unseen();
       lastRead = Date.now();
       readFailed = false;
+      push();
     } catch (e) {
       log(e.message);
-      return;
     }
-    push();
+    if (child.here) goHere(child);
   };
 
   const onMessage = (data) => {

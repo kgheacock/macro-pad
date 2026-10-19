@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const DEFAULT_STATUS = 'info';
 
 // MIGRATIONS[n] takes a file from user_version n to n + 1.
@@ -22,6 +22,8 @@ const MIGRATIONS = [
    );
    CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;`,
   `ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '${DEFAULT_STATUS}';`,
+  `ALTER TABLE messages ADD COLUMN here TEXT;
+   CREATE TABLE channel_here (channel TEXT PRIMARY KEY, here TEXT NOT NULL);`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -157,26 +159,27 @@ export class Store {
     }
   }
 
-  // Returns the id of the new message.
-  insert(channel, body, cwd, { status = DEFAULT_STATUS, now = Date.now() } = {}) {
+  // Returns the id of the new message. `here` is a "here" string (see
+  // here.js) or null; this file stores it without looking at it.
+  insert(channel, body, cwd, { status = DEFAULT_STATUS, here = null, now = Date.now() } = {}) {
     return this.#guard(() => {
       const result = this.#db
         .prepare(
-          'INSERT INTO messages (channel, body, created_at, cwd, status) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO messages (channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .run(channel, body, now, cwd, status);
+        .run(channel, body, now, cwd, status, here);
       return Number(result.lastInsertRowid);
     });
   }
 
   // Inserts every body in one transaction. Returns how many rows it added.
-  insertMany(channel, bodies, cwd, { status = DEFAULT_STATUS, now = Date.now() } = {}) {
+  insertMany(channel, bodies, cwd, { status = DEFAULT_STATUS, here = null, now = Date.now() } = {}) {
     return this.#guard(() =>
       this.#inTransaction(() => {
         const stmt = this.#db.prepare(
-          'INSERT INTO messages (channel, body, created_at, cwd, status) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO messages (channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?)',
         );
-        for (const body of bodies) stmt.run(channel, body, now, cwd, status);
+        for (const body of bodies) stmt.run(channel, body, now, cwd, status, here);
         return bodies.length;
       }),
     );
@@ -194,7 +197,7 @@ export class Store {
       }
       if (!includeSeen) where.push('seen_at IS NULL');
       const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      const select = `SELECT id, channel, body, created_at, seen_at, cwd, status FROM messages ${clause}`;
+      const select = `SELECT id, channel, body, created_at, seen_at, cwd, status, here FROM messages ${clause}`;
       const sql =
         limit === null
           ? `${select} ORDER BY id`
@@ -204,18 +207,21 @@ export class Store {
     });
   }
 
-  // Per channel with unseen rows: the count, the newest unseen id, and its
-  // created_at. Ordered by channel.
+  // Per channel with unseen rows: the count, the newest unseen id, its
+  // created_at, and its here (else the channel's fallback, else null).
+  // Ordered by channel.
   unseen(channel = null) {
     return this.#guard(() => {
       const clause = channel === null ? '' : 'AND channel = ?';
       const rows = this.#db
         .prepare(
-          `SELECT m.channel AS channel, c.count AS count, m.id AS newestId, m.created_at AS createdAt
+          `SELECT m.channel AS channel, c.count AS count, m.id AS newestId, m.created_at AS createdAt,
+                  COALESCE(m.here, h.here) AS here
              FROM messages m
              JOIN (SELECT channel, COUNT(*) AS count, MAX(id) AS newest
                      FROM messages WHERE seen_at IS NULL ${clause} GROUP BY channel) c
                ON m.id = c.newest
+             LEFT JOIN channel_here h ON h.channel = m.channel
             ORDER BY m.channel`,
         )
         .all(...(channel === null ? [] : [channel]));
@@ -230,6 +236,30 @@ export class Store {
         .prepare('SELECT DISTINCT channel FROM messages ORDER BY channel')
         .all()
         .map((row) => row.channel),
+    );
+  }
+
+  // The fallback "here" of a channel, or null.
+  channelHere(channel) {
+    return this.#guard(
+      () => this.#db.prepare('SELECT here FROM channel_here WHERE channel = ?').get(channel)?.here ?? null,
+    );
+  }
+
+  setChannelHere(channel, here) {
+    this.#guard(() => {
+      this.#db
+        .prepare(
+          'INSERT INTO channel_here (channel, here) VALUES (?, ?) ON CONFLICT (channel) DO UPDATE SET here = excluded.here',
+        )
+        .run(channel, here);
+    });
+  }
+
+  // Returns true when the channel had a fallback.
+  clearChannelHere(channel) {
+    return this.#guard(
+      () => Number(this.#db.prepare('DELETE FROM channel_here WHERE channel = ?').run(channel).changes) > 0,
     );
   }
 

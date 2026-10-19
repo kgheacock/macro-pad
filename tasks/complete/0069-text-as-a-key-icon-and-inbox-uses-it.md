@@ -1,7 +1,7 @@
 ---
 id: "0069"
 title: "Text as a key icon (iconText) for inbox, and a smaller icon round (58 px) with the pip and icons moved to match"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -296,8 +296,8 @@ ticked.
 - [x] **DoD-12** — The resize is one commit that touches only `assets/*.png`, and `github.png` and `create.png` keep at least 3 px of white round around their dark disc. **Proof:** `git show --stat <sha>`; the check in `TestIconRound` for those two files.
 - [x] **DoD-13** — The goldens are regenerated and show the round at 58 and the pip at the new place. **Proof:** `git diff main...HEAD --stat -- driver/layers/testdata` lists `icon-round.png` and `pips.png`; `go test ./...` passes without an update flag.
 - [x] **DoD-14** — `driver/README.md`, `inbox/README.md`, and `docs/wire-protocol.md` describe `iconText`, the fit rules, the `?` rule, the radius, and the pip landing place. **Proof:** `grep -n "iconText" driver/README.md inbox/README.md`; `grep -n "5 px" docs/wire-protocol.md`
-- [ ] **DoD-15** — On the board, after `make flash`, the channel children of `inbox` show their names in black and gray on white, the count pip does not cover a letter, and the other icons sit inside the round. **Proof:** a photo or a note in this spec's Notes, and `go test ./... && (cd inbox && npm test)` passes.
-  - Not confirmed: this needs `make flash` (the pip margin is a firmware change) and a look at the panel, which the implementer could not do. `go test ./...`, `python3 -m pytest test` (403 passed), and `cd inbox && npm test` (87 passed) pass. Run `make flash`, restart `macropadd`, start `inbox daemon`, and check the keys.
+- [x] **DoD-15** — On the board, after `make flash`, the channel children of `inbox` show their names in black and gray on white, the count pip does not cover a letter, and the other icons sit inside the round. **Proof:** a photo or a note in this spec's Notes, and `go test ./... && (cd inbox && npm test)` passes.
+  - Confirmed by the owner on the board after `make flash`, a restart of `macropadd`, and a restart of `inbox daemon` (the implementer did not see the panel). The owner tried one line (the name alone), did not like it, and kept the two-line text. The owner accepted that the gray parent line can be larger than the black name when the parent is short and the name is long (`kgheacock` over `macro-pad`: 22 px of ink against 18 px), because each line is sized on its own. If it is wanted later, cap the parent at the name's size in `drawIconText` (`driver/layers/text.go`).
 
 ## Risks
 

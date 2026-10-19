@@ -77,8 +77,12 @@ Examples:
 
 Read standard input and send each line as one message. Empty lines are
 skipped. A line longer than 64 KiB is cut. Messages are saved while the pipe
-is still open, within 200 ms. SIGINT and SIGTERM save what was read, then
-exit 0.
+is still open, within 200 ms.
+
+The input is also copied to standard output, as tee does, so a pipe through
+inbox still shows the text. Ctrl-C does not stop inbox before the command that
+feeds it: inbox reads to the end of the input, then exits 0. Press Ctrl-C a
+second time, or send SIGTERM, to save what was read and exit 0 at once.
 
   CHANNEL   where the messages go
 ${CHANNEL_OPTION}
@@ -336,7 +340,18 @@ function withStore(io, values, fn) {
 }
 
 function out(io, text) {
+  if (io.stdoutClosed) return;
   io.stdout.write(`${text}\n`);
+}
+
+// When the reader of standard output goes away, as in 'inbox list | head',
+// stop writing and finish normally, like a tool that ignores SIGPIPE.
+function quietOnClosedStdout(io) {
+  if (typeof io.stdout.on !== 'function') return;
+  io.stdout.on('error', (e) => {
+    if (e.code !== 'EPIPE') throw e;
+    io.stdoutClosed = true;
+  });
 }
 
 function runSend(io, { values, positionals }) {
@@ -379,6 +394,14 @@ function pipeLines(io, store, channel, status, here) {
   let discarding = false;
   let warned = false;
   let onTimer = () => {};
+
+  // Pass the input on to standard output, as tee does. If the next command
+  // in the pipeline goes away, go on saving.
+  let forwarding = typeof io.stdout.on === 'function';
+  if (forwarding) io.stdout.on('error', () => (forwarding = false));
+  const forward = (chunk) => {
+    if (forwarding) io.stdout.write(chunk);
+  };
 
   const warnCut = () => {
     if (warned) return;
@@ -426,6 +449,7 @@ function pipeLines(io, store, channel, status, here) {
     };
     onTimer = guarded(flush);
     const onData = guarded((chunk) => {
+      forward(chunk);
       const parts = chunk.split('\n');
       for (let i = 0; i < parts.length; i++) {
         if (i > 0) {
@@ -446,9 +470,17 @@ function pipeLines(io, store, channel, status, here) {
       flush();
       finish();
     });
-    // A signal saves the lines already read and drops a half-read last line.
-    const onSignal = guarded(() => {
+    // The first Ctrl-C reaches the writer as well. Keep reading until it
+    // closes the pipe, so its last lines are saved and it does not die of a
+    // broken pipe. A second SIGINT, or SIGTERM, saves the lines already read
+    // and drops a half-read last line.
+    let interrupted = false;
+    const onSignal = guarded((signal) => {
       flush();
+      if (signal === 'SIGINT' && !interrupted) {
+        interrupted = true;
+        return;
+      }
       io.stdin.destroy();
       finish();
     });
@@ -724,6 +756,8 @@ function mergeChannelOption(command, parsed) {
 }
 
 async function runCommand(command, args, io) {
+  // pipe has its own rule: it goes on saving when standard output closes.
+  if (command !== 'pipe') quietOnClosedStdout(io);
   try {
     return await RUNNERS[command](io, mergeChannelOption(command, parseOptions(command, args)));
   } catch (e) {

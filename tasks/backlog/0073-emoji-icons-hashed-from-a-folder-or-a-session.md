@@ -278,8 +278,8 @@ item names its proof. The task moves to `complete/` only when every box is ticke
 
 ## Open questions
 
-1. **Set (owner):** Fluent flat (default, MIT), Twemoji (CC-BY, needs a credit
-   line in the README), or Noto (Apache 2.0, shaded)? The contact sheet shows all three.
+1. ~~**Set (owner):** Fluent flat, Twemoji, or Noto?~~ Settled 2026-10-19: the
+   owner picked **Fluent flat** after the contact sheet.
 2. **Layout of a channel child (owner):** the emoji alone (default: no driver
    change, the status color shows again), or the emoji with the channel name in
    one small line under it? The second needs `iconRef` and `iconText` together,

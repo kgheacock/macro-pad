@@ -116,9 +116,9 @@ follows the store, so each daemon has its own.
 
 Files to change:
 
-- `inbox/src/profiles.js`, `inbox/src/ai-render.js`, `inbox/bin/ai-inbox.js` — new
-- `inbox/src/cli.js`, `inbox/src/daemon.js`, `inbox/src/store.js` — profile, `topId`, `byStatus`
-- `inbox/scripts/install.sh`, `inbox/scripts/uninstall.sh`, `inbox/README.md` — `--ai`, a section "ai-inbox"
+- `inbox/src/profiles.js`, `inbox/src/ai-render.js`, `inbox/src/entry.js`, `inbox/bin/ai-inbox.js` — new
+- `inbox/src/cli.js`, `inbox/src/daemon.js`, `inbox/src/store.js`, `inbox/src/render.js`, `inbox/bin/inbox.js` — profile, `topId`, `byStatus`, rules
+- `inbox/scripts/install.sh`, `inbox/scripts/uninstall.sh`, `inbox/scripts/inbox-daemon.service.tmpl`, `inbox/README.md` — `--ai`, a section "ai-inbox"
 - `driver/layers/layers_test.go` — one test, no driver code change
 
 ## Definition of done
@@ -126,30 +126,34 @@ Files to change:
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task
 moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — Channel `a` has unseen `waiting` and `done`, `b` has `running`, `c` has `done`. The plan has
+- [x] **DoD-1** — Channel `a` has unseen `waiting` and `done`, `b` has `running`, `c` has `done`. The plan has
   `ai-inbox` with status `WARN` and count 1, and children `a` (`WARN`, 1), `b` (`RUNNING`, 0), `c` (`DONE`, 0), in that
   order. **Proof:** `cd inbox && node --test --test-name-pattern=TestAiPlan test/ai.test.js`
-- [ ] **DoD-2** — Only `running` and `done` give `RUNNING`. Only `done` gives `DONE`. No unseen messages give an empty
+- [x] **DoD-2** — Only `running` and `done` give `RUNNING`. Only `done` gives `DONE`. No unseen messages give an empty
   status and no children. **Proof:** `node --test --test-name-pattern=TestAiPriority test/ai.test.js`
-- [ ] **DoD-3** — After `markSeen` on the `waiting` message of `a`, the next plan gives `a` the status `DONE` and the top
+- [x] **DoD-3** — After `markSeen` on the `waiting` message of `a`, the next plan gives `a` the status `DONE` and the top
   key `RUNNING` with count 0. **Proof:** `node --test --test-name-pattern=TestAiSeenRecalculates test/ai.test.js`
-- [ ] **DoD-4** — With only `done` channels, the top key has count 0 and one child per channel.
+- [x] **DoD-4** — With only `done` channels, the top key has count 0 and one child per channel.
   A press on a key with children and count 0 opens the child layer. **Proof:**
   `node --test --test-name-pattern=TestAiListWithoutPips test/ai.test.js` and
   `cd driver && go test ./layers -run TestPressOpensLayerAtZeroCount`
-- [ ] **DoD-5** — `ai-inbox send` writes to `$AI_INBOX_DB`. With `INBOX_DB` set to another file, `inbox list
+- [x] **DoD-5** — `ai-inbox send` writes to `$AI_INBOX_DB`. With `INBOX_DB` set to another file, `inbox list
   --all-channels` does not show the message. **Proof:** `node --test --test-name-pattern=TestAiSeparateStore test/cli.test.js`
-- [ ] **DoD-6** — `ai-inbox send --status error x y` exits 2, names the three statuses, and saves nothing.
+- [x] **DoD-6** — `ai-inbox send --status error x y` exits 2, names the three statuses, and saves nothing.
   `ai-inbox send x y` saves status `done`. **Proof:** `node --test --test-name-pattern=TestAiStatus test/cli.test.js`
-- [ ] **DoD-7** — A daemon with `topId` `ai-inbox` marks nothing when it gets a press while `active` is `inbox`.
+- [x] **DoD-7** — A daemon with `topId` `ai-inbox` marks nothing when it gets a press while `active` is `inbox`.
   All other daemon and `inbox` tests pass unchanged. **Proof:** `cd inbox && npm test`
-- [ ] **DoD-8** — `inbox/scripts/install.sh --ai --dry-run` names `com.kgheacock.macropad.ai-inbox` and
+  - One existing test changed: `TestUnseen` in `inbox/test/store.test.js` now expects the new `byStatus` field.
+    No daemon or renderer test changed.
+- [x] **DoD-8** — `inbox/scripts/install.sh --ai --dry-run` names `com.kgheacock.macropad.ai-inbox` and
   `ai-inbox`. Without `--ai`, its output has no `ai-inbox`. Both for `uninstall.sh`. **Proof:** run both commands and
   `grep -c ai-inbox`
 - [ ] **DoD-9** — On the pad, with both daemons running: `ai-inbox send --status waiting a x` gives a yellow key with
   pip 1; `ai-inbox seen a` removes the pip and the color; a `done` message gives a green key with no pip, and a
   press lists its channel. **Proof:** Keith's check on the board, recorded in Notes
-- [ ] **DoD-10** — `inbox/README.md` has a section "ai-inbox" with the statuses, the order, and the pip rule.
+  - Not done: needs the board. `macropadd` accepts 16 plugin clients (`maxClients` in `driver/plugin/server.go`),
+    so two daemons can connect, but no one has run both on the pad yet. @keith
+- [x] **DoD-10** — `inbox/README.md` has a section "ai-inbox" with the statuses, the order, and the pip rule.
   **Proof:** `inbox/README.md`
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 

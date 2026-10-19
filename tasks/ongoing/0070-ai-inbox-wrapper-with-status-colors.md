@@ -35,7 +35,8 @@ store serve both uses.
 
 ## Non-goals
 
-- Hooks that make Claude Code or other agents call `ai-inbox`. A later task adds them.
+- Hooks that make Claude Code or other agents call `ai-inbox`. A later task adds them. (Claude Code's hooks
+  were added after review: see Notes.)
 - Changes to the `inbox` command, its store, or its key.
 - New driver colors. `RUNNING`, `DONE`, and `WARN` already are blue, green, and yellow.
 - A sixth channel on the pad. Channels past five count in the top status, as in task 0066.
@@ -168,3 +169,11 @@ moves to `complete/` only when every box is ticked.
 
 - [ ] Is the pip on a channel key the number of its `waiting` messages (the default here), or 1? — kgheacock
 - [ ] Is `done` the right default status for `ai-inbox send` without `--status`? — kgheacock
+
+## Notes
+
+After review, Keith asked for Claude Code to use `ai-inbox` in place of the iTerm badge hooks. The change is
+outside the DoD above. A reference copy is in `inbox/claude-code/` (script, `hooks` block, README). The live files are
+`~/.claude/hooks/claude-ai-inbox.sh` and `~/.claude/settings.json`. `ai-inbox` was installed with
+`inbox/scripts/install.sh --ai`. The old iTerm hooks were removed from `settings.json`; the files
+`claude-iterm-badge.sh`, `claude-iterm-reset.sh`, and `ctab.sh` still sit in `~/.claude/hooks/`, unused.

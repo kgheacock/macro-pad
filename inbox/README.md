@@ -436,3 +436,10 @@ The flags and the behavior are those of `inbox daemon`. It makes its own
 one `macropadd`. Each reads a press only in the layer of its own key. Give the
 two keys different slots with `--slot` if you want them in fixed places;
 otherwise each takes the first free slot.
+
+### Claude Code
+
+`inbox/claude-code/` holds the hooks that report each Claude Code session to
+`ai-inbox`: running while it works, waiting when it needs you, done when the
+turn ends. See `inbox/claude-code/README.md` for the events, the install
+steps, and the limits.

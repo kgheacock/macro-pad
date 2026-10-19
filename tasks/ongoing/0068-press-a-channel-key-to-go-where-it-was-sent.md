@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/84"
 branch: "0068-press-a-channel-key-to-go-where-it-was-sent"
 related: ["0064", "0065", "0066", "0067"]
 tags: ["inbox", "input", "macos", "iterm"]
@@ -178,7 +178,7 @@ is ticked.
   session and an unknown UUID from a shell (see Notes), but no key was pressed.
 - [x] **DoD-9** — `inbox/README.md` "Here" lists the scheme, the capture order,
   and the Automation prompt. **Proof:** `inbox/README.md`
-- [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

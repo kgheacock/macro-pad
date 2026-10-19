@@ -1,25 +1,26 @@
 #!/bin/sh
-# Install the inbox command and start the inbox daemon at login.
-# macOS: a launchd LaunchAgent. Linux: a systemd user unit.
+# Install the inbox command (or with --ai, the ai-inbox command) and start its
+# daemon at login. macOS: a launchd LaunchAgent. Linux: a systemd user unit.
 
 NAME=install.sh
-LABEL=com.kgheacock.macropad.inbox
-UNIT=inbox-daemon.service
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--port N] [--slot N] [--no-completions] [--dry-run]
+Usage: install.sh [--ai] [--port N] [--slot N] [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. Run it again
 to upgrade in place: it rewrites the files and restarts the daemon.
 
+  --ai              install ai-inbox, the inbox for AI agents, instead: its own
+                    command, store, service, and key on the pad. It does not
+                    change the inbox install. It installs no completions.
   --port N          macropadd's port (default: 8765)
   --slot N          put the Inbox key in slot N, 0 to 5
   --no-completions  do not install the zsh completions
   --dry-run         print each action; change nothing
   -h, --help        show this text
 
-It writes:
+It writes (with --ai: ai-inbox in place of inbox):
   \$PREFIX/bin/inbox   a wrapper that runs this checkout with the node found
                       now (PREFIX defaults to \$HOME/.local)
   _inbox              a link to inbox/completions/_inbox in the completions
@@ -45,10 +46,12 @@ PORT=8765
 SLOT=
 DRY=0
 COMPLETIONS=1
+AI=0
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
+    --ai) AI=1 ;;
     --no-completions) COMPLETIONS=0 ;;
     --assets-dir | --port | --slot)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
@@ -76,9 +79,26 @@ if [ -n "$SLOT" ]; then
   [ "$SLOT" -le 5 ] || fail "--slot $SLOT is out of range; use 0 to 5"
 fi
 
+# What differs for ai-inbox: the names, the store, and the variable that sets it.
+if [ "$AI" = 1 ]; then
+  CMD=ai-inbox
+  LABEL=com.kgheacock.macropad.ai-inbox
+  UNIT=ai-inbox-daemon.service
+  DESC='ai-inbox daemon: show the state of AI agents on the macro pad'
+  DB_VAR=AI_INBOX_DB
+  DB_OVERRIDE=${AI_INBOX_DB:-}
+  COMPLETIONS=0
+else
+  CMD=inbox
+  LABEL=com.kgheacock.macropad.inbox
+  UNIT=inbox-daemon.service
+  DESC='Inbox daemon: show unseen inbox messages on the macro pad'
+  DB_VAR=INBOX_DB
+  DB_OVERRIDE=${INBOX_DB:-}
+fi
 PREFIX=${PREFIX:-$HOME/.local}
-WRAPPER=$PREFIX/bin/inbox
-DB=${INBOX_DB:-${XDG_DATA_HOME:-$HOME/.local/share}/inbox/inbox.db}
+WRAPPER=$PREFIX/bin/$CMD
+DB=${DB_OVERRIDE:-${XDG_DATA_HOME:-$HOME/.local/share}/$CMD/$CMD.db}
 
 # A service file cannot hold these characters safely, so refuse them.
 plain() {
@@ -89,7 +109,7 @@ plain() {
 }
 plain "the checkout path" "$INBOX_DIR"
 plain "PREFIX" "$PREFIX"
-[ -z "${INBOX_DB:-}" ] || plain "INBOX_DB" "$INBOX_DB"
+[ -z "$DB_OVERRIDE" ] || plain "$DB_VAR" "$DB_OVERRIDE"
 
 # Step 1: node, by absolute path, because launchd and systemd do not see the
 # PATH of a shell (nvm, Homebrew).
@@ -115,7 +135,7 @@ do_run() {
 # Daemon flags, as words for the wrapper.
 DAEMON_ARGS="daemon --port $PORT"
 [ -z "$SLOT" ] || DAEMON_ARGS="$DAEMON_ARGS --slot $SLOT"
-[ -z "${INBOX_DB:-}" ] || DAEMON_ARGS="$DAEMON_ARGS --db $INBOX_DB"
+[ -z "$DB_OVERRIDE" ] || DAEMON_ARGS="$DAEMON_ARGS --db $DB_OVERRIDE"
 
 write_wrapper() {
   if [ "$DRY" = 1 ]; then
@@ -125,7 +145,7 @@ write_wrapper() {
   mkdir -p "$PREFIX/bin" || fail "step failed: mkdir -p $PREFIX/bin"
   {
     printf '#!/bin/sh\n'
-    printf "exec '%s' '%s/bin/inbox.js' \"\$@\"\\n" "$NODE" "$INBOX_DIR"
+    printf "exec '%s' '%s/bin/%s.js' \"\$@\"\\n" "$NODE" "$INBOX_DIR" "$CMD"
   } >"$WRAPPER.new" || fail "step failed: write $WRAPPER.new"
   chmod 755 "$WRAPPER.new" || fail "step failed: chmod 755 $WRAPPER.new"
   mv "$WRAPPER.new" "$WRAPPER" || fail "step failed: mv $WRAPPER.new $WRAPPER"
@@ -164,7 +184,7 @@ render() {
   while IFS= read -r line; do
     case $line in
       @ARGS@) printf '%s\n' "$ARGS_TEXT" ;;
-      *) printf '%s\n' "$line" | sed -e "s|@LABEL@|$LABEL|g" -e "s|@LOG@|$LOG|g" -e "s|@EXEC@|$EXEC|g" ;;
+      *) printf '%s\n' "$line" | sed -e "s|@LABEL@|$LABEL|g" -e "s|@LOG@|$LOG|g" -e "s|@EXEC@|$EXEC|g" -e "s|@DESC@|$DESC|g" ;;
     esac
   done <"$1"
 }
@@ -180,8 +200,8 @@ write_service() {
 
 install_macos() {
   SERVICE_FILE=$HOME/Library/LaunchAgents/$LABEL.plist
-  LOG=$HOME/Library/Logs/inbox-daemon.log
-  TEMPLATE=$HERE/$LABEL.plist.tmpl
+  LOG=$HOME/Library/Logs/$CMD-daemon.log
+  TEMPLATE=$HERE/com.kgheacock.macropad.inbox.plist.tmpl
   ARGS_TEXT=$(plist_args)
   EXEC=
   uid=$(id -u)
@@ -218,7 +238,7 @@ install_macos() {
 install_linux() {
   SERVICE_FILE=$HOME/.config/systemd/user/$UNIT
   LOG="journalctl --user -u $UNIT"
-  TEMPLATE=$HERE/$UNIT.tmpl
+  TEMPLATE=$HERE/inbox-daemon.service.tmpl
   ARGS_TEXT=
   EXEC="$WRAPPER"
   for word in $DAEMON_ARGS; do EXEC="$EXEC \"$word\""; done
@@ -261,6 +281,6 @@ printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
-  *) printf 'note: %s is not on your PATH; add it to use the inbox command\n' "$PREFIX/bin" ;;
+  *) printf 'note: %s is not on your PATH; add it to use the %s command\n' "$PREFIX/bin" "$CMD" ;;
 esac
 [ "$STATE" = running ] || fail "the daemon is not running; read the log: $LOG"

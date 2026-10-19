@@ -170,7 +170,7 @@ test('TestCommands', (t) => {
     ['a', 'a one', false], ['a', 'a two', false], ['b', 'b one', false],
     ['proj.sub', 'p one', true], ['proj.sub', 'p two', false],
   ]);
-  assert.deepEqual(Object.keys(json[0]), ['id', 'channel', 'body', 'created_at', 'seen_at', 'cwd', 'status']);
+  assert.deepEqual(Object.keys(json[0]), ['id', 'channel', 'body', 'created_at', 'seen_at', 'cwd', 'status', 'here']);
   assert.equal(json[0].created_at, Date.UTC(2026, 0, 1, 12));
   assert.equal(json[0].seen_at, null);
   const unseenJson = JSON.parse(run(['list', '--json', '--unseen', '--all-channels'], { sc }).stdout);
@@ -295,7 +295,7 @@ test('TestErrorMessages', async (t) => {
   raw.exec('PRAGMA user_version = 9');
   raw.close();
   expect(run(['count', '--all-channels'], { sc }), 1,
-    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to 2\\. Update the inbox checkout\\.$`));
+    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to 3\\. Update the inbox checkout\\.$`));
 });
 
 test('TestSymlinkedWorkingDirectory', (t) => {
@@ -429,4 +429,110 @@ test('TestDaemonBadFlags', () => {
   }
   const extra = run(['daemon', 'now'], { sc });
   assert.equal(extra.status, 2);
+});
+
+const SESSION = '0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';
+const ITERM = { TERM_PROGRAM: 'iTerm.app', ITERM_SESSION_ID: `w0t1p2:${SESSION}` };
+const hereOf = (sc) => rows(sc).map((m) => m.here);
+
+test('TestHerePrecedence', (t) => {
+  const sc = scratch(t);
+  const flag = 'app:com.tinyspeck.slackmacgap';
+  const fromEnv = 'url:https://example.com/a';
+
+  // --here beats $INBOX_HERE, which beats iTerm detection.
+  assert.equal(run(['send', '--here', flag, 'x', 'one'], { sc, env: { ...ITERM, INBOX_HERE: fromEnv } }).status, 0);
+  assert.equal(run(['send', 'x', 'two'], { sc, env: { ...ITERM, INBOX_HERE: fromEnv } }).status, 0);
+  assert.equal(run(['send', 'x', 'three'], { sc, env: ITERM }).status, 0);
+  // With $TMUX set, or another terminal, detection gives nothing.
+  assert.equal(run(['send', 'x', 'four'], { sc, env: { ...ITERM, TMUX: '/tmp/tmux-1/default,1,0' } }).status, 0);
+  assert.equal(run(['send', 'x', 'five'], { sc, env: { ...ITERM, TERM_PROGRAM: 'Apple_Terminal' } }).status, 0);
+  assert.equal(run(['send', 'x', 'six'], { sc }).status, 0);
+  assert.deepEqual(hereOf(sc), [flag, fromEnv, `iterm2:${SESSION}`, null, null, null]);
+
+  // `inbox here` prints what detection finds, or exits 1.
+  let r = run(['here'], { sc, env: ITERM });
+  assert.deepEqual([r.status, r.stdout], [0, `iterm2:${SESSION}\n`]);
+  r = run(['here'], { sc, env: { ...ITERM, TMUX: 'x' } });
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes('--here'), r.stderr);
+});
+
+test('TestPipeStoresHere', (t) => {
+  const sc = scratch(t);
+  const r = run(['pipe', 'x'], { sc, env: ITERM, input: 'a\nb\nc\n' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(hereOf(sc), Array(3).fill(`iterm2:${SESSION}`));
+  const json = JSON.parse(run(['list', 'x', '--json'], { sc }).stdout);
+  assert.deepEqual(json.map((m) => m.here), Array(3).fill(`iterm2:${SESSION}`));
+
+  // A bad value stops the run before any line is stored.
+  const bad = run(['pipe', 'x', '--here', 'sh:ls'], { sc, input: 'd\n' });
+  assert.equal(bad.status, 2);
+  assert.equal(rows(sc).length, 3);
+});
+
+test('TestHereRejects', (t) => {
+  const sc = scratch(t);
+  const bad = [
+    'iterm2:xyz',
+    'url:file:///etc/passwd',
+    'url:javascript:alert(1)',
+    'sh:ls',
+    'app:-a',
+    'app:com.example.app; rm -rf /',
+    'url:https://example.com/ a',
+    'url:',
+    'nonsense',
+  ];
+  for (const value of bad) {
+    for (const args of [['send', 'x', 'm'], ['pipe', 'x']]) {
+      const r = run([args[0], '--here', value, ...args.slice(1)], { sc, input: 'm\n' });
+      assert.equal(r.status, 2, `${value}: ${r.stderr}`);
+      assert.match(r.stderr.split('\n')[0], /^inbox: bad --here /);
+    }
+    assert.equal(run(['here', 'x', value], { sc }).status, 2, value);
+  }
+  assert.equal(run(['send', 'x', 'm'], { sc, env: { INBOX_HERE: 'sh:ls' } }).status, 2);
+  assert.equal(rows(sc).length, 0);
+  // The good kinds pass.
+  for (const value of [
+    `iterm2:${SESSION}`,
+    'app:com.apple.Safari',
+    'url:slack://channel?team=T1&id=C1',
+    'url:msteams://teams.microsoft.com/l/chat',
+    'url:ms-outlook://emails',
+    'url:https://example.com/',
+  ]) {
+    assert.equal(run(['send', '--here', value, 'x', 'm'], { sc }).status, 0, value);
+  }
+});
+
+test('TestChannelFallback', (t) => {
+  const sc = scratch(t);
+  const fallback = 'app:com.tinyspeck.slackmacgap';
+  const mine = `iterm2:${SESSION}`;
+  assert.equal(run(['here', 'chat', fallback], { sc }).status, 0);
+  let r = run(['here', 'chat'], { sc });
+  assert.deepEqual([r.status, r.stdout], [0, `${fallback}\n`]);
+
+  assert.equal(run(['send', 'chat', 'no here'], { sc }).status, 0);
+  const unseenHere = () => {
+    const store = openStore(sc.db);
+    const found = store.unseen().map((u) => u.here);
+    store.close();
+    return found;
+  };
+  assert.deepEqual(unseenHere(), [fallback]);
+  // A message here wins over the fallback.
+  assert.equal(run(['send', '--here', mine, 'chat', 'has here'], { sc }).status, 0);
+  assert.deepEqual(unseenHere(), [mine]);
+
+  assert.equal(run(['here', '--clear', 'chat'], { sc }).status, 0);
+  r = run(['here', 'chat'], { sc });
+  assert.equal(r.status, 1);
+  assert.deepEqual(unseenHere(), [mine]);
+  // Usage errors.
+  assert.equal(run(['here', '--clear'], { sc }).status, 2);
+  assert.equal(run(['here', 'bad channel!', fallback], { sc }).status, 2);
 });

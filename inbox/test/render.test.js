@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
-import { channelImage, decodePng, encodePng, writeChannelImage } from '../src/png.js';
-import { createRenderer } from '../src/render.js';
-import { scratch } from '../testlib/helpers.js';
+import { channelText, createRenderer } from '../src/render.js';
 
 const row = (channel, count, newestId) => ({ channel, count, newestId, createdAt: newestId });
-const drawImage = (_dir, channel) => `.generated/inbox/${channel}.png`;
-const renderer = (extra = {}) => createRenderer({ assetsDir: '/unused', drawImage, ...extra });
+const renderer = (extra = {}) => createRenderer(extra);
 
 // The setLayerKey and removeLayerKey messages of a plan, as short strings.
 function brief(messages) {
@@ -33,7 +28,7 @@ test('TestPlan', () => {
     parent: 'inbox',
     status: 'WARN',
     count: 1,
-    iconRef: '.generated/inbox/b.png',
+    iconText: 'b',
   });
 
   // Nothing unseen: the key stays, with count 0 and no status, and no children.
@@ -163,64 +158,34 @@ test('TestResetSendsEverythingAndClearsLeftovers', () => {
   ]);
 });
 
-test('TestPictureFailureStillShowsCount', () => {
-  const logs = [];
-  const r = renderer({
-    log: (line) => logs.push(line),
-    drawImage: () => {
-      throw new Error('read-only');
-    },
-  });
-  const messages = r.plan({ unseen: [row('a', 2, 5)], active: null });
-  assert.equal(messages[1].setLayerKey.iconRef, '');
-  assert.equal(messages[1].setLayerKey.count, 2);
-  assert.equal(logs.length, 1);
+test('TestChannelText', () => {
+  // The last segment is the name; the segment before it is the line above.
+  assert.equal(channelText('debug'), 'debug');
+  assert.equal(channelText('macro-pad.driver'), 'macro-pad\ndriver');
+  assert.equal(channelText('github.com.kgheacock.macro-pad'), 'kgheacock\nmacro-pad');
 });
 
-const FIXTURE = new URL('./fixtures/channel-macro-pad.driver.png', import.meta.url);
-
-test('TestChannelImage', () => {
-  const image = channelImage('macro-pad.driver');
-  assert.equal(image.width, 128);
-  assert.equal(image.height, 128);
-  const golden = decodePng(readFileSync(FIXTURE));
-  assert.equal(golden.width, 128);
-  assert.equal(golden.height, 128);
-  assert.ok(image.rgb.equals(golden.rgb), 'pixels differ from test/fixtures/channel-macro-pad.driver.png');
-  // The PNG the encoder writes reads back to the same pixels.
-  assert.ok(decodePng(encodePng(image)).rgb.equals(image.rgb));
-});
-
-test('TestChannelImageLongNamesAreCut', () => {
-  const long = channelImage('a-very-long-parent-segment.and-an-even-longer-last-segment');
-  const short = channelImage('ai');
-  assert.ok(!long.rgb.equals(short.rgb));
-  // The text stays inside the tile: the first and last columns are background.
-  for (const y of [14, 40, 60]) {
-    for (const x of [0, 127]) {
-      const at = (y * 128 + x) * 3;
-      assert.deepEqual([...long.rgb.subarray(at, at + 3)], [0x1b, 0x1f, 0x2a]);
-    }
+test('TestChannelTextFitsMacropadd', () => {
+  // macropadd takes at most 32 runes on two lines, and cuts what is too wide.
+  const cases = [
+    'a'.repeat(60),
+    `${'p'.repeat(40)}.${'n'.repeat(40)}`,
+    'x.y.z',
+    '_',
+  ];
+  for (const channel of cases) {
+    const text = channelText(channel);
+    assert.ok([...text].length <= 32, `${channel}: ${[...text].length} runes`);
+    assert.ok(text.split('\n').length <= 2, `${channel}: more than two lines`);
+    assert.ok(!/[\u0000-\u0009\u000b-\u001f]/.test(text), `${channel}: a control character`);
   }
+  assert.equal(channelText('p'.repeat(40) + '.' + 'n'.repeat(40)), `${'p'.repeat(14)}…\n${'n'.repeat(15)}…`);
+  assert.equal(channelText('x.y.z'), 'y\nz');
 });
 
-test('TestChannelImageIsWrittenOnce', (t) => {
-  const sc = scratch(t);
-  const assets = path.join(sc.dir, 'assets');
-  const ref = writeChannelImage(assets, 'demo');
-  assert.equal(ref, '.generated/inbox/demo.png');
-  const file = path.join(assets, '.generated', 'inbox', 'demo.png');
-  assert.ok(existsSync(file));
-  // An existing file is kept, even when it differs.
-  writeFileSync(file, 'mine');
-  writeChannelImage(assets, 'demo');
-  assert.equal(readFileSync(file, 'utf8'), 'mine');
-  assert.ok(!existsSync(`${file}.${process.pid}.tmp`));
-});
-
-test('TestChannelImageNeedsWritableDirectory', (t) => {
-  const sc = scratch(t);
-  const blocker = path.join(sc.dir, 'file');
-  writeFileSync(blocker, '');
-  assert.throws(() => writeChannelImage(blocker, 'demo'));
+test('TestPlanSendsTextNotAPicture', () => {
+  const messages = renderer().plan({ unseen: [row('macro-pad.driver', 2, 5)], active: null });
+  const child = messages[1].setLayerKey;
+  assert.equal(child.iconText, 'macro-pad\ndriver');
+  assert.ok(!('iconRef' in child), 'a child sends text, and no iconRef');
 });

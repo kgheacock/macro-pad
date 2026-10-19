@@ -165,6 +165,36 @@ func TestSlotReserved(t *testing.T) {
 	}
 }
 
+// TestSetLayerKeyIconText is task 0069: a setLayerKey message with iconText
+// reaches the layer tree and the key draws a glyph, and one with both iconRef
+// and iconText is logged and dropped.
+func TestSetLayerKeyIconText(t *testing.T) {
+	s, ctl, _, logs := layerServer(t)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "t", Status: layers.StatusWarn, IconText: "macro-pad\ndriver"}})
+	waitForCondition(t, time.Second, func() bool { return ctl.Snapshot().Keys[0] != nil })
+	if got := ctl.Snapshot().Keys[0].IconText; got != "macro-pad\ndriver" {
+		t.Fatalf("iconText is %q", got)
+	}
+	waitForCondition(t, time.Second, func() bool {
+		for _, m := range conn.messages(t) {
+			if m.Kind == KindSetCustomGlyph && m.SetCustomGlyph.KeyIndex == 0 {
+				return true
+			}
+		}
+		return false
+	})
+
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "t", IconRef: "github.png", IconText: "x"}})
+	waitForCondition(t, time.Second, func() bool { return logs.has("setLayerKey id=\"t\" dropped") })
+	if got := ctl.Snapshot().Keys[0].IconText; got != "macro-pad\ndriver" {
+		t.Errorf("a rejected message changed iconText to %q", got)
+	}
+}
+
 func TestSetLayerKeyWithoutLayersIsLogged(t *testing.T) {
 	dev := transport.NewEmulator()
 	defer dev.Close()

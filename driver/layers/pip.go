@@ -26,7 +26,7 @@ import (
 const (
 	pipDisc    = 44 // diameter of the disc, ring included
 	pipRing    = 2  // width of the white ring
-	pipMargin  = 4  // distance from the disc to the corner of the panel
+	pipMargin  = 5  // distance from the disc sprite to the corner of the panel; firmware PIP_MARGIN says the same
 	pipBigW    = 14 // cell of a digit of a count up to 99
 	pipBigH    = 20
 	pipSmallW  = 10 // cell of a character of "99+"
@@ -53,8 +53,8 @@ const (
 	pipEdgeMin = 4
 
 	// iconRoundRadius is the radius of the white round behind an icon, in
-	// pixels. It is a first guess; the owner adjusts it on the panel.
-	iconRoundRadius = 60
+	// pixels. Every icon under assets/ lies inside it (task 0069).
+	iconRoundRadius = 58
 )
 
 var (

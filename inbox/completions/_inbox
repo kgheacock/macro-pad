@@ -68,7 +68,7 @@ _inbox() {
         daemon)
           _arguments "$db" \
             '--port=[macropadd port on 127.0.0.1]:port:' \
-            '--assets-dir=[the directory macropadd uses for pictures]:directory:_directories' \
+            '--assets-dir=[unused: the daemon sends icon text]:directory:_directories' \
             '--slot=[put the Inbox key in this slot]:slot:(0 1 2 3 4 5)' \
             '--poll=[how often to look for a change]:duration:' && ret=0 ;;
         help)

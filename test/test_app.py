@@ -2191,7 +2191,7 @@ def test_a_show_with_pips_stamps_the_pip_on_a_copy_and_leaves_the_slot_unchanged
         differs = 0
         for y in range(128):
             for x in range(128):
-                inside = 80 <= x < 124 and 80 <= y < 124
+                inside = 79 <= x < 123 and 79 <= y < 123
                 index = y * 128 + x
                 same = frame[2 * index : 2 * index + 2] == slot_before[2 * index : 2 * index + 2]
                 if not inside:
@@ -2207,9 +2207,9 @@ def test_the_pip_is_the_disc_of_the_slots_color_with_the_digits_of_the_count():
     _show_pips(pad, serial, [7])
     frame = _last_frame(panels.per_key[0])
     assert _panel_pixel(frame, 0, 0) == 0xF800  # the corner shows the key color
-    assert _panel_pixel(frame, 85, 85) == 0x1102  # disc 2 is the one for 0xF800
-    assert _panel_pixel(frame, 80, 80) == 0x07E0  # a transparent disc pixel keeps the slot's
-    assert _panel_pixel(frame, 95, 92) == 0x2207  # one big cell, centred
+    assert _panel_pixel(frame, 84, 84) == 0x1102  # disc 2 is the one for 0xF800
+    assert _panel_pixel(frame, 79, 79) == 0x07E0  # a transparent disc pixel keeps the slot's
+    assert _panel_pixel(frame, 94, 91) == 0x2207  # one big cell, centred
 
     _show_pips(pad, serial, [42], now=3000)
     frame = _last_frame(panels.per_key[0])
@@ -2222,7 +2222,7 @@ def test_a_pip_on_a_color_the_sheet_has_no_disc_for_uses_the_first_disc():
 
     _show_pips(pad, serial, [7])
 
-    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x1100
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 84, 84) == 0x1100
 
 
 def test_a_pip_count_above_99_draws_99_plus_and_a_count_of_0_shows_the_slot_itself():
@@ -2240,7 +2240,7 @@ def test_a_pip_count_above_99_draws_99_plus_and_a_count_of_0_shows_the_slot_itse
 
     _show_pips(pad, serial, [0], now=4000)
     assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
-    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x07E0
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 84, 84) == 0x07E0
 
 
 def test_a_pip_without_sheet_draws_the_slot_with_no_pip():
@@ -2253,7 +2253,7 @@ def test_a_pip_without_sheet_draws_the_slot_with_no_pip():
     _show_pips(pad, serial, [12])
 
     assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
-    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x07E0
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 84, 84) == 0x07E0
     assert _show_misses(serial) == []
 
 
@@ -2267,7 +2267,7 @@ def test_a_pip_on_a_frame_with_no_picture_still_draws_and_marks_the_key_as_a_gly
 
     _show_pips(pad, serial, [3])
 
-    assert _panel_pixel(_last_frame(panels.per_key[0]), 85, 85) == 0x1102
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 84, 84) == 0x1102
     assert pad.key_states[0].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
 
 

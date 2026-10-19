@@ -2,6 +2,7 @@ package layers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -78,7 +79,27 @@ func RenderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, err
 // the color the edges of the round and the pip are blended against, so that no
 // edge pixel is half transparent (task 0062).
 func renderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, error) {
+	return renderIcon(assetsDir, ref, "", count, keyColor)
+}
+
+// renderIcon is renderGlyph for an icon that is either a PNG at ref or the words
+// in text (task 0069). A text icon is a plain white tile, so the key color
+// cannot show; the pip is blended against ColorNone, as the board draws it on a
+// frame stored for a text icon.
+func renderIcon(assetsDir, ref, text string, count int, keyColor uint16) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
+	if text != "" {
+		if ref != "" {
+			return nil, errors.New("iconRef and iconText are exclusive")
+		}
+		if err := ValidateIconText(text); err != nil {
+			return nil, err
+		}
+		if err := drawIconText(canvas, text); err != nil {
+			return nil, err
+		}
+		keyColor = ColorNone
+	}
 	if ref != "" {
 		p, err := assetPath(assetsDir, ref)
 		if err != nil {

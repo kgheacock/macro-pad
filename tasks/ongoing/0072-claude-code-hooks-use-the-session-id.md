@@ -7,7 +7,7 @@ updated: "2026-10-19"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/92"
 branch: "claude/project-thread-t9q0s6"
 related: ["0070", "0071"]
 tags: ["inbox", "agents", "claude-code"]

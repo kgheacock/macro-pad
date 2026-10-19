@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import basic from '../src/plugins/basic.js';
-import { channelText, createRenderer } from '../src/render.js';
+import { emojiFor } from '../src/emoji.js';
+import ai from '../src/plugins/ai.js';
+import { channelIcon, createRenderer } from '../src/render.js';
 
 const row = (channel, count, newestId) => ({ channel, count, newestId, createdAt: newestId });
 const renderer = (extra = {}) => createRenderer({ rules: basic.rules, ...extra });
@@ -30,6 +32,7 @@ test('TestPlan', () => {
     status: 'WARN',
     count: 1,
     iconText: 'b',
+    iconEmoji: [emojiFor('channel:b').iconRef],
   });
 
   // Nothing unseen: the key stays, with count 0 and no status, and no children.
@@ -159,34 +162,41 @@ test('TestResetSendsEverythingAndClearsLeftovers', () => {
   ]);
 });
 
-test('TestChannelText', () => {
-  // The last segment is the name; the segment before it is the line above.
-  assert.equal(channelText('debug'), 'debug');
-  assert.equal(channelText('macro-pad.driver'), 'macro-pad\ndriver');
-  assert.equal(channelText('github.com.kgheacock.macro-pad'), 'kgheacock\nmacro-pad');
+test('TestChannelIcon', () => {
+  const folder = (name) => emojiFor(`channel:${name}`).iconRef;
+  // A channel is a folder: its last segment over its emoji.
+  assert.deepEqual(channelIcon('debug'), { iconText: 'debug', iconEmoji: [folder('debug')] });
+  assert.deepEqual(channelIcon('macro-pad.driver'), {
+    iconText: 'driver',
+    iconEmoji: [folder('macro-pad.driver')],
+  });
+  // Without sessions, a last segment of 8 hex digits is part of the folder.
+  assert.deepEqual(channelIcon('macro-pad.3f2a91c0').iconEmoji, [folder('macro-pad.3f2a91c0')]);
+  // With sessions, PROJECT.SID is the folder's emoji, then the session's.
+  assert.deepEqual(channelIcon('macro-pad.driver.3F2A91C0', { sessions: true }), {
+    iconText: 'driver',
+    iconEmoji: [folder('macro-pad.driver'), emojiFor('session:3f2a91c0').iconRef],
+  });
+  // A long name is cut to the 16 runes macropadd takes as a caption.
+  assert.equal(channelIcon(`x.${'n'.repeat(40)}`).iconText, `${'n'.repeat(15)}…`);
 });
 
-test('TestChannelTextFitsMacropadd', () => {
-  // macropadd takes at most 32 runes on two lines, and cuts what is too wide.
-  const cases = [
-    'a'.repeat(60),
-    `${'p'.repeat(40)}.${'n'.repeat(40)}`,
-    'x.y.z',
-    '_',
-  ];
-  for (const channel of cases) {
-    const text = channelText(channel);
-    assert.ok([...text].length <= 32, `${channel}: ${[...text].length} runes`);
-    assert.ok(text.split('\n').length <= 2, `${channel}: more than two lines`);
-    assert.ok(!/[\u0000-\u0009\u000b-\u001f]/.test(text), `${channel}: a control character`);
-  }
-  assert.equal(channelText('p'.repeat(40) + '.' + 'n'.repeat(40)), `${'p'.repeat(14)}…\n${'n'.repeat(15)}…`);
-  assert.equal(channelText('x.y.z'), 'y\nz');
+test('TestBasicAndAiShareTheFolderEmoji', () => {
+  // A folder sent to the basic inbox and a session in it on the ai inbox show
+  // the same folder emoji.
+  const basicChild = renderer().plan({ unseen: [row('macro-pad.driver', 1, 1)], active: null })[1].setLayerKey;
+  const aiChild = createRenderer({ rules: ai.rules })
+    .plan({ unseen: [{ ...row('macro-pad.driver.3f2a91c0', 1, 1), byStatus: { waiting: 1 } }], active: null })[1]
+    .setLayerKey;
+  assert.equal(aiChild.iconEmoji[0], basicChild.iconEmoji[0]);
+  assert.equal(aiChild.iconText, basicChild.iconText);
+  assert.equal(aiChild.iconEmoji.length, 2);
 });
 
-test('TestPlanSendsTextNotAPicture', () => {
+test('TestPlanSendsEmojiNotAPicture', () => {
   const messages = renderer().plan({ unseen: [row('macro-pad.driver', 2, 5)], active: null });
   const child = messages[1].setLayerKey;
-  assert.equal(child.iconText, 'macro-pad\ndriver');
-  assert.ok(!('iconRef' in child), 'a child sends text, and no iconRef');
+  assert.equal(child.iconText, 'driver');
+  assert.deepEqual(child.iconEmoji, [emojiFor('channel:macro-pad.driver').iconRef]);
+  assert.ok(!('iconRef' in child), 'a child sends emoji, and no iconRef');
 });

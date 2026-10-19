@@ -219,6 +219,17 @@ the poller used is not read any more; delete it.
   that is still too wide ends in `…`. A rune that Go Bold lacks, such as an
   emoji, draws as `?`. The text stays above the count pip. Two keys with the
   same text share one frame on the board, whatever their colors.
+- `iconEmoji` is one or two pictures under `assets/emoji/` (task 0073), and it
+  excludes `iconRef`. They sit side by side on the white round, 48 px each
+  (64 px for one), so the key color shows around it. With `iconEmoji`,
+  `iconText` is a caption of one line and at most 16 runes, in black Go Bold at
+  the largest of 20, 18, 16, 14, or 12 px that fits 84 px, above the emoji.
+  A third ref, a ref outside `emoji/`, or a longer caption drops the message.
+  The count pip covers the lower right of a second emoji.
+- `assets/emoji/` holds Microsoft Fluent Emoji (flat, MIT), one
+  `<codepoints>.png` per line of `assets/emoji/set.txt`, drawn by
+  `tools/emoji/` to fit the round. Any of them also works as an `iconRef`,
+  such as `emoji/1f98a.png`.
 - `count` is drawn as a pip, a red disc with a white ring and a white number,
   in the bottom-right corner of the image (see "Count pip," above). A count of
   0 has no pip, and a count above 99 shows `99+`.

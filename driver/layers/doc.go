@@ -56,13 +56,17 @@ type Node struct {
 	// IconText is words drawn as the icon instead of a PNG (task 0069). It
 	// excludes IconRef.
 	IconText string `json:"iconText,omitempty"`
-	Children []Node `json:"children,omitempty"`
+	// IconEmoji is one or two pictures under assets/emoji/, side by side on
+	// the round, with IconText as a caption of one line (task 0073). It
+	// excludes IconRef.
+	IconEmoji []string `json:"iconEmoji,omitempty"`
+	Children  []Node   `json:"children,omitempty"`
 }
 
 // hasContent reports whether n shows anything. A key with no content is a
 // reserved slot: the controller does not draw it.
 func (n *Node) hasContent() bool {
-	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.Children) > 0
+	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || len(n.Children) > 0
 }
 
 // Doc is the whole layers.json object.
@@ -195,7 +199,17 @@ func (n *Node) validate() error {
 	if err := ValidateIconText(n.IconText); err != nil {
 		return err
 	}
-	if n.IconRef != "" && n.IconText != "" {
+	if err := ValidateIconEmoji(n.IconEmoji); err != nil {
+		return err
+	}
+	if len(n.IconEmoji) > 0 {
+		if n.IconRef != "" {
+			return errors.New("iconRef and iconEmoji are exclusive")
+		}
+		if err := validateIconCaption(n.IconText); err != nil {
+			return err
+		}
+	} else if n.IconRef != "" && n.IconText != "" {
 		return errors.New("iconRef and iconText are exclusive")
 	}
 	return nil

@@ -41,8 +41,8 @@ test('TestUnseen', (t) => {
   const a2 = store.insert('a', 'two', '/x', { now: 2000 });
   const b1 = store.insert('b', 'three', '/x', { now: 3000 });
   assert.deepEqual(store.unseen(), [
-    { channel: 'a', count: 2, newestId: a2, createdAt: 2000 },
-    { channel: 'b', count: 1, newestId: b1, createdAt: 3000 },
+    { channel: 'a', count: 2, newestId: a2, createdAt: 2000, here: null },
+    { channel: 'b', count: 1, newestId: b1, createdAt: 3000, here: null },
   ]);
   assert.equal(store.count(), 3);
   assert.equal(store.count('a'), 2);
@@ -133,4 +133,58 @@ test('TestMigrateV1ToV2', (t) => {
   const check = new DatabaseSync(db);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   check.close();
+});
+
+test('TestMigrateToHere', (t) => {
+  const { db } = scratch(t);
+  mkdirSync(path.dirname(db), { recursive: true });
+  const raw = new DatabaseSync(db);
+  raw.exec(`CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, body TEXT NOT NULL,
+    created_at INTEGER NOT NULL, seen_at INTEGER, cwd TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'info');
+    CREATE INDEX messages_unseen ON messages (channel, id) WHERE seen_at IS NULL;
+    INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x');
+    PRAGMA user_version = 2;`);
+  raw.close();
+  const store = openStore(db);
+  assert.deepEqual(store.list().map((m) => [m.body, m.here]), [['old', null]]);
+  assert.equal(store.channelHere('a'), null);
+  store.setChannelHere('a', 'app:com.tinyspeck.slackmacgap');
+  assert.equal(store.unseen()[0].here, 'app:com.tinyspeck.slackmacgap');
+  store.close();
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3);
+  check.close();
+});
+
+test('TestChannelFallback', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db);
+  const mine = 'iterm2:11111111-2222-3333-4444-555555555555';
+  const fallback = 'app:com.tinyspeck.slackmacgap';
+  store.insert('a', 'none', '/x');
+  store.insert('b', 'has one', '/x', { here: mine });
+  const hereOf = () => Object.fromEntries(store.unseen().map((r) => [r.channel, r.here]));
+  assert.deepEqual(hereOf(), { a: null, b: mine });
+
+  // A fallback fills in a message with no here, and a message here wins.
+  store.setChannelHere('a', fallback);
+  store.setChannelHere('b', fallback);
+  assert.deepEqual(hereOf(), { a: fallback, b: mine });
+  assert.equal(store.channelHere('a'), fallback);
+
+  // The newest unseen row decides, not the oldest.
+  store.insertMany('a', ['two', 'three'], '/x', { here: mine });
+  assert.equal(hereOf().a, mine);
+  store.insert('a', 'four', '/x');
+  assert.equal(hereOf().a, fallback);
+
+  // Setting again replaces; clearing removes and says whether it did.
+  store.setChannelHere('a', 'url:https://example.com/');
+  assert.equal(store.channelHere('a'), 'url:https://example.com/');
+  assert.equal(store.clearChannelHere('a'), true);
+  assert.equal(store.clearChannelHere('a'), false);
+  assert.equal(hereOf().a, null);
+  store.close();
 });

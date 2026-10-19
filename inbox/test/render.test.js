@@ -45,14 +45,23 @@ test('TestTarget', () => {
   const r = renderer();
   assert.equal(r.target(0), null);
   r.plan({ unseen: [row('a', 2, 5), row('b', 1, 9)], active: null });
-  assert.deepEqual(r.target(0), { channel: 'b', shownId: 9 });
-  assert.deepEqual(r.target(1), { channel: 'a', shownId: 5 });
+  assert.deepEqual(r.target(0), { channel: 'b', shownId: 9, here: null });
+  assert.deepEqual(r.target(1), { channel: 'a', shownId: 5, here: null });
   assert.equal(r.target(2), null);
   // A channel at zero stays in its place, with nothing to mark.
   r.plan({ unseen: [row('a', 2, 5)], active: 'inbox' });
-  assert.deepEqual(r.target(0), { channel: 'b', shownId: 0 });
+  assert.deepEqual(r.target(0), { channel: 'b', shownId: 0, here: null });
   r.reset([]);
   assert.equal(r.target(0), null);
+});
+
+test('TestTargetHere', () => {
+  const r = renderer();
+  r.plan({ unseen: [{ ...row('a', 1, 5), here: 'app:com.apple.Safari' }, row('b', 1, 9)], active: null });
+  assert.equal(r.target(0).here, null);
+  assert.equal(r.target(1).here, 'app:com.apple.Safari');
+  r.reset([]);
+  assert.equal(r.target(1), null);
 });
 
 test('TestPlanSlot', () => {

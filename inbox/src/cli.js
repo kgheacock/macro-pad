@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
+import { detectHere, resolveHere, validateHere } from './here.js';
 import { DEFAULT_STATUS, defaultDbPath, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
@@ -21,6 +22,8 @@ const CHANNEL_RULES = `How the channel is chosen:
 
 const DB_OPTION = `  --db PATH   use this SQLite file instead of $INBOX_DB`;
 const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
+const HERE_OPTION = `  --here H    where a press on the channel key goes: iterm2:UUID, app:BUNDLE_ID, or
+              url:URL (default: $INBOX_HERE, else the iTerm session you are in)`;
 
 // macropadd run from the repo root reads its pictures from here.
 const REPO_ASSETS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
@@ -37,6 +40,7 @@ Commands:
   count      print how many messages are not seen yet
   channels   list channels that have unseen messages
   seen       mark messages as seen
+  here       show or set where a press on a channel key goes
   daemon     watch the inbox and show it on the macro pad
   help       show help for a command
 
@@ -47,13 +51,14 @@ Examples:
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
 
-  send: `Usage: inbox send [--status STATUS] [CHANNEL] MESSAGE
+  send: `Usage: inbox send [--status STATUS] [--here HERE] [CHANNEL] MESSAGE
 
 Send one message.
 
   CHANNEL   where the message goes, such as "debug" or "macro-pad.driver"
   MESSAGE   the text; quote it when it has spaces
 ${STATUS_OPTION}
+${HERE_OPTION}
 ${DB_OPTION}
 
 ${CHANNEL_RULES}
@@ -63,7 +68,7 @@ Examples:
   inbox send --status error debug "build failed"
   inbox send "tests passed"        (in ~/source/macro-pad: channel macro-pad)`,
 
-  pipe: `Usage: inbox pipe [--status STATUS] [CHANNEL]
+  pipe: `Usage: inbox pipe [--status STATUS] [--here HERE] [CHANNEL]
 
 Read standard input and send each line as one message. Empty lines are
 skipped. A line longer than 64 KiB is cut. Messages are saved while the pipe
@@ -72,6 +77,7 @@ exit 0.
 
   CHANNEL   where the messages go
 ${STATUS_OPTION}
+${HERE_OPTION}
 ${DB_OPTION}
 
 ${CHANNEL_RULES}
@@ -94,7 +100,7 @@ message.
   --all-channels  list every channel
   --unseen        list only the messages that are not seen yet
   --json          print a JSON array of {id, channel, body, created_at,
-                  seen_at, cwd, status}
+                  seen_at, cwd, status, here}
   -n N            keep only the newest N messages
 ${DB_OPTION}
 
@@ -145,6 +151,30 @@ Examples:
   inbox seen debug
   inbox seen --all-channels`,
 
+  here: `Usage: inbox here
+       inbox here CHANNEL
+       inbox here CHANNEL HERE
+       inbox here --clear CHANNEL
+
+A "here" says where a press on a channel key goes. Its kinds are:
+  iterm2:UUID       an iTerm session (36 hex digits and dashes)
+  app:BUNDLE_ID     a macOS app, such as com.tinyspeck.slackmacgap
+  url:URL           a deep link; slack, msteams, ms-outlook, or https
+
+  (no argument)     print the "here" of the iTerm session you are in, or exit 1
+  CHANNEL           print the fallback "here" of the channel, or exit 1
+  CHANNEL HERE      set the fallback of the channel, used by a message with none
+  --clear CHANNEL   remove the fallback of the channel
+${DB_OPTION}
+
+send and pipe look for a "here" in this order: --here, $INBOX_HERE, the iTerm
+session you are in (not inside tmux). macOS only.
+
+Examples:
+  inbox here
+  inbox here chat app:com.tinyspeck.slackmacgap
+  inbox here --clear chat`,
+
   daemon: `Usage: inbox daemon [--port N] [--assets-dir DIR] [--slot N] [--poll DURATION]
 
 Run until stopped. Watch the store, and send the unseen counts to macropadd
@@ -167,12 +197,12 @@ Example:
   inbox daemon --assets-dir ~/source/macro-pad/assets`,
 };
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'daemon'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const OPTIONS = {
-  send: { status: { type: 'string' } },
-  pipe: { status: { type: 'string' } },
+  send: { status: { type: 'string' }, here: { type: 'string' } },
+  pipe: { status: { type: 'string' }, here: { type: 'string' } },
   list: {
     'all-channels': { type: 'boolean' },
     unseen: { type: 'boolean' },
@@ -182,6 +212,7 @@ const OPTIONS = {
   count: { 'all-channels': { type: 'boolean' } },
   channels: { json: { type: 'boolean' } },
   seen: { 'all-channels': { type: 'boolean' } },
+  here: { clear: { type: 'boolean' } },
   daemon: {
     port: { type: 'string' },
     'assets-dir': { type: 'string' },
@@ -313,7 +344,8 @@ function runSend(io, { values, positionals }) {
   const explicit = positionals.length === 2 ? positionals[0] : undefined;
   const channel = requireChannel(io, explicit, 'inbox send CHANNEL MESSAGE');
   const status = parseStatus(values.status);
-  withStore(io, values, (store) => store.insert(channel, message, io.cwd(), { status }));
+  const here = resolveHere({ flag: values.here, env: io.env });
+  withStore(io, values, (store) => store.insert(channel, message, io.cwd(), { status, here }));
   return 0;
 }
 
@@ -328,7 +360,7 @@ function cutLine(line, warnCut) {
 
 // Reads lines until end of input or a signal. Saves in batches so a long
 // pipe shows its lines within FLUSH_MS and a burst costs a few transactions.
-function pipeLines(io, store, channel, status) {
+function pipeLines(io, store, channel, status, here) {
   const cwd = io.cwd();
   let pending = [];
   let timer = null;
@@ -349,7 +381,7 @@ function pipeLines(io, store, channel, status) {
     if (pending.length === 0) return;
     const batch = pending;
     pending = [];
-    store.insertMany(channel, batch, cwd, { status });
+    store.insertMany(channel, batch, cwd, { status, here });
   };
 
   const addLine = (raw) => {
@@ -424,6 +456,8 @@ async function runPipe(io, { values, positionals }) {
   }
   const channel = requireChannel(io, positionals[0], 'inbox pipe CHANNEL');
   const status = parseStatus(values.status);
+  // Like the channel, the "here" is fixed before the first line is read.
+  const here = resolveHere({ flag: values.here, env: io.env });
   if (io.stdin.isTTY) {
     throw new UsageError(
       'pipe reads lines from a pipe or file, as in: my_cmd 2>&1 | inbox pipe debug',
@@ -431,7 +465,7 @@ async function runPipe(io, { values, positionals }) {
   }
   const store = openStore(values.db ?? defaultDbPath(io.env), io.env);
   try {
-    return await pipeLines(io, store, channel, status);
+    return await pipeLines(io, store, channel, status, here);
   } finally {
     store.close();
   }
@@ -501,6 +535,42 @@ function runSeen(io, { values, positionals }) {
     channel = requireChannel(io, positionals[0], 'inbox seen CHANNEL');
   }
   out(io, String(withStore(io, values, (store) => store.markAllSeen(channel))));
+  return 0;
+}
+
+function runHere(io, { values, positionals }) {
+  if (positionals.length > 2) throw new UsageError('here takes at most CHANNEL and HERE');
+  if (values.clear) {
+    if (positionals.length !== 1) {
+      throw new UsageError('--clear takes one CHANNEL, as in: inbox here --clear chat');
+    }
+    const channel = validateChannel(positionals[0]);
+    withStore(io, values, (store) => store.clearChannelHere(channel));
+    return 0;
+  }
+  if (positionals.length === 0) {
+    const here = detectHere(io.env);
+    if (here === null) {
+      io.stderr.write(
+        'inbox: no "here" found for this shell; pass --here or set INBOX_HERE (iterm2:UUID, app:BUNDLE_ID, or url:URL)\n',
+      );
+      return 1;
+    }
+    out(io, here);
+    return 0;
+  }
+  const channel = validateChannel(positionals[0]);
+  if (positionals.length === 2) {
+    const here = validateHere(positionals[1], 'HERE');
+    withStore(io, values, (store) => store.setChannelHere(channel, here));
+    return 0;
+  }
+  const here = withStore(io, values, (store) => store.channelHere(channel));
+  if (here === null) {
+    io.stderr.write(`inbox: ${channel} has no fallback "here"\n`);
+    return 1;
+  }
+  out(io, here);
   return 0;
 }
 
@@ -583,6 +653,7 @@ const RUNNERS = {
   count: runCount,
   channels: runChannels,
   seen: runSeen,
+  here: runHere,
   daemon: runDaemon,
 };
 

@@ -22,6 +22,20 @@ function subdir(sc, ...parts) {
   return dir;
 }
 
+test('TestChannelCommand', (t) => {
+  const sc = scratch(t);
+  let r = run(['channel'], { sc, cwd: subdir(sc, 'github.com', 'me', 'app') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'github.com.me.app\n');
+  r = run(['channel'], { sc, cwd: sc.dir });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes(sc.root), r.stderr);
+  r = run(['channel'], { sc, cwd: subdir(sc, 'bad name') });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, '');
+  assert.equal(run(['channel', 'x'], { sc, cwd: sc.dir }).status, 2);
+});
+
 test('TestChannelArgument', (t) => {
   const sc = scratch(t);
   const outside = sc.dir;

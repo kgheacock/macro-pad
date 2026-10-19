@@ -7,17 +7,18 @@
 #        tool      PostToolUse       a tool finished              -> running (only on a change)
 #        waiting   Notification      permission / question        -> waiting
 #        done      Stop              the turn ended               -> done
-#        end       SessionEnd        the session closed           -> clears a stuck running/waiting
+#        end       SessionEnd        the session closed           -> marks it seen, so its key goes
 #
-# One channel per project: the path below ~/source joined by dots, as
-# `inbox send` infers it (else the folder name). Sessions in one project
-# share a channel.
+# One channel per session: PROJECT.SID. PROJECT is the channel `inbox channel`
+# prints in the project folder (the path below ~/source joined by dots); SID is the
+# first 8 characters of the session id, from `session_id` in the hook payload,
+# else $CLAUDE_CODE_SESSION_ID. Without a session id the channel is PROJECT.
 #
 # The ai plugin shows the highest status of the UNSEEN messages (waiting > running >
 # done), so a state change marks the channel seen first. Otherwise a `waiting`
 # from a permission prompt would keep the key yellow after you approved it, and
 # `running` would hide `done`. A tool hook sends nothing while the state is
-# already running: the last state sent is kept in a file per channel.
+# already running: the last state sent is kept in a file per session.
 #
 # Never blocks Claude Code: every failure is silent and the exit code is 0.
 
@@ -26,20 +27,21 @@ payload="$(cat)"
 inbox="${INBOX_BIN:-$HOME/.local/bin/inbox}"
 { [ -x "$inbox" ] && command -v jq >/dev/null 2>&1; } || exit 0
 
+# The project channel is what `inbox send` would infer in the project folder,
+# so both name it the same way. Outside the source root inbox infers nothing,
+# and the session is not reported.
 proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
-proj="$(cd "${proj:-$PWD}" 2>/dev/null && pwd -P)" || exit 0
-root="$(cd "${INBOX_SOURCE_ROOT:-$HOME/source}" 2>/dev/null && pwd -P)"
-case "$proj" in
-  "$root"/*) rel="${proj#"$root"/}"; channel="${rel//\//.}" ;;
-  *) channel="$(basename "$proj")" ;;
-esac
-# A channel holds letters, digits, - and _ between dots.
-channel="$(printf '%s' "$channel" | tr -c 'A-Za-z0-9_.-' '-' | sed -E 's/\.+/./g; s/^\.//; s/\.$//')"
-[ -n "$channel" ] || exit 0
+project="$(cd "${proj:-$PWD}" 2>/dev/null && "$inbox" channel 2>/dev/null)" || exit 0
+[ -n "$project" ] || exit 0
+
+# The full session id; only letters, digits, - and _ are kept.
+session="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
+session="$(printf '%s' "${session:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_-')"
+channel="$project${session:+.${session:0:8}}"
 
 cache="${CLAUDE_AI_INBOX_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/ai-inbox-claude}"
 mkdir -p "$cache" 2>/dev/null
-file="$cache/$channel"
+file="$cache/${session:-$channel}"
 last="$(cat "$file" 2>/dev/null)"
 
 seen() { "$inbox" --plugin ai seen "$channel" >/dev/null 2>&1; }
@@ -68,7 +70,8 @@ case "$state" in
     send done "finished"
     ;;
   end)
-    [ "$last" = done ] || seen
+    # The session is gone: its key goes too.
+    seen
     rm -f "$file" 2>/dev/null
     ;;
 esac

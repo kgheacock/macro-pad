@@ -203,15 +203,17 @@ const counts = (store) => Object.fromEntries(store.unseen().map((row) => [row.ch
 
 // Starts a daemon with a child per channel (the last one inserted is first),
 // the Inbox layer open, and a slow poll so only a press can change the pad.
-async function openInbox(t, sc, channels) {
+async function openInbox(t, sc, channels, { heres = {}, ...extra } = {}) {
   const server = await serve(t);
   const writer = openStore(sc.db);
   t.after(() => writer.close());
-  for (const channel of [...channels].reverse()) writer.insert(channel, 'one', sc.root);
-  launch(t, sc, server, { pollMs: 10_000 });
+  for (const channel of [...channels].reverse()) {
+    writer.insert(channel, 'one', sc.root, { here: heres[channel] ?? null });
+  }
+  const { logs } = launch(t, sc, server, { pollMs: 10_000, ...extra });
   await waitFor(() => server.received.some((m) => m.setLayerKey?.id === channels[0]), 3000, 'the children');
   server.layerChanged('inbox');
-  return { server, writer };
+  return { server, writer, logs };
 }
 
 test('TestPressMarksChannel', async (t) => {
@@ -287,6 +289,69 @@ test('TestMarkSendsAtOnce', async (t) => {
   const sent = server.received.slice(before).map((m) => m.setLayerKey);
   assert.equal(sent.find((k) => k.id === 'inbox').count, 1);
   assert.equal(sent.find((k) => k.id === 'a').count, 0);
+});
+
+test('TestPressFocuses', async (t) => {
+  const sc = scratch(t);
+  const slack = 'app:com.tinyspeck.slackmacgap';
+  const tab = 'iterm2:0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';
+  const calls = [];
+  let writer;
+  // Records what the store held at the moment of the call: the mark comes first.
+  const focus = async (here) => calls.push({ here, unseen: counts(writer) });
+  const opened = await openInbox(t, sc, ['a', 'b', 'c'], { heres: { a: slack, b: tab }, focus });
+  const { server } = opened;
+  writer = opened.writer;
+
+  // The up key, an empty key, and a channel with no here call nothing.
+  for (const key of [3, 4, 5]) press(server, key);
+  press(server, 2);
+  await waitFor(() => counts(writer).c === undefined, 1000, 'c seen');
+  await pause(100);
+  assert.deepEqual(calls, []);
+
+  press(server, 0);
+  await waitFor(() => calls.length === 1, 1000, 'one focus');
+  assert.equal(calls[0].here, slack);
+  assert.equal(calls[0].unseen.a, undefined, 'a was marked before focus');
+  assert.equal(calls[0].unseen.b, 1);
+  press(server, 1);
+  await waitFor(() => calls.length === 2, 1000, 'two focus');
+  assert.equal(calls[1].here, tab);
+  await pause(100);
+  assert.equal(calls.length, 2);
+});
+
+test('TestOpenPressFocusesNothing', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  writer.insert('a', 'one', sc.root, { here: 'app:com.tinyspeck.slackmacgap' });
+  const calls = [];
+  launch(t, sc, server, { pollMs: 10_000, slot: 0, focus: async (here) => calls.push(here) });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'the child');
+  press(server, 0);
+  press(server, 1);
+  await pause(150);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(counts(writer), { a: 1 });
+});
+
+test('TestFailedFocusKeepsMark', async (t) => {
+  const sc = scratch(t);
+  const bad = 'iterm2:0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';
+  const { server, writer, logs } = await openInbox(t, sc, ['a'], {
+    heres: { a: bad },
+    focus: async () => {
+      throw new Error('no iTerm session gone');
+    },
+  });
+  press(server, 0);
+  await waitFor(() => logs.some((l) => l.includes('no iTerm session gone')), 1000, 'the log line');
+  assert.ok(logs.some((l) => l.includes('iterm2') && l.includes(' a: ')), logs.join('\n'));
+  assert.ok(!logs.some((l) => l.includes(bad)), 'the log names the kind, not the value');
+  assert.deepEqual(counts(writer), {});
 });
 
 test('TestPidFile', (t) => {

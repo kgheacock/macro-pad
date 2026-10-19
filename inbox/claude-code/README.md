@@ -9,14 +9,18 @@ badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
 | Claude Code event | Argument | What the pad shows |
 |---|---|---|
 | `UserPromptSubmit` | `prompt` | running (blue) |
-| `PostToolUse` | `tool` | running, only if the state was not running already |
+| `PostToolUse` | `tool` | running, unless it shows already (the channel has an unseen message) |
 | `Notification` | `waiting` | waiting (yellow); `idle_prompt` and `auth_success` are ignored |
 | `Stop` | `done` | done (green) |
 | `SessionEnd` | `end` | clears a running or waiting state that would stay stuck |
 
-One channel per project: the path below `~/source` joined by dots, as
-`ai-inbox send` infers it, else the folder name. Sessions in one project share
-a channel. The script marks the channel seen on a state change, because
+One channel per session. It starts with the project: the path below `~/source`
+joined by dots, as `ai-inbox send` infers it, else the folder name. The git
+branch follows (a worktree has its own), as `macro-pad.my-branch`. If a live
+session holds that channel already, an ordinal follows: `.2`, `.3`. A session
+keeps its channel until it ends, also when the branch changes. Claims live in
+`~/.cache/ai-inbox-claude`; a claim that no hook touched for 12 hours (a session
+that was killed) is free again. The script marks the channel seen on a state change, because
 `ai-inbox` shows the highest status of the *unseen* messages: without it, a
 `waiting` from a permission prompt would stay yellow after you approve, and a
 `running` would hide the `done`. A press on the channel key goes back to the

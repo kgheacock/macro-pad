@@ -10,28 +10,31 @@
 // and `channels` is every channel the store has ever held, so reset can clear
 // children an earlier daemon left on the pad.
 
+import { channelInput, emojiFor, loadEmojiSet, splitSessionChannel } from './emoji.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
 
 export const MAX_CHILDREN = 5;
 
-// macropadd takes at most 32 runes of icon text on two lines. A channel is
-// letters, digits, - and _ joined by dots, so a long one is cut here to
-// leave room for the line break; macropadd cuts what is still too wide.
-const MAX_SEGMENT = 15;
-const MAX_NAME = 16;
+// macropadd takes a caption of at most 16 runes over emoji, and cuts what is
+// still too wide.
+const MAX_CAPTION = 16;
 
 function clip(segment, limit) {
   const runes = [...segment];
   return runes.length <= limit ? segment : `${runes.slice(0, limit - 1).join('')}…`;
 }
 
-// The icon text of a channel: its last segment, and the segment before it as
-// a line above. `macro-pad.driver` gives "macro-pad\ndriver".
-export function channelText(channel) {
-  const segments = channel.split('.');
-  const name = segments.at(-1);
-  if (segments.length === 1) return clip(name, MAX_SEGMENT + 1 + MAX_NAME);
-  return `${clip(segments.at(-2), MAX_SEGMENT)}\n${clip(name, MAX_NAME)}`;
+// The icon of a channel (task 0073): the last segment of its folder as a
+// caption, over the folder's emoji and, for a session channel, the session's
+// emoji. With `sessions`, a channel PROJECT.SID (task 0072) is the folder
+// PROJECT and the session SID; otherwise the whole channel is the folder.
+// `macro-pad.driver.3f2a91c0` gives "driver" over the emoji of
+// channel:macro-pad.driver and session:3f2a91c0.
+export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } = {}) {
+  const { folder, session } = sessions ? splitSessionChannel(channel) : { folder: channel, session: null };
+  const emoji = [emojiFor(channelInput(folder), set).iconRef];
+  if (session !== null) emoji.push(emojiFor(`session:${session}`, set).iconRef);
+  return { iconText: clip(folder.split('.').at(-1), MAX_CAPTION), iconEmoji: emoji };
 }
 
 // `rules` is a plugin's rules: what the top key and the children show.
@@ -41,7 +44,15 @@ export function channelText(channel) {
 //   child(row)       the fields of a child, besides id and parent; row is
 //                    undefined for a channel that has no unseen message now
 //   before(a, b)     orders two rows; the first five show
-export function createRenderer({ slot, rules }) {
+//   sessions         true when a channel may be PROJECT.SID (see channelIcon)
+// `emojiSet` is the emoji set, for a test; by default assets/emoji/set.txt.
+export function createRenderer({ slot, rules, emojiSet }) {
+  // The icon of each channel, worked out once.
+  const icons = new Map();
+  const iconOf = (channel) => {
+    if (!icons.has(channel)) icons.set(channel, channelIcon(channel, { sessions: rules.sessions === true, set: emojiSet }));
+    return icons.get(channel);
+  };
   // The last values sent per node, as JSON, so only a change is sent again.
   const sent = new Map();
   // The channels macropadd holds as children of `inbox`, in its order.
@@ -71,7 +82,7 @@ export function createRenderer({ slot, rules }) {
       id: channel,
       parent: rules.id,
       ...rules.child(row),
-      iconText: channelText(channel),
+      ...iconOf(channel),
     });
   };
 

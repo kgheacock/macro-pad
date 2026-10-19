@@ -31,9 +31,10 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |
 | `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
 | `inbox plugins` | Print each plugin and what it shows. See "Plugins". |
+| `inbox emoji [CHANNEL \| --folder DIR] [--session ID] [--format F]` | Print the emoji a key shows for a folder, a session, or both. See "Emoji". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
-`send`, `pipe`, `list`, `count` and `seen` also take `--channel C` in place of
+`send`, `pipe`, `list`, `count`, `seen` and `emoji` also take `--channel C` in place of
 the `CHANNEL` argument. Give the channel only once: both together exit with
 code 2.
 
@@ -295,12 +296,12 @@ The keys:
   no "here" only marks. A "here" that fails (a closed iTerm session, a wrong
   bundle ID, a missing Automation permission) is logged with the channel and
   the kind, and the mark stands.
-- `macropadd` draws the text. The daemon sends each channel as `iconText`
-  (`<parent>\n<name>`, or the name alone), and writes no file. A segment of
-  more than 15 characters (16 for the name) is cut with `…` before it is sent,
-  and `macropadd` cuts what is still too wide for the key. Older versions wrote
-  pictures to `<assets-dir>/.generated/inbox/`; those files are no longer used,
-  and you can delete that directory.
+- `macropadd` draws the icon. The daemon sends each channel as the last segment
+  of its folder in `iconText`, over the folder's emoji in `iconEmoji`, and for
+  a Claude Code session of the ai plugin the session's emoji beside it (see
+  "Emoji"). It writes no file. A name of more than 16 characters is cut with
+  `…`. Older versions wrote pictures to `<assets-dir>/.generated/inbox/`;
+  those files are no longer used, and you can delete that directory.
 - The daemon sends a key only when its values changed. On every connect it
   removes every channel it knows from the `inbox` layer and sends the full
   state, so a child that an earlier daemon left on the pad does not stay.
@@ -327,8 +328,8 @@ How it behaves:
 - Log lines go to standard error, each starting with `inbox:`.
 
 Start `macropadd` first, for example from the repo root. Use a `macropadd`
-and firmware from this checkout: an older `macropadd` ignores `iconText`, and
-the key then shows only its color and count.
+and firmware from this checkout: an older `macropadd` ignores `iconEmoji` (and
+`iconText` before task 0069), and the key then shows less.
 
 ```
 go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 --assets-dir "$PWD/assets"
@@ -463,6 +464,32 @@ inbox/scripts/install.sh --plugin ai
 
 Give the two keys different slots with `--slot` if you want them in fixed
 places; otherwise each takes the first free slot.
+
+### Emoji
+
+Each channel key shows its folder's name over one or two emoji from
+`assets/emoji/` (task 0073): the folder's on the left and, for a Claude Code
+session, the session's on the right. The same folder or session always gets
+the same emoji, on every machine.
+
+- The folder of a channel is the channel itself. For the ai plugin, a channel
+  `PROJECT.SID` from the Claude Code hooks, whose last segment is 8 hex digits,
+  is the folder `PROJECT` and the session `SID`. So a folder shows the same
+  emoji in the basic inbox and in the ai inbox.
+- The emoji of a folder is the emoji of `channel:` and its channel; a session
+  hashes `session:` and the first 8 hex digits of its id, in lower case.
+- Every emoji of `assets/emoji/set.txt` gets a score, the first 8 bytes of
+  SHA-256 of the input, a line break, and the emoji's code points; the highest
+  wins (rendezvous hashing). Adding an emoji to the set moves only the inputs
+  that take it, about 1 in the size of the set.
+- Two keys on the pad share an emoji about 1 time in 13; their names tell them apart.
+- `inbox emoji` prints the same emoji, so a status line can show them:
+
+```
+inbox emoji                                     # the current folder
+inbox emoji --folder "$PWD" --session "$CLAUDE_CODE_SESSION_ID"
+inbox emoji macro-pad.driver --format name      # char, name, ref, or json
+```
 
 ### Claude Code
 

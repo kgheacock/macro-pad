@@ -41,5 +41,8 @@ waiting, running, done. The pip on the key counts the channels that wait.`,
     },
     // The highest status first, then the newest unseen message.
     before: (a, b) => rank(b) - rank(a) || b.newestId - a.newestId,
+    // A Claude Code session reports to PROJECT.SID (task 0072), so its key
+    // shows the folder's emoji and the session's (task 0073).
+    sessions: true,
   },
 };

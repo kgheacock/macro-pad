@@ -47,6 +47,7 @@ _inbox() {
     'here:show or set where a press on a channel key goes'
     'daemon:watch the inbox and show it on the macro pad'
     'plugins:list the plugins'
+    'emoji:print the emoji of a folder or a Claude Code session'
     'help:show help for a command'
   )
   local here='--here=[where a press goes: iterm2:UUID, app:BUNDLE_ID, or url:URL]:here:'
@@ -99,6 +100,13 @@ _inbox() {
             '--poll=[how often to look for a change]:duration:' && ret=0 ;;
         plugins | channel)
           _arguments "$plugin" && ret=0 ;;
+        emoji)
+          _arguments "$plugin" \
+            '(1 --folder)--channel=[the channel]:channel:_inbox_channels' \
+            '(1 --channel)--folder=[the folder]:directory:_directories' \
+            '--session=[a Claude Code session id]:session:' \
+            '--format=[what to print]:format:(char name ref json)' \
+            '(--channel --folder)1::channel:_inbox_channels' && ret=0 ;;
         help)
           _describe -t commands 'inbox command' commands && ret=0 ;;
       esac

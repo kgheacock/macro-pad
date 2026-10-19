@@ -12,11 +12,16 @@ badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
 | `PostToolUse` | `tool` | running, only if the state was not running already |
 | `Notification` | `waiting` | waiting (yellow); `idle_prompt` and `auth_success` are ignored |
 | `Stop` | `done` | done (green) |
-| `SessionEnd` | `end` | clears a running or waiting state that would stay stuck |
+| `SessionEnd` | `end` | marks the session seen, so its key goes away |
 
-One channel per project: the path below `~/source` joined by dots, as
-`inbox send` infers it, else the folder name. Sessions in one project share
-a channel. The script marks the channel seen on a state change, because
+One channel per session, `PROJECT.SID`: `PROJECT` is the path below
+`~/source` joined by dots, as `inbox send` infers it, else the folder name;
+`SID` is the first 8 characters of the session id, from `session_id` in the
+hook payload, else `$CLAUDE_CODE_SESSION_ID`. The key shows the project above
+the short id, so two sessions in one project get two keys, and one session's
+`done` cannot hide another that waits. Without a session id the channel is
+`PROJECT`. `SessionEnd` marks the channel seen, so the key of a closed session
+goes away. The script marks the channel seen on a state change, because
 the ai plugin shows the highest status of the *unseen* messages: without it, a
 `waiting` from a permission prompt would stay yellow after you approve, and a
 `running` would hide the `done`. A press on the channel key goes back to the

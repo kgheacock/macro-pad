@@ -21,9 +21,11 @@ _inbox() {
     'count:print how many messages are not seen yet'
     'channels:list channels that have unseen messages'
     'seen:mark messages as seen'
+    'here:show or set where a press on a channel key goes'
     'daemon:watch the inbox and show it on the macro pad'
     'help:show help for a command'
   )
+  local here='--here=[where a press goes: iterm2:UUID, app:BUNDLE_ID, or url:URL]:here:'
   local db='--db[use this SQLite file instead of $INBOX_DB]:file:_files'
 
   _arguments -C \
@@ -38,11 +40,14 @@ _inbox() {
     args)
       case $line[1] in
         send)
-          _arguments "$db" '--status=[the status of the message]:status:' \
+          _arguments "$db" "$here" '--status=[the status of the message]:status:' \
             '1::channel:_inbox_channels' && ret=0 ;;
         pipe)
-          _arguments "$db" '--status=[the status of the message]:status:' \
+          _arguments "$db" "$here" '--status=[the status of the message]:status:' \
             '1::channel:_inbox_channels' && ret=0 ;;
+        here)
+          _arguments "$db" '--clear[remove the fallback of the channel]' \
+            '1::channel:_inbox_channels' '2::here:' && ret=0 ;;
         list)
           _arguments "$db" \
             '(--all-channels 1)--all-channels[list every channel]' \

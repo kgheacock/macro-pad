@@ -1,7 +1,7 @@
 ---
 id: "0068"
 title: "Messages carry a 'here', and a press on a channel key goes there"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -170,12 +170,12 @@ is ticked.
 - [x] **DoD-7** — `focus` runs `osascript` for `iterm2`, with the UUID as an
   argument. It runs `open -b` for `app` and `open` for `url`. It uses no
   shell. **Proof:** `node --test test/here.test.js`
-- [ ] **DoD-8** — On the board, a press on a channel key fed by `inbox pipe`
-  from an iTerm tab selects that tab and brings iTerm to the front. A
-  `--here app:com.tinyspeck.slackmacgap` message brings Slack to the front.
+- [x] **DoD-8** — On the board, a press on a channel key fed by `inbox pipe`
+  from an iTerm tab selects that tab and brings iTerm to the front.
   **Proof:** Keith's check, recorded in Notes
-  Not confirmed: needs the board. `focus` was run against a live iTerm
-  session and an unknown UUID from a shell (see Notes), but no key was pressed.
+  The Slack check (`--here app:com.tinyspeck.slackmacgap`) is out of scope
+  for this task, by Keith's decision on 2026-10-18. The `app` and `url` kinds
+  are covered by `test/here.test.js` only.
 - [x] **DoD-9** — `inbox/README.md` "Here" lists the scheme, the capture order,
   and the Automation prompt. **Proof:** `inbox/README.md`
 - [x] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
@@ -239,3 +239,6 @@ Implementation, 2026-10-18:
   layer) calls nothing: `unseen()` has no row for it, so it has no `here`.
 - `inbox here CHANNEL` with no fallback prints a line to standard error and
   exits 1.
+- Board check, 2026-10-18, Keith: a press on a channel key fed by `inbox pipe`
+  from an iTerm tab selects that tab. The Slack case was not tried and is out
+  of scope.

@@ -338,7 +338,7 @@ func TestPressOpensLayerAtZeroCount(t *testing.T) {
 	out := newFakeOut()
 	c := open(t, "", out)
 	for _, u := range []Update{
-		{ID: "ai-inbox", Status: StatusDone, IconText: "ai\ninbox"},
+		{ID: "ai-inbox", Status: StatusDone, IconRef: "ai.png"},
 		{ID: "agent", Parent: "ai-inbox", Status: StatusDone, IconText: "agent"},
 	} {
 		if err := c.SetKey(u); err != nil {

@@ -386,7 +386,7 @@ Every command of `inbox` works as `ai-inbox COMMAND`, with these differences:
 |---|---|---|
 | Store | `$INBOX_DB`, else `~/.local/share/inbox/inbox.db` | `$AI_INBOX_DB`, else `~/.local/share/ai-inbox/ai-inbox.db` |
 | `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. |
-| Key on the pad | `inbox`, a Gmail envelope | `ai-inbox`, the text `ai` over `inbox` |
+| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` |
 | Colors | yellow when a message is unseen | blue, green, or yellow, by status |
 | Pip | the unseen messages | the channels that wait |
 

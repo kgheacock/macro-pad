@@ -42,6 +42,7 @@ _inbox() {
     'list:list messages, seen and unseen'
     'count:print how many messages are not seen yet'
     'channels:list channels that have unseen messages'
+    'channel:print the channel of the working directory'
     'seen:mark messages as seen'
     'here:show or set where a press on a channel key goes'
     'daemon:watch the inbox and show it on the macro pad'
@@ -96,7 +97,7 @@ _inbox() {
             '--assets-dir=[unused: the daemon sends icon text]:directory:_directories' \
             '--slot=[put the Inbox key in this slot]:slot:(0 1 2 3 4 5)' \
             '--poll=[how often to look for a change]:duration:' && ret=0 ;;
-        plugins)
+        plugins | channel)
           _arguments "$plugin" && ret=0 ;;
         help)
           _describe -t commands 'inbox command' commands && ret=0 ;;

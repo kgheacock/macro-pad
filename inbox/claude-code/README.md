@@ -14,9 +14,11 @@ badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
 | `Stop` | `done` | done (green) |
 | `SessionEnd` | `end` | marks the session seen, so its key goes away |
 
-One channel per session, `PROJECT.SID`: `PROJECT` is the path below
-`~/source` joined by dots, as `inbox send` infers it, else the folder name;
-`SID` is the first 8 characters of the session id, from `session_id` in the
+One channel per session, `PROJECT.SID`: `PROJECT` is what `inbox channel`
+prints in the folder the session started in, the same channel `inbox send`
+infers there (`~/source/macro-pad/driver` gives `macro-pad.driver`). A session
+outside `~/source`, or in a folder whose name cannot be a channel, is not
+reported. `SID` is the first 8 characters of the session id, from `session_id` in the
 hook payload, else `$CLAUDE_CODE_SESSION_ID`. The key shows the project above
 the short id, so two sessions in one project get two keys, and one session's
 `done` cannot hide another that waits. Without a session id the channel is

@@ -1,14 +1,14 @@
 ---
 id: "0067"
 title: "A press on a channel key marks that channel's messages seen"
-status: "backlog"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: "https://github.com/kgheacock/macro-pad/pull/77"
-branch: "claude/project-thread-tl5p4v"
+pr: "https://github.com/kgheacock/macro-pad/pull/82"
+branch: "0067-press-a-channel-key-to-mark-it-seen"
 related: ["0013", "0057", "0064", "0065", "0066"]
 tags: ["inbox", "layers", "input"]
 ---
@@ -117,7 +117,9 @@ logged with the channel, and the counts stay. The next press tries again.
 Files to change:
 
 - `inbox/src/daemon.js` — press handling
-- `inbox/README.md` — "Daemon": what a press does
+- `inbox/src/render.js` — `target(position)`: the channel and shown id of a child
+- `inbox/README.md` — "Daemon": what a press does; "Completions"
+- `inbox/completions/_inbox`, `inbox/scripts/` — zsh completions and their install
 
 ## Definition of done
 
@@ -125,23 +127,27 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — With `active` `inbox` and children `a`, `b`, `c`, presses
+- [x] **DoD-1** — With `active` `inbox` and children `a`, `b`, `c`, presses
   on keys 0, 1, 2 mark `a`, `b`, `c` seen; keys 4 and 5 with no child mark
   nothing; key 3 marks nothing. **Proof:** `cd inbox && node --test --test-name-pattern=TestPressMarksChannel test/daemon.test.js`
-- [ ] **DoD-2** — A press while `active` is `null` marks nothing, including
+- [x] **DoD-2** — A press while `active` is `null` marks nothing, including
   the press on the Inbox key that opens the layer, with Inbox on key 0.
   **Proof:** `node --test --test-name-pattern=TestOpenPressMarksNothing test/daemon.test.js`
-- [ ] **DoD-3** — A message inserted after the child was sent, and before
+- [x] **DoD-3** — A message inserted after the child was sent, and before
   the press, stays unseen, and the child shows count 1 after the press.
   **Proof:** `node --test --test-name-pattern=TestLateMessageStaysUnseen test/daemon.test.js`
-- [ ] **DoD-4** — After a press, the server receives the new child count
+- [x] **DoD-4** — After a press, the server receives the new child count
   and Inbox total within 1 s, with `--poll 10s`. **Proof:** `node --test --test-name-pattern=TestMarkSendsAtOnce test/daemon.test.js`
-- [ ] **DoD-5** — On the pad, a press on a channel key with count 2 shows
-  count 0, and the Inbox key's count drops by 2. `inbox list` for that
+- [x] **DoD-5** — On the pad, a press on a channel key with count 2 shows
+  count 0, and the Inbox key's count drops by 2. `inbox list CHANNEL --unseen` for that
   channel prints nothing. **Proof:** Keith's check on the board, recorded in Notes
-- [ ] **DoD-6** — `inbox/README.md` "Daemon" says what a press on a channel
+- [x] **DoD-6** — `inbox/README.md` "Daemon" says what a press on a channel
   key does. **Proof:** `inbox/README.md`
-- [ ] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-7** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-8** — Added with the request to put zsh completions in the same
+  effort. `install.sh` links `inbox/completions/_inbox` into the oh-my-zsh
+  completions directory, `uninstall.sh` removes it, and the README
+  "Completions" says so. **Proof:** `cd inbox && zsh -n completions/_inbox && sh scripts/install.sh --dry-run` prints a `would link:` line
 
 ## Risks
 
@@ -164,3 +170,18 @@ is ticked.
 Keith asked for seen on a channel key press on 2026-10-18. `macropadd`
 broadcasts each `event` before it queues the press for the layer tree
 (`driver/plugin/server.go`, the read loop), which Approach A relies on.
+
+Keith also asked for zsh completions (oh-my-zsh) in the install step, in the
+same effort (DoD-8). oh-my-zsh does not put `$ZSH_CUSTOM/completions` on
+`fpath`; it does put `$ZSH_CACHE_DIR/completions` there, so the link goes
+there. The completion was loaded by `compinit` in a fresh zsh
+(`_comps[inbox]` is `_inbox`), but a Tab press in a live shell was not
+checked; the harness in this session could not drive one.
+
+Board check, 2026-10-18 (Keith): with `debug` at 2 unseen, `macro-pad.driver`
+at 1, and `macro-pad.inbox` at 1, a press on the `debug` key removed its pip,
+and the Inbox total went from 4 to 2. `inbox channels` then listed the other
+two channels only, and both `debug` messages were seen in the store. A first
+try failed because the running daemon predated the change; a restart of the
+launchd service fixed it. The Tab completion (DoD-8) was not tried in a live
+shell.

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DaemonRunningError, StoreError } from './errors.js';
 import { decodeMessage } from './protocol.js';
 import { openStore } from './store.js';
-import { createRenderer as createInboxRenderer } from './render.js';
+import { INBOX_ID, createRenderer as createInboxRenderer } from './render.js';
 
 export const DEFAULT_PORT = 8765;
 export const DEFAULT_POLL_MS = 500;
@@ -15,6 +15,9 @@ const LAYER_WAIT_MS = 1000;
 const CLOSE_WAIT_MS = 300;
 const BACKOFF_FIRST_MS = 250;
 const BACKOFF_MAX_MS = 5000;
+const UP_KEY = 3;
+// The keys of the open Inbox layer, in child order; key 3 is the up key.
+const CHILD_KEYS = [0, 1, 2, null, 3, 4];
 
 function isAlive(pid) {
   try {
@@ -79,7 +82,8 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 // store     an open Store (a test passes one to count queries); else the
 //           daemon opens `file` and closes it on stop
 // renderer  createRenderer({ slot, assetsDir, log }), see render.js
-// onEvent   (event, { active }) for each event from macropadd; task 0067's hook
+// onEvent   (event, { active }) for each event from macropadd, after the daemon
+//           has acted on it
 export function startDaemon({
   file,
   env = process.env,
@@ -156,6 +160,34 @@ export function startDaemon({
     push();
   };
 
+  // A press on a channel key of the open Inbox layer marks the messages that
+  // key showed as seen. macropadd sends the event before it handles the press,
+  // so `active` is the layer the person saw. The press that opens Inbox
+  // arrives while `active` is still null.
+  const onPress = (keyIndex) => {
+    if (active !== INBOX_ID || keyIndex === UP_KEY) return;
+    const position = CHILD_KEYS[keyIndex];
+    const child = position === undefined || position === null ? null : renderer.target(position);
+    if (child === null || child.shownId === 0) return;
+    try {
+      db.markSeen(child.channel, child.shownId);
+    } catch (e) {
+      log(`cannot mark ${child.channel} seen: ${e.message}`);
+      return;
+    }
+    // Show it now rather than at the next poll.
+    try {
+      version = db.dataVersion();
+      unseen = db.unseen();
+      lastRead = Date.now();
+      readFailed = false;
+    } catch (e) {
+      log(e.message);
+      return;
+    }
+    push();
+  };
+
   const onMessage = (data) => {
     if (typeof data !== 'string') return;
     const message = decodeMessage(data);
@@ -169,6 +201,7 @@ export function startDaemon({
       if (!ready) becomeReady();
       else push();
     } else if (message.kind === 'event') {
+      if (message.type === 'press') onPress(message.keyIndex);
       try {
         onEvent(message, { active });
       } catch (e) {

@@ -196,6 +196,99 @@ test('TestEventsReachHook', async (t) => {
   ]);
 });
 
+const press = (server, keyIndex) =>
+  server.send({ kind: 'event', event: { keyIndex, type: 'press', timestamp: 1 } });
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const counts = (store) => Object.fromEntries(store.unseen().map((row) => [row.channel, row.count]));
+
+// Starts a daemon with a child per channel (the last one inserted is first),
+// the Inbox layer open, and a slow poll so only a press can change the pad.
+async function openInbox(t, sc, channels) {
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  for (const channel of [...channels].reverse()) writer.insert(channel, 'one', sc.root);
+  launch(t, sc, server, { pollMs: 10_000 });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === channels[0]), 3000, 'the children');
+  server.layerChanged('inbox');
+  return { server, writer };
+}
+
+test('TestPressMarksChannel', async (t) => {
+  const sc = scratch(t);
+  const { server, writer } = await openInbox(t, sc, ['a', 'b', 'c']);
+  // The up key and keys with no child mark nothing.
+  for (const key of [3, 4, 5]) press(server, key);
+  await pause(150);
+  assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1 });
+  press(server, 0);
+  await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
+  press(server, 1);
+  await waitFor(() => counts(writer).b === undefined, 1000, 'b seen');
+  press(server, 2);
+  await waitFor(() => counts(writer).c === undefined, 1000, 'c seen');
+});
+
+test('TestPressMarksChannelKeyMap', async (t) => {
+  const sc = scratch(t);
+  const { server, writer } = await openInbox(t, sc, ['a', 'b', 'c', 'd', 'e']);
+  // Key 3 is the up key, so keys 4 and 5 are children 3 and 4.
+  press(server, 4);
+  await waitFor(() => counts(writer).d === undefined, 1000, 'd seen');
+  press(server, 5);
+  await waitFor(() => counts(writer).e === undefined, 1000, 'e seen');
+  assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1 });
+});
+
+test('TestOpenPressMarksNothing', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  writer.insert('a', 'one', sc.root);
+  // Inbox is on key 0. Its press arrives while the top layer is active, and
+  // so does a press on any other key.
+  launch(t, sc, server, { pollMs: 10_000, slot: 0 });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'the child');
+  press(server, 0);
+  press(server, 1);
+  await pause(150);
+  assert.deepEqual(counts(writer), { a: 1 });
+  // Once the layer is open the same key marks it.
+  server.layerChanged('inbox');
+  press(server, 0);
+  await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
+});
+
+test('TestLateMessageStaysUnseen', async (t) => {
+  const sc = scratch(t);
+  const { server, writer } = await openInbox(t, sc, ['a']);
+  writer.insert('a', 'late', sc.root);
+  press(server, 0);
+  // Only the message the key showed is marked; the late one stays.
+  await waitFor(() => counts(writer).a === 1, 1000, 'one message marked');
+  await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'a').setLayerKey.count === 1, 1000, 'count 1');
+  assert.equal(inboxCounts(server).at(-1), 1);
+});
+
+test('TestMarkSendsAtOnce', async (t) => {
+  const sc = scratch(t);
+  // The poll is 10 s, so only the press can send the new counts.
+  const { server } = await openInbox(t, sc, ['a', 'b']);
+  const before = server.received.length;
+  const started = Date.now();
+  press(server, 0);
+  await waitFor(
+    () => server.received.slice(before).some((m) => m.setLayerKey?.id === 'inbox'),
+    1000,
+    'the new total',
+  );
+  assert.ok(Date.now() - started < 1000);
+  const sent = server.received.slice(before).map((m) => m.setLayerKey);
+  assert.equal(sent.find((k) => k.id === 'inbox').count, 1);
+  assert.equal(sent.find((k) => k.id === 'a').count, 0);
+});
+
 test('TestPidFile', (t) => {
   const sc = scratch(t);
   mkdirSync(path.dirname(sc.db), { recursive: true });

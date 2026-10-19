@@ -2,6 +2,8 @@
 // and one child per channel with unseen messages, at most five. A renderer has
 //   plan({ unseen, active }) -> the messages to send macropadd now
 //   reset(channels)          -> forget what it sent (called on every connect)
+//   target(position)         -> { channel, shownId } for the child at that
+//                               position (0 to 4), or null
 // where `unseen` is Store.unseen(), `active` is the open layer's id or null,
 // and `channels` is every channel the store has ever held, so reset can clear
 // children an earlier daemon left on the pad.
@@ -24,6 +26,9 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
   let known = false;
   let leftovers = [];
   const icons = new Map();
+  // The newest unseen id each child showed when it was last planned. A press
+  // marks up to this id, so a message that landed since stays unseen.
+  const shownIds = new Map();
 
   const iconFor = (channel) => {
     if (!icons.has(channel)) {
@@ -46,7 +51,9 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
     out.push(setLayerKeyMessage(fields));
   };
 
-  const setChild = (out, channel, count) => {
+  const setChild = (out, channel, row) => {
+    const count = row?.count ?? 0;
+    shownIds.set(channel, row?.newestId ?? 0);
     set(out, channel, {
       id: channel,
       parent: INBOX_ID,
@@ -64,9 +71,16 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
   return {
     reset(channels = []) {
       sent.clear();
+      shownIds.clear();
       shown = [];
       known = false;
       leftovers = channels;
+    },
+
+    target(position) {
+      const channel = shown[position];
+      if (channel === undefined) return null;
+      return { channel, shownId: shownIds.get(channel) ?? 0 };
     },
 
     plan({ unseen, active }) {
@@ -76,7 +90,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
       if (slot !== undefined) key.slot = slot;
       set(out, INBOX_ID, key);
 
-      const counts = new Map(unseen.map((row) => [row.channel, row.count]));
+      const rows = new Map(unseen.map((row) => [row.channel, row]));
       // Newest unseen message first; only the first five show.
       const wanted = [...unseen]
         .sort((a, b) => b.newestId - a.newestId)
@@ -85,12 +99,12 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
 
       if (active === INBOX_ID) {
         // Open: no key moves or goes. A channel at zero stays with count 0.
-        for (const channel of shown) setChild(out, channel, counts.get(channel) ?? 0);
+        for (const channel of shown) setChild(out, channel, rows.get(channel));
         for (const channel of wanted) {
           if (shown.length >= MAX_CHILDREN) break;
           if (shown.includes(channel)) continue;
           shown.push(channel);
-          setChild(out, channel, counts.get(channel));
+          setChild(out, channel, rows.get(channel));
         }
         return out;
       }
@@ -111,7 +125,7 @@ export function createRenderer({ slot, assetsDir, log = () => {}, drawImage = wr
       while (same < stay.length && stay[same] === wanted[same]) same++;
       for (const channel of stay.slice(same)) removeChild(out, channel);
       shown = wanted;
-      for (const channel of shown) setChild(out, channel, counts.get(channel));
+      for (const channel of shown) setChild(out, channel, rows.get(channel));
       return out;
     },
   };

@@ -159,25 +159,33 @@ test('TestResetSendsEverythingAndClearsLeftovers', () => {
 });
 
 test('TestChannelText', () => {
-  // Only the last segment shows: the ones before the final dot are dropped.
+  // The last segment is the name; the segment before it is the line above.
   assert.equal(channelText('debug'), 'debug');
-  assert.equal(channelText('macro-pad.driver'), 'driver');
-  assert.equal(channelText('github.com.kgheacock.macro-pad'), 'macro-pad');
+  assert.equal(channelText('macro-pad.driver'), 'macro-pad\ndriver');
+  assert.equal(channelText('github.com.kgheacock.macro-pad'), 'kgheacock\nmacro-pad');
 });
 
 test('TestChannelTextFitsMacropadd', () => {
-  // macropadd takes at most 32 runes on one line here, and cuts what is too wide.
-  const text = channelText(`p.${'n'.repeat(60)}`);
-  assert.equal([...text].length, 32);
-  assert.ok(text.endsWith('…'));
-  assert.ok(!text.includes('\n'));
-  assert.equal(channelText('n'.repeat(32)), 'n'.repeat(32));
-  assert.equal(channelText('_'), '_');
+  // macropadd takes at most 32 runes on two lines, and cuts what is too wide.
+  const cases = [
+    'a'.repeat(60),
+    `${'p'.repeat(40)}.${'n'.repeat(40)}`,
+    'x.y.z',
+    '_',
+  ];
+  for (const channel of cases) {
+    const text = channelText(channel);
+    assert.ok([...text].length <= 32, `${channel}: ${[...text].length} runes`);
+    assert.ok(text.split('\n').length <= 2, `${channel}: more than two lines`);
+    assert.ok(!/[\u0000-\u0009\u000b-\u001f]/.test(text), `${channel}: a control character`);
+  }
+  assert.equal(channelText('p'.repeat(40) + '.' + 'n'.repeat(40)), `${'p'.repeat(14)}…\n${'n'.repeat(15)}…`);
+  assert.equal(channelText('x.y.z'), 'y\nz');
 });
 
 test('TestPlanSendsTextNotAPicture', () => {
   const messages = renderer().plan({ unseen: [row('macro-pad.driver', 2, 5)], active: null });
   const child = messages[1].setLayerKey;
-  assert.equal(child.iconText, 'driver');
+  assert.equal(child.iconText, 'macro-pad\ndriver');
   assert.ok(!('iconRef' in child), 'a child sends text, and no iconRef');
 });

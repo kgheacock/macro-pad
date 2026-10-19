@@ -133,10 +133,8 @@ either. For a text icon the color is left out of the key (zero): the tile is
 opaque, so the color cannot change the frame. The count pip stays outside the key (task 0062). Two keys with the same
 text share one slot, whatever their colors.
 
-**inbox.** `render.js` sends `iconText` = the last segment of the channel. The
-segments before the last dot are dropped (`kgheacock.macro-pad` shows
-`macro-pad`), by the owner's choice after the first version. The driver still
-takes two lines; `inbox` does not use the second. It drops `png.js`, `drawImage`, and the `.generated`
+**inbox.** `render.js` sends `iconText` = `<parent>\n<last segment>`, or the
+last segment alone. It drops `png.js`, `drawImage`, and the `.generated`
 directory. `--assets-dir` is still accepted so an installed service starts. It
 is ignored, with one stderr line. `install.sh` and the service templates stop
 passing it. The old `.generated/inbox` files stay; the README says to delete them.

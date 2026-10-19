@@ -1,14 +1,14 @@
 ---
 id: "0068"
 title: "Messages carry a 'here', and a press on a channel key goes there"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0068-press-a-channel-key-to-go-where-it-was-sent"
 related: ["0064", "0065", "0066", "0067"]
 tags: ["inbox", "input", "macos", "iterm"]
 ---

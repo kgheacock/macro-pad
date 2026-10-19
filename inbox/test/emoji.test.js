@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { folderChannel } from '../src/channel.js';
 import {
   channelInput,
   emojiChar,
@@ -70,8 +69,8 @@ test('TestFolderIsItsChannel', (t) => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), emojiFor(channelInput('macro-pad.driver')).iconRef);
   assert.equal(run(['emoji', 'macro-pad.driver', '--format', 'ref'], { sc }).stdout, r.stdout);
-  // Outside the root, the folder name, as the Claude Code hook names it.
-  assert.equal(folderChannel('/tmp', sc.root), 'tmp');
+  // Outside the root there is no channel, as for `inbox channel`.
+  assert.equal(run(['emoji', '--folder', sc.dir], { sc }).status, 2);
 });
 
 test('TestEmojiStability', () => {

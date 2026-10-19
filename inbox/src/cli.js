@@ -3,7 +3,7 @@
 
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { folderChannel, inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
+import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
 import { channelInput, emojiFor, sessionInput } from './emoji.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
@@ -41,6 +41,7 @@ Commands:
   list       list messages, seen and unseen
   count      print how many messages are not seen yet
   channels   list channels that have unseen messages
+  channel    print the channel of the working directory
   seen       mark messages as seen
   here       show or set where a press on a channel key goes
   daemon     watch the inbox and show it on the macro pad
@@ -149,6 +150,17 @@ ${DB_OPTION}
 
 Example:
   inbox channels`,
+
+  channel: `Usage: inbox channel
+
+Print the channel that send and pipe infer from the working directory: the
+path below the source root ($INBOX_SOURCE_ROOT, default ~/source) joined by
+dots. Outside the source root, or for a folder name that cannot be a channel
+segment, it prints an error and exits 2. Scripts use it to name channels the
+same way inbox does.
+
+Example:
+  cd ~/source/macro-pad/driver && inbox channel   # macro-pad.driver`,
 
   seen: `Usage: inbox seen [CHANNEL | --channel C | --all-channels]
 
@@ -269,7 +281,7 @@ function helpText(command, plugin) {
   return text;
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon', 'plugins', 'emoji'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins', 'emoji'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen', 'emoji'];
@@ -284,6 +296,7 @@ const OPTIONS = {
   },
   count: { 'all-channels': { type: 'boolean' } },
   channels: { json: { type: 'boolean' } },
+  channel: {},
   seen: { 'all-channels': { type: 'boolean' } },
   here: { clear: { type: 'boolean' } },
   plugins: {},
@@ -652,6 +665,12 @@ function runSeen(io, { values, positionals }) {
   return 0;
 }
 
+function runChannel(io, { positionals }) {
+  if (positionals.length) throw new UsageError('channel takes no arguments');
+  out(io, requireChannel(io, undefined, 'inbox send CHANNEL MESSAGE'));
+  return 0;
+}
+
 function runPlugins(io, { positionals }) {
   if (positionals.length) throw new UsageError('plugins takes no arguments');
   for (const line of pluginList()) out(io, line);
@@ -659,6 +678,16 @@ function runPlugins(io, { positionals }) {
 }
 
 const EMOJI_FORMATS = ['char', 'name', 'ref', 'json'];
+
+// The channel a folder gives, as send infers it and `inbox channel` prints it
+// for the Claude Code hook; outside the source root there is none.
+function folderChannel(dir, root) {
+  const channel = inferChannel(dir, root);
+  if (channel === null) {
+    throw new UsageError(`no channel: ${tildify(dir)} is not under ${tildify(root)}. Pass a CHANNEL instead`);
+  }
+  return channel;
+}
 
 function runEmoji(io, { values, positionals }) {
   if (positionals.length > 1) throw new UsageError('emoji takes at most one CHANNEL');
@@ -791,6 +820,7 @@ const RUNNERS = {
   list: runList,
   count: runCount,
   channels: runChannels,
+  channel: runChannel,
   seen: runSeen,
   here: runHere,
   daemon: runDaemon,

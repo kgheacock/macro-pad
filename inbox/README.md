@@ -27,6 +27,7 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox list [CHANNEL \| --all-channels] [--unseen] [--json] [-n N]` | List messages, oldest first, seen and unseen (a leading `*` marks the unseen). `--unseen` lists only the unseen. `-n N` keeps the newest N. Each line is: time, status, the channel (with `--all-channels` or outside the root), then the message. Default scope: the inferred channel, else every channel. |
 | `inbox count [CHANNEL \| --all-channels]` | Print the unseen count. Same default scope as `list`. |
 | `inbox channels [--json]` | Print each channel with unseen messages, its count, and the time of its newest message. |
+| `inbox channel` | Print the channel inferred from the working directory (see Channels). |
 | `inbox seen [CHANNEL \| --all-channels]` | Mark unseen messages seen. Print how many. With neither argument it needs an inferred channel. |
 | `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
 | `inbox plugins` | Print each plugin and what it shows. See "Plugins". |
@@ -170,6 +171,9 @@ gives `macro-pad.driver`. Symbolic links are resolved in both paths first.
   the short name `app`.
 - A directory name with any other character (`a b`, or a name that starts or
   ends with a dot) is an error that says to pass the channel as an argument.
+
+`inbox channel` prints the inferred channel of the working directory, or exits
+2 where there is none, so a script can name a channel the way inbox does.
 
 ## Store
 

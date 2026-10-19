@@ -1,8 +1,6 @@
 // Subcommands, help text, and error messages. main() takes an io object so
 // a test can run the CLI in process; bin/inbox.js passes the real streams.
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
@@ -25,9 +23,6 @@ const CHANNEL_OPTION = `  --channel C  the CHANNEL, as an option instead of an a
 const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
 const HERE_OPTION = `  --here H    where a press on the channel key goes: iterm2:UUID, app:BUNDLE_ID, or
               url:URL (default: $INBOX_HERE, else the iTerm session you are in)`;
-
-// macropadd run from the repo root reads its pictures from here.
-const REPO_ASSETS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
 
 const HELP = {
   inbox: `inbox - leave short messages per channel, and read them later
@@ -185,15 +180,15 @@ Examples:
   inbox here chat app:com.tinyspeck.slackmacgap
   inbox here --clear chat`,
 
-  daemon: `Usage: inbox daemon [--port N] [--assets-dir DIR] [--slot N] [--poll DURATION]
+  daemon: `Usage: inbox daemon [--port N] [--slot N] [--poll DURATION]
 
 Run until stopped. Watch the store, and send the unseen counts to macropadd
 over its WebSocket. It starts with or without macropadd, and sends the full
 state again each time it connects. Log lines go to standard error.
 
   --port N          macropadd's port on 127.0.0.1 (default: ${DEFAULT_PORT})
-  --assets-dir DIR  the directory macropadd uses for pictures; an absolute
-                    path (default: ${REPO_ASSETS})
+  --assets-dir DIR  unused: the daemon sends icon text, not picture files. It is
+                    still accepted, so a service that passes it starts.
   --slot N          put the Inbox key in slot N, 0 to 5 (default: the first free slot)
   --poll DURATION   how often to look for a change, such as 500ms or 2s
                     (default: ${DEFAULT_POLL_MS}ms)
@@ -204,7 +199,7 @@ SIGINT and SIGTERM stop it with exit code 0. The keys stay on the pad.
 To run it at login, use inbox/scripts/install.sh.
 
 Example:
-  inbox daemon --assets-dir ~/source/macro-pad/assets`,
+  inbox daemon --port 8765`,
 };
 
 const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon'];
@@ -637,20 +632,12 @@ function parsePoll(text) {
 }
 
 function daemonSettings(io, values) {
-  const assetsDir = values['assets-dir'] ?? REPO_ASSETS;
-  if (!path.isAbsolute(assetsDir)) {
-    throw new UsageError(
-      `assets dir "${assetsDir}" is relative; pass an absolute path, as macropadd sees it`,
-      { help: false },
-    );
-  }
   return {
     file: values.db ?? defaultDbPath(io.env),
     port:
       values.port === undefined ? DEFAULT_PORT : parseWhole('--port', values.port, 1, 65535, 'use 1 to 65535'),
     slot: values.slot === undefined ? undefined : parseWhole('--slot', values.slot, 0, 5, 'use 0 to 5'),
     pollMs: values.poll === undefined ? DEFAULT_POLL_MS : parsePoll(values.poll),
-    assetsDir,
   };
 }
 
@@ -658,6 +645,9 @@ async function runDaemon(io, { values, positionals }) {
   if (positionals.length) throw new UsageError('daemon takes no arguments');
   const settings = daemonSettings(io, values);
   const log = (text) => io.stderr.write(`inbox: ${text}\n`);
+  if (values['assets-dir'] !== undefined) {
+    log('--assets-dir is unused: the daemon sends icon text, not picture files');
+  }
   // Listen for signals before anything else, so one that arrives right after
   // the start line still ends in a clean stop.
   let onSignal = () => {};

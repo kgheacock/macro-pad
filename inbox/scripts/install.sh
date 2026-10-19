@@ -8,13 +8,11 @@ UNIT=inbox-daemon.service
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--assets-dir DIR] [--port N] [--slot N] [--no-completions] [--dry-run]
+Usage: install.sh [--port N] [--slot N] [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. Run it again
 to upgrade in place: it rewrites the files and restarts the daemon.
 
-  --assets-dir DIR  the directory macropadd uses for pictures; an absolute
-                    path (default: the assets/ folder of this checkout)
   --port N          macropadd's port (default: 8765)
   --slot N          put the Inbox key in slot N, 0 to 5
   --no-completions  do not install the zsh completions
@@ -33,7 +31,8 @@ It writes:
           log: journalctl --user -u $UNIT
 
 Keep this checkout where it is. Run install.sh again after you move it or
-change the Node version. Start macropadd with the same --assets-dir.
+change the Node version. Restart macropadd after you update it: the
+daemon sends icon text, which an old macropadd ignores.
 USAGE
 }
 
@@ -42,7 +41,6 @@ fail() {
   exit 1
 }
 
-ASSETS_DIR=
 PORT=8765
 SLOT=
 DRY=0
@@ -55,7 +53,7 @@ while [ $# -gt 0 ]; do
     --assets-dir | --port | --slot)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
-        --assets-dir) ASSETS_DIR=$2 ;;
+        --assets-dir) printf '%s: --assets-dir is unused: the daemon sends icon text, not picture files; ignoring it\n' "$NAME" >&2 ;;
         --port) PORT=$2 ;;
         --slot) SLOT=$2 ;;
       esac
@@ -67,12 +65,6 @@ done
 
 HERE=$(cd "$(dirname "$0")" && pwd) || fail "cannot find the folder of this script"
 INBOX_DIR=$(dirname "$HERE")
-REPO_DIR=$(dirname "$INBOX_DIR")
-[ -n "$ASSETS_DIR" ] || ASSETS_DIR=$REPO_DIR/assets
-case $ASSETS_DIR in
-  /*) ;;
-  *) fail "assets dir \"$ASSETS_DIR\" is relative; pass an absolute path, as macropadd sees it" ;;
-esac
 case $PORT in
   '' | *[!0-9]*) fail "--port $PORT is not a port; use 1 to 65535" ;;
 esac
@@ -96,7 +88,6 @@ plain() {
   esac
 }
 plain "the checkout path" "$INBOX_DIR"
-plain "--assets-dir" "$ASSETS_DIR"
 plain "PREFIX" "$PREFIX"
 [ -z "${INBOX_DB:-}" ] || plain "INBOX_DB" "$INBOX_DB"
 
@@ -122,7 +113,7 @@ do_run() {
 }
 
 # Daemon flags, as words for the wrapper.
-DAEMON_ARGS="daemon --port $PORT --assets-dir $ASSETS_DIR"
+DAEMON_ARGS="daemon --port $PORT"
 [ -z "$SLOT" ] || DAEMON_ARGS="$DAEMON_ARGS --slot $SLOT"
 [ -z "${INBOX_DB:-}" ] || DAEMON_ARGS="$DAEMON_ARGS --db $INBOX_DB"
 

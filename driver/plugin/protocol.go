@@ -152,6 +152,8 @@ type SetLayerKeyPayload struct {
 	Status  string `json:"status"`
 	Count   int    `json:"count"`
 	IconRef string `json:"iconRef"`
+	// IconText is words drawn as the icon instead of IconRef (task 0069).
+	IconText string `json:"iconText,omitempty"`
 }
 
 // RemoveLayerKeyPayload names the node to remove. With Parent, it is that

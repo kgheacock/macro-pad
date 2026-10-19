@@ -184,7 +184,7 @@ def test_a_stamp_with_the_module_equals_a_stamp_on_the_heap_and_leaves_the_slot(
     assert slot_with_module == slot_on_heap
     assert on_heap != slot_on_heap  # the pip is there
     # The disc of 0xF800 is disc 1 of the sheet: its interior value is 0x1101.
-    assert on_heap[(85 * 128 + 85) * 2 : (85 * 128 + 85) * 2 + 2] == _be(0x1101)
+    assert on_heap[(84 * 128 + 84) * 2 : (84 * 128 + 84) * 2 + 2] == _be(0x1101)
 
 
 def test_a_stamp_changes_only_the_pip_box():
@@ -192,7 +192,7 @@ def test_a_stamp_changes_only_the_pip_box():
 
     for y in range(128):
         for x in range(128):
-            if 80 <= x < 124 and 80 <= y < 124:
+            if 79 <= x < 123 and 79 <= y < 123:
                 continue
             i = (y * 128 + x) * 2
             assert stamped[i : i + 2] == slot[i : i + 2]

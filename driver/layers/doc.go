@@ -48,18 +48,21 @@ func ValidStatus(s string) bool {
 // Node is a top-level key or a child. A child has the same fields, and no
 // children of its own.
 type Node struct {
-	ID       string `json:"id"`
-	Icon     byte   `json:"icon"`
-	Status   string `json:"status"`
-	Count    int    `json:"count"`
-	IconRef  string `json:"iconRef"`
+	ID      string `json:"id"`
+	Icon    byte   `json:"icon"`
+	Status  string `json:"status"`
+	Count   int    `json:"count"`
+	IconRef string `json:"iconRef"`
+	// IconText is words drawn as the icon instead of a PNG (task 0069). It
+	// excludes IconRef.
+	IconText string `json:"iconText,omitempty"`
 	Children []Node `json:"children,omitempty"`
 }
 
 // hasContent reports whether n shows anything. A key with no content is a
 // reserved slot: the controller does not draw it.
 func (n *Node) hasContent() bool {
-	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || len(n.Children) > 0
+	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.Children) > 0
 }
 
 // Doc is the whole layers.json object.
@@ -188,6 +191,12 @@ func (n *Node) validate() error {
 	}
 	if err := ValidateIconRef(n.IconRef); err != nil {
 		return err
+	}
+	if err := ValidateIconText(n.IconText); err != nil {
+		return err
+	}
+	if n.IconRef != "" && n.IconText != "" {
+		return errors.New("iconRef and iconText are exclusive")
 	}
 	return nil
 }

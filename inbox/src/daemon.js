@@ -82,7 +82,7 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 //
 // store     an open Store (a test passes one to count queries); else the
 //           daemon opens `file` and closes it on stop
-// renderer  createRenderer({ slot, assetsDir, log }), see render.js
+// renderer  createRenderer({ slot }), see render.js
 // focus     (here) -> Promise, brings a "here" to the front (here.js); a test
 //           passes a stub
 // onEvent   (event, { active }) for each event from macropadd, after the daemon
@@ -91,7 +91,6 @@ export function startDaemon({
   file,
   env = process.env,
   port = DEFAULT_PORT,
-  assetsDir,
   slot,
   pollMs = DEFAULT_POLL_MS,
   guardMs = GUARD_MS,
@@ -104,7 +103,7 @@ export function startDaemon({
   WebSocketImpl = globalThis.WebSocket,
 }) {
   const db = store ?? openStore(file, env);
-  const renderer = createRenderer({ slot, assetsDir, log });
+  const renderer = createRenderer({ slot });
   const url = `ws://127.0.0.1:${port}/`;
 
   let version;

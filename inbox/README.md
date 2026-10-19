@@ -231,13 +231,13 @@ and one child key per channel with unseen messages. A press on a child key
 marks that channel's messages seen, then goes to its "here" (see "Here").
 
 ```
-inbox daemon [--db PATH] [--port 8765] [--assets-dir DIR] [--slot N] [--poll 500ms]
+inbox daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--port N` | `macropadd`'s port on 127.0.0.1. Default 8765. |
-| `--assets-dir DIR` | The directory `macropadd` uses for pictures. Must be absolute, and the same as `macropadd --assets-dir`. Default: the `assets/` folder of this checkout. |
+| `--assets-dir DIR` | Unused. The daemon sends icon text, not picture files, so it needs no assets directory. The flag is still accepted, with one line on standard error, so a service that passes it starts. |
 | `--slot N` | Put the Inbox key in slot N, 0 to 5. Default: the first free slot. |
 | `--poll DURATION` | How often to look for a change, such as `500ms` or `2s`. Default `500ms`. |
 | `--db PATH` | The store, as for every command. |
@@ -249,7 +249,8 @@ The keys:
   is 0. It stays on the pad at 0.
 - A press on `inbox` opens a layer with one key per channel that has unseen
   messages, each with its own count. The key shows the channel's last name
-  segment in large letters, and the segment before it in small letters above.
+  segment in black letters on a plain white tile, and the segment before it in
+  gray letters above (`macro-pad.driver` shows `macro-pad` over `driver`).
   There are at most five, the channels with the newest unseen messages. A
   channel past the fifth counts in the `inbox` total, and `inbox channels`
   lists it.
@@ -271,10 +272,12 @@ The keys:
   no "here" only marks. A "here" that fails (a closed iTerm session, a wrong
   bundle ID, a missing Automation permission) is logged with the channel and
   the kind, and the mark stands.
-- The daemon draws the pictures. It writes one 128x128 PNG per channel to
-  `<assets-dir>/.generated/inbox/<channel>.png`, only when the file does not
-  exist. Delete a file to draw it again. If the daemon cannot write there, it
-  logs the error and the key shows only its count.
+- `macropadd` draws the text. The daemon sends each channel as `iconText`
+  (`<parent>\n<name>`, or the name alone), and writes no file. A segment of
+  more than 15 characters (16 for the name) is cut with `…` before it is sent,
+  and `macropadd` cuts what is still too wide for the key. Older versions wrote
+  pictures to `<assets-dir>/.generated/inbox/`; those files are no longer used,
+  and you can delete that directory.
 - The daemon sends a key only when its values changed. On every connect it
   removes every channel it knows from the `inbox` layer and sends the full
   state, so a child that an earlier daemon left on the pad does not stay.
@@ -298,18 +301,19 @@ How it behaves:
   corrects them.
 - Log lines go to standard error, each starting with `inbox:`.
 
-Start `macropadd` with the same `--assets-dir`, for example from the repo
-root:
+Start `macropadd` first, for example from the repo root. Use a `macropadd`
+and firmware from this checkout: an older `macropadd` ignores `iconText`, and
+the key then shows only its color and count.
 
 ```
 go run ./driver/cmd/macropadd --vendor-id=0x2E8A --product-id=0x10A3 --assets-dir "$PWD/assets"
-inbox daemon --assets-dir "$PWD/assets"
+inbox daemon
 ```
 
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--assets-dir DIR] [--port N] [--slot N] [--no-completions] [--dry-run]
+inbox/scripts/install.sh [--port N] [--slot N] [--no-completions] [--dry-run]
 inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
 

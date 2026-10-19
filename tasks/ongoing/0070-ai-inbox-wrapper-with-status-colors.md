@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/89"
 branch: "0070-ai-inbox-wrapper-with-status-colors"
 related: ["0064", "0065", "0066", "0067", "0069"]
 tags: ["inbox", "layers", "daemon", "agents"]
@@ -155,7 +155,7 @@ moves to `complete/` only when every box is ticked.
     so two daemons can connect, but no one has run both on the pad yet. @keith
 - [x] **DoD-10** — `inbox/README.md` has a section "ai-inbox" with the statuses, the order, and the pip rule.
   **Proof:** `inbox/README.md`
-- [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

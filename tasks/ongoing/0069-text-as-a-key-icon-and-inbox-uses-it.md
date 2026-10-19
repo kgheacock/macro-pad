@@ -7,7 +7,7 @@ updated: "2026-10-18"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/87"
 branch: "0069-text-as-a-key-icon-and-inbox-uses-it"
 related: ["0041", "0057", "0061", "0062", "0066"]
 tags: ["layers", "plugin", "inbox", "driver", "protocol", "firmware", "assets"]

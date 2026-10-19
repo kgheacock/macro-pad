@@ -152,8 +152,11 @@ type SetLayerKeyPayload struct {
 	Status  string `json:"status"`
 	Count   int    `json:"count"`
 	IconRef string `json:"iconRef"`
-	// IconText is words drawn as the icon instead of IconRef (task 0069).
+	// IconText is words drawn as the icon instead of IconRef (task 0069), or
+	// the caption over IconEmoji.
 	IconText string `json:"iconText,omitempty"`
+	// IconEmoji is one or two refs under assets/emoji/ (task 0073).
+	IconEmoji []string `json:"iconEmoji,omitempty"`
 }
 
 // RemoveLayerKeyPayload names the node to remove. With Parent, it is that

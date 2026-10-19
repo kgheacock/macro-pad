@@ -223,9 +223,16 @@ func TestIconRound(t *testing.T) {
 	if err != nil || len(refs) == 0 {
 		t.Fatalf("no icons in %s: %v", assetsDir, err)
 	}
+	// Task 0073: the emoji set follows the same rules.
+	emoji, err := filepath.Glob(filepath.Join(assetsDir, "emoji", "*.png"))
+	if err != nil || len(emoji) < 128 {
+		t.Fatalf("%d emoji in %s/emoji, want at least 128: %v", len(emoji), assetsDir, err)
+	}
+	refs = append(refs, emoji...)
 	centre := float64(transport.CustomGlyphWidth) / 2
 	for _, path := range refs {
-		ref := filepath.Base(path)
+		rel, _ := filepath.Rel(assetsDir, path)
+		ref := filepath.ToSlash(rel)
 		f, err := os.Open(path)
 		if err != nil {
 			t.Fatal(err)

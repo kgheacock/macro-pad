@@ -116,6 +116,55 @@ test('TestPipeSignalSavesAndExitsZero', async (t) => {
   assert.deepEqual(rows(sc).map((m) => m.body), ['kept']);
 });
 
+test('TestPipeForwardsStandardOutput', (t) => {
+  const sc = scratch(t);
+  const input = 'a\n\n  \nb\r\nc';
+  const r = run(['pipe', 'x'], { sc, input });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, input);
+  assert.deepEqual(rows(sc).map((m) => m.body), ['a', 'b', 'c']);
+});
+
+test('TestPipeSigintReadsToTheEnd', async (t) => {
+  const sc = scratch(t);
+  const { child, exited } = start(['pipe', 'int'], { sc });
+  let out = '';
+  child.stdout.setEncoding('utf8').on('data', (d) => (out += d));
+  child.stdin.write('one\n');
+  await new Promise((r) => setTimeout(r, 600));
+  child.kill('SIGINT');
+  await new Promise((r) => setTimeout(r, 300));
+  // Still running: the writer may have more to say after its own Ctrl-C.
+  assert.equal(child.exitCode, null);
+  child.stdin.end('last\npartial');
+  assert.equal((await exited).status, 0);
+  assert.deepEqual(rows(sc).map((m) => m.body), ['one', 'last', 'partial']);
+  assert.equal(out, 'one\nlast\npartial');
+});
+
+test('TestPipeSecondSigintExits', async (t) => {
+  const sc = scratch(t);
+  const { child, exited } = start(['pipe', 'int2'], { sc });
+  child.stdin.write('kept\npartial');
+  await new Promise((r) => setTimeout(r, 600));
+  child.kill('SIGINT');
+  await new Promise((r) => setTimeout(r, 200));
+  child.kill('SIGINT');
+  assert.equal((await exited).status, 0);
+  assert.deepEqual(rows(sc).map((m) => m.body), ['kept']);
+});
+
+test('TestPipeKeepsSavingWhenStandardOutputCloses', async (t) => {
+  const sc = scratch(t);
+  const { child, exited } = start(['pipe', 'gone'], { sc });
+  child.stdout.destroy();
+  child.stdin.write('a\n');
+  await new Promise((r) => setTimeout(r, 300));
+  child.stdin.end('b\n');
+  assert.equal((await exited).status, 0);
+  assert.deepEqual(rows(sc).map((m) => m.body), ['a', 'b']);
+});
+
 test('TestPipeBurst', (t) => {
   const sc = scratch(t);
   const input = Array.from({ length: 10000 }, (_, i) => `line ${i}`).join('\n');
@@ -608,4 +657,15 @@ test('TestChannelOption', (t) => {
   assert.equal(run(['send', '--channel', 'a'], { sc, cwd: outside }).status, 2);
   assert.equal(run(['send', '--channel', 'bad channel!', 'm'], { sc, cwd: outside }).status, 2);
   assert.equal(run(['channels', '--channel', 'a'], { sc }).status, 2);
+});
+
+test('TestListSurvivesAClosedStdout', async (t) => {
+  const sc = scratch(t);
+  const input = Array.from({ length: 20000 }, (_, i) => `line ${i}`).join('\n');
+  assert.equal(run(['pipe', 'big'], { sc, input }).status, 0);
+  const { child, exited } = start(['list', 'big'], { sc });
+  child.stdout.destroy();
+  const { status, stderr } = await exited;
+  assert.equal(stderr, '');
+  assert.equal(status, 0);
 });

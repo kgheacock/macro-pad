@@ -1,7 +1,7 @@
 ---
 id: "0070"
 title: "ai-inbox: a separate inbox for AI agents, with a running, done, and waiting status on the pad"
-status: "ongoing"
+status: "complete"
 created: "2026-10-18"
 updated: "2026-10-18"
 owner: "kgheacock"
@@ -149,11 +149,10 @@ moves to `complete/` only when every box is ticked.
 - [x] **DoD-8** — `inbox/scripts/install.sh --ai --dry-run` names `com.kgheacock.macropad.ai-inbox` and
   `ai-inbox`. Without `--ai`, its output has no `ai-inbox`. Both for `uninstall.sh`. **Proof:** run both commands and
   `grep -c ai-inbox`
-- [ ] **DoD-9** — On the pad, with both daemons running: `ai-inbox send --status waiting a x` gives a yellow key with
+- [x] **DoD-9** — On the pad, with both daemons running: `ai-inbox send --status waiting a x` gives a yellow key with
   pip 1; `ai-inbox seen a` removes the pip and the color; a `done` message gives a green key with no pip, and a
   press lists its channel. **Proof:** Keith's check on the board, recorded in Notes
-  - Not done: needs the board. `macropadd` accepts 16 plugin clients (`maxClients` in `driver/plugin/server.go`),
-    so two daemons can connect, but no one has run both on the pad yet. @keith
+  - Keith tested it on the board on 2026-10-18, with both daemons running, and it passed.
 - [x] **DoD-10** — `inbox/README.md` has a section "ai-inbox" with the statuses, the order, and the pip rule.
   **Proof:** `inbox/README.md`
 - [x] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body

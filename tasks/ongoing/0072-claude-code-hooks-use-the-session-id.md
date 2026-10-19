@@ -53,3 +53,16 @@ Claude Code gives every hook the session id: `session_id` in the JSON on stdin, 
 - Two sessions in one project get two channels; a `done` in one does not mark the other seen.
 - A run with a fake `inbox` checks the channel name, the payload and environment fallbacks, and the
   `SessionEnd` cleanup.
+
+## Follow-up: the same channel rule as inbox
+
+PR #92 named `PROJECT` with its own bash copy of the rule. Inside `~/source` it matched `inbox send`, but
+outside it used the folder name (inbox has no channel there) and it changed bad characters to `-` (inbox
+refuses them). Keith asked that both use the same criteria.
+
+- `inbox channel` (new) prints the channel that `send` and `pipe` infer from the working directory, or
+  exits 2 where there is none, with the same error.
+- The hook runs `inbox channel` in the session's folder and uses its output as `PROJECT`. Outside the
+  source root, or in a folder that cannot be a channel, the session is not reported.
+- Done when `inbox channel` has a test and the hook gives `macro-pad.driver.SID` for a session started in
+  `~/source/macro-pad/driver`.

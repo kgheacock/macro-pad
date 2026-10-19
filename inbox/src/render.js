@@ -1,5 +1,7 @@
-// The renderer the daemon uses: one `inbox` key with the total unseen count,
-// and one child per channel with unseen messages, at most five. A renderer has
+// The renderer the daemon uses: one top key, and one child per channel with
+// unseen messages, at most five. What the keys show comes from a set of rules
+// (see INBOX_RULES); ai-render.js has another set. A renderer has
+//   topId                    -> the id of the top key
 //   plan({ unseen, active }) -> the messages to send macropadd now
 //   reset(channels)          -> forget what it sent (called on every connect)
 //   target(position)         -> { channel, shownId, here } for the child at that
@@ -35,7 +37,27 @@ export function channelText(channel) {
   return `${clip(segments.at(-2), MAX_SEGMENT)}\n${clip(name, MAX_NAME)}`;
 }
 
-export function createRenderer({ slot } = {}) {
+// What the top key and the children show. `unseen` is Store.unseen().
+//   id               the id of the top key
+//   top(unseen)      the fields of the top key, besides id and slot
+//   child(row)       the fields of a child, besides id and parent; row is
+//                    undefined for a channel that has no unseen message now
+//   before(a, b)     orders two rows; the first five show
+export const INBOX_RULES = {
+  id: INBOX_ID,
+  top(unseen) {
+    const total = unseen.reduce((sum, row) => sum + row.count, 0);
+    return { status: total > 0 ? 'WARN' : '', count: total, iconRef: INBOX_ICON };
+  },
+  child(row) {
+    const count = row?.count ?? 0;
+    return { status: count > 0 ? 'WARN' : '', count };
+  },
+  // Newest unseen message first.
+  before: (a, b) => b.newestId - a.newestId,
+};
+
+export function createRenderer({ slot, rules = INBOX_RULES } = {}) {
   // The last values sent per node, as JSON, so only a change is sent again.
   const sent = new Map();
   // The channels macropadd holds as children of `inbox`, in its order.
@@ -59,24 +81,24 @@ export function createRenderer({ slot } = {}) {
   };
 
   const setChild = (out, channel, row) => {
-    const count = row?.count ?? 0;
     shownIds.set(channel, row?.newestId ?? 0);
     shownHere.set(channel, row?.here ?? null);
     set(out, channel, {
       id: channel,
-      parent: INBOX_ID,
-      status: count > 0 ? 'WARN' : '',
-      count,
+      parent: rules.id,
+      ...rules.child(row),
       iconText: channelText(channel),
     });
   };
 
   const removeChild = (out, channel) => {
     sent.delete(channel);
-    out.push(removeLayerKeyMessage(channel, INBOX_ID));
+    out.push(removeLayerKeyMessage(channel, rules.id));
   };
 
   return {
+    topId: rules.id,
+
     reset(channels = []) {
       sent.clear();
       shownIds.clear();
@@ -94,19 +116,18 @@ export function createRenderer({ slot } = {}) {
 
     plan({ unseen, active }) {
       const out = [];
-      const total = unseen.reduce((sum, row) => sum + row.count, 0);
-      const key = { id: INBOX_ID, status: total > 0 ? 'WARN' : '', count: total, iconRef: INBOX_ICON };
+      const key = { id: rules.id, ...rules.top(unseen) };
       if (slot !== undefined) key.slot = slot;
-      set(out, INBOX_ID, key);
+      set(out, rules.id, key);
 
       const rows = new Map(unseen.map((row) => [row.channel, row]));
-      // Newest unseen message first; only the first five show.
+      // Only the first five show.
       const wanted = [...unseen]
-        .sort((a, b) => b.newestId - a.newestId)
+        .sort(rules.before)
         .slice(0, MAX_CHILDREN)
         .map((row) => row.channel);
 
-      if (active === INBOX_ID) {
+      if (active === rules.id) {
         // Open: no key moves or goes. A channel at zero stays with count 0.
         for (const channel of shown) setChild(out, channel, rows.get(channel));
         for (const channel of wanted) {

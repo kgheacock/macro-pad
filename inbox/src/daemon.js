@@ -82,7 +82,8 @@ export function acquirePidFile(file, { log = () => {}, pid = process.pid, alive 
 //
 // store     an open Store (a test passes one to count queries); else the
 //           daemon opens `file` and closes it on stop
-// renderer  createRenderer({ slot }), see render.js
+// renderer  createRenderer({ slot }), see render.js; its `topId` is the key
+//           whose layer a press is read in (else `inbox`)
 // focus     (here) -> Promise, brings a "here" to the front (here.js); a test
 //           passes a stub
 // onEvent   (event, { active }) for each event from macropadd, after the daemon
@@ -104,6 +105,7 @@ export function startDaemon({
 }) {
   const db = store ?? openStore(file, env);
   const renderer = createRenderer({ slot });
+  const topId = renderer.topId ?? INBOX_ID;
   const url = `ws://127.0.0.1:${port}/`;
 
   let version;
@@ -174,12 +176,13 @@ export function startDaemon({
     }
   };
 
-  // A press on a channel key of the open Inbox layer marks the messages that
-  // key showed as seen, then goes to their "here". macropadd sends the event
-  // before it handles the press, so `active` is the layer the person saw. The
-  // press that opens Inbox arrives while `active` is still null.
+  // A press on a channel key of the open layer of the top key marks the
+  // messages that key showed as seen, then goes to their "here". macropadd
+  // sends the event before it handles the press, so `active` is the layer the
+  // person saw. The press that opens the layer arrives while `active` is
+  // still null, and a press in the layer of another client is not ours.
   const onPress = (keyIndex) => {
-    if (active !== INBOX_ID || keyIndex === UP_KEY) return;
+    if (active !== topId || keyIndex === UP_KEY) return;
     const position = CHILD_KEYS[keyIndex];
     const child = position === undefined || position === null ? null : renderer.target(position);
     if (child === null || child.shownId === 0) return;

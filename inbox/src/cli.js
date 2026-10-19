@@ -6,7 +6,8 @@ import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
-import { DEFAULT_STATUS, defaultDbPath, openStore } from './store.js';
+import { INBOX_PROFILE } from './profiles.js';
+import { DEFAULT_STATUS, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
 const FLUSH_MS = 200;
@@ -202,6 +203,22 @@ Example:
   inbox daemon --port 8765`,
 };
 
+// The help of a command, written for the command line of the profile: its
+// name, its store variable, and its statuses.
+function helpText(command, profile) {
+  const text = HELP[command];
+  if (profile.name === INBOX_PROFILE.name) return text;
+  const word = /(^|[\s('|])inbox (?=COMMAND|send|pipe|list|count|channels|seen|here|daemon|help|\[|-| +\()/gm;
+  const statuses = profile.statuses.join(' | ');
+  return `${text
+    .replace(word, `$1${profile.name} `)
+    .replace('$INBOX_DB', `$${profile.dbEnv}`)
+    .replace(/^  --status S .*$/m, `  --status S  the status of the message: ${statuses} (default: ${profile.defaultStatus})`)
+    .replace('inbox/scripts/install.sh', 'inbox/scripts/install.sh --ai')}${
+    command === 'inbox' ? `\n\nA channel shows the highest status of its unseen messages, in the order\nwaiting, running, done. The pip on the key counts the channels that wait.` : ''
+  }`;
+}
+
 const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
@@ -287,8 +304,12 @@ function formatTime(ms) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
-function parseStatus(status) {
-  if (status === undefined) return DEFAULT_STATUS;
+function parseStatus(io, status) {
+  const { statuses, defaultStatus } = io.profile;
+  if (status === undefined) return defaultStatus;
+  if (statuses !== null && !statuses.includes(status)) {
+    throw new UsageError(`bad status "${status}": use ${statuses.join(', ')}`);
+  }
   if (!/^[A-Za-z0-9_-]+$/.test(status)) {
     throw new UsageError(
       `bad status "${status}": a status may hold only letters, digits, - and _`,
@@ -325,7 +346,7 @@ function readScope(io, values, positionals) {
 }
 
 function withStore(io, values, fn) {
-  const file = values.db ?? defaultDbPath(io.env);
+  const file = values.db ?? io.profile.dbPath(io.env);
   const store = openStore(file, io.env);
   try {
     return fn(store);
@@ -364,7 +385,7 @@ function runSend(io, { values, positionals }) {
   }
   const explicit = positionals.length === 2 ? positionals[0] : undefined;
   const channel = requireChannel(io, explicit, 'inbox send CHANNEL MESSAGE');
-  const status = parseStatus(values.status);
+  const status = parseStatus(io, values.status);
   const here = resolveHere({ flag: values.here, env: io.env });
   withStore(io, values, (store) => store.insert(channel, message, io.cwd(), { status, here }));
   return 0;
@@ -401,7 +422,7 @@ function pipeLines(io, store, channel, status, here) {
   const warnCut = () => {
     if (warned) return;
     warned = true;
-    io.stderr.write(`inbox: cut a line longer than ${MAX_LINE_BYTES / 1024} KiB\n`);
+    io.stderr.write(`${io.profile.name}: cut a line longer than ${MAX_LINE_BYTES / 1024} KiB\n`);
   };
 
   const flush = () => {
@@ -493,7 +514,7 @@ async function runPipe(io, { values, positionals }) {
     throw new UsageError('pipe takes at most one argument, the CHANNEL, as in: my_cmd 2>&1 | inbox pipe debug');
   }
   const channel = requireChannel(io, positionals[0], 'inbox pipe CHANNEL');
-  const status = parseStatus(values.status);
+  const status = parseStatus(io, values.status);
   // Like the channel, the "here" is fixed before the first line is read.
   const here = resolveHere({ flag: values.here, env: io.env });
   if (io.stdin.isTTY) {
@@ -501,7 +522,7 @@ async function runPipe(io, { values, positionals }) {
       'pipe reads lines from a pipe or file, as in: my_cmd 2>&1 | inbox pipe debug',
     );
   }
-  const store = openStore(values.db ?? defaultDbPath(io.env), io.env);
+  const store = openStore(values.db ?? io.profile.dbPath(io.env), io.env);
   try {
     return await pipeLines(io, store, channel, status, here);
   } finally {
@@ -590,7 +611,7 @@ function runHere(io, { values, positionals }) {
     const here = detectHere(io.env);
     if (here === null) {
       io.stderr.write(
-        'inbox: no "here" found for this shell; pass --here or set INBOX_HERE (iterm2:UUID, app:BUNDLE_ID, or url:URL)\n',
+        `${io.profile.name}: no "here" found for this shell; pass --here or set INBOX_HERE (iterm2:UUID, app:BUNDLE_ID, or url:URL)\n`,
       );
       return 1;
     }
@@ -605,7 +626,7 @@ function runHere(io, { values, positionals }) {
   }
   const here = withStore(io, values, (store) => store.channelHere(channel));
   if (here === null) {
-    io.stderr.write(`inbox: ${channel} has no fallback "here"\n`);
+    io.stderr.write(`${io.profile.name}: ${channel} has no fallback "here"\n`);
     return 1;
   }
   out(io, here);
@@ -633,7 +654,8 @@ function parsePoll(text) {
 
 function daemonSettings(io, values) {
   return {
-    file: values.db ?? defaultDbPath(io.env),
+    file: values.db ?? io.profile.dbPath(io.env),
+    createRenderer: io.profile.createRenderer,
     port:
       values.port === undefined ? DEFAULT_PORT : parseWhole('--port', values.port, 1, 65535, 'use 1 to 65535'),
     slot: values.slot === undefined ? undefined : parseWhole('--slot', values.slot, 0, 5, 'use 0 to 5'),
@@ -644,7 +666,7 @@ function daemonSettings(io, values) {
 async function runDaemon(io, { values, positionals }) {
   if (positionals.length) throw new UsageError('daemon takes no arguments');
   const settings = daemonSettings(io, values);
-  const log = (text) => io.stderr.write(`inbox: ${text}\n`);
+  const log = (text) => io.stderr.write(`${io.profile.name}: ${text}\n`);
   if (values['assets-dir'] !== undefined) {
     log('--assets-dir is unused: the daemon sends icon text, not picture files');
   }
@@ -699,7 +721,7 @@ function wantsHelp(argv) {
 async function dispatch(argv, io) {
   if (wantsHelp(argv)) {
     const command = argv.find((a) => COMMANDS.includes(a)) ?? 'inbox';
-    out(io, HELP[command]);
+    out(io, helpText(command, io.profile));
     return 0;
   }
   // Input is piped in and no command is named: read it as a pipe.
@@ -707,14 +729,14 @@ async function dispatch(argv, io) {
     return await runCommand('pipe', argv, io);
   }
   if (argv.length === 0) {
-    io.stderr.write(`${HELP.inbox}\n`);
+    io.stderr.write(`${helpText('inbox', io.profile)}\n`);
     return 2;
   }
   const [command, ...rest] = argv;
   if (command === 'help') {
     const topic = rest[0];
-    if (topic === undefined) out(io, HELP.inbox);
-    else if (COMMANDS.includes(topic)) out(io, HELP[topic]);
+    if (topic === undefined) out(io, helpText('inbox', io.profile));
+    else if (COMMANDS.includes(topic)) out(io, helpText(topic, io.profile));
     else throw unknownCommand(topic);
     return 0;
   }
@@ -757,30 +779,37 @@ async function runCommand(command, args, io) {
 }
 
 function report(e, io) {
+  const name = io.profile.name;
+  // The hints in a message name the inbox command; name this command instead.
+  const message = String(e?.message).replace(/\binbox (?=send |pipe |seen |here |-h)/g, `${name} `);
   if (e instanceof UsageError) {
-    let text = `inbox: ${e.message}\n`;
-    if (e.help && e.command) text += `run 'inbox ${e.command} -h' for help\n`;
+    let text = `${name}: ${message}\n`;
+    if (e.help && e.command) text += `run '${name} ${e.command} -h' for help\n`;
     io.stderr.write(text);
     return 2;
   }
   if (e instanceof DaemonRunningError) {
-    io.stderr.write(`inbox: ${e.message}\n`);
+    io.stderr.write(`${name}: ${message}\n`);
     return 3;
   }
   if (e instanceof StoreError) {
-    io.stderr.write(`inbox: ${e.message}\n`);
+    io.stderr.write(`${name}: ${e.message.replace('INBOX_DB', io.profile.dbEnv)}\n`);
     return 1;
   }
-  let text = `inbox: internal error: ${e?.message ?? e}\n`;
+  let text = `${name}: internal error: ${e?.message ?? e}\n`;
   if (io.env.INBOX_DEBUG === '1' && e?.stack) text += `${e.stack}\n`;
   io.stderr.write(text);
   return 1;
 }
 
-export async function main(argv, io) {
+// `profile` says which command line this is (see profiles.js). The runners
+// read it from `io`; Object.create keeps the getters of the real io.
+export async function main(argv, io, profile = INBOX_PROFILE) {
+  const ctx = Object.create(io);
+  ctx.profile = profile;
   try {
-    return await dispatch(argv, io);
+    return await dispatch(argv, ctx);
   } catch (e) {
-    return report(e, io);
+    return report(e, ctx);
   }
 }

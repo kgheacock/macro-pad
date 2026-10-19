@@ -1,0 +1,73 @@
+#compdef inbox
+# zsh completion for the inbox command. scripts/install.sh links it into
+# oh-my-zsh's completions directory. Channel names come from `inbox channels`,
+# so only channels with unseen messages are offered.
+
+_inbox_channels() {
+  local -a channels db
+  [[ -n ${opt_args[--db]} ]] && db=(--db ${opt_args[--db]})
+  channels=(${(f)"$(command ${words[1]} channels $db 2>/dev/null | awk '{print $1}')"})
+  _describe -t channels 'channel' channels
+}
+
+_inbox() {
+  local curcontext="$curcontext" state line ret=1
+  typeset -A opt_args
+  local -a commands
+  commands=(
+    'send:send one message'
+    'pipe:send each line of standard input as a message'
+    'list:list messages, seen and unseen'
+    'count:print how many messages are not seen yet'
+    'channels:list channels that have unseen messages'
+    'seen:mark messages as seen'
+    'daemon:watch the inbox and show it on the macro pad'
+    'help:show help for a command'
+  )
+  local db='--db[use this SQLite file instead of $INBOX_DB]:file:_files'
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '1: :->command' \
+    '*:: :->args' && ret=0
+
+  case $state in
+    command)
+      _describe -t commands 'inbox command' commands && ret=0
+      ;;
+    args)
+      case $line[1] in
+        send)
+          _arguments "$db" '--status=[the status of the message]:status:' \
+            '1::channel:_inbox_channels' && ret=0 ;;
+        pipe)
+          _arguments "$db" '--status=[the status of the message]:status:' \
+            '1::channel:_inbox_channels' && ret=0 ;;
+        list)
+          _arguments "$db" \
+            '(--all-channels 1)--all-channels[list every channel]' \
+            '--unseen[list only the unseen]' \
+            '--json[print JSON]' \
+            '-n+[keep the newest N]:count:' \
+            '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
+        count | seen)
+          _arguments "$db" \
+            '(--all-channels 1)--all-channels[every channel]' \
+            '(--all-channels)1::channel:_inbox_channels' && ret=0 ;;
+        channels)
+          _arguments "$db" '--json[print JSON]' && ret=0 ;;
+        daemon)
+          _arguments "$db" \
+            '--port=[macropadd port on 127.0.0.1]:port:' \
+            '--assets-dir=[the directory macropadd uses for pictures]:directory:_directories' \
+            '--slot=[put the Inbox key in this slot]:slot:(0 1 2 3 4 5)' \
+            '--poll=[how often to look for a change]:duration:' && ret=0 ;;
+        help)
+          _describe -t commands 'inbox command' commands && ret=0 ;;
+      esac
+      ;;
+  esac
+  return ret
+}
+
+_inbox "$@"

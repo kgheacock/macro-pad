@@ -8,7 +8,7 @@ UNIT=inbox-daemon.service
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--assets-dir DIR] [--port N] [--slot N] [--dry-run]
+Usage: install.sh [--assets-dir DIR] [--port N] [--slot N] [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. Run it again
 to upgrade in place: it rewrites the files and restarts the daemon.
@@ -17,12 +17,16 @@ to upgrade in place: it rewrites the files and restarts the daemon.
                     path (default: the assets/ folder of this checkout)
   --port N          macropadd's port (default: 8765)
   --slot N          put the Inbox key in slot N, 0 to 5
+  --no-completions  do not install the zsh completions
   --dry-run         print each action; change nothing
   -h, --help        show this text
 
 It writes:
   \$PREFIX/bin/inbox   a wrapper that runs this checkout with the node found
                       now (PREFIX defaults to \$HOME/.local)
+  _inbox              a link to inbox/completions/_inbox in the completions
+                      directory of oh-my-zsh ($ZSH_CACHE_DIR/completions),
+                      when oh-my-zsh is installed. Open a new shell to use it.
   macOS   ~/Library/LaunchAgents/$LABEL.plist
           log: ~/Library/Logs/inbox-daemon.log
   Linux   ~/.config/systemd/user/$UNIT
@@ -42,10 +46,12 @@ ASSETS_DIR=
 PORT=8765
 SLOT=
 DRY=0
+COMPLETIONS=1
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
+    --no-completions) COMPLETIONS=0 ;;
     --assets-dir | --port | --slot)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
@@ -132,6 +138,28 @@ write_wrapper() {
   } >"$WRAPPER.new" || fail "step failed: write $WRAPPER.new"
   chmod 755 "$WRAPPER.new" || fail "step failed: chmod 755 $WRAPPER.new"
   mv "$WRAPPER.new" "$WRAPPER" || fail "step failed: mv $WRAPPER.new $WRAPPER"
+}
+
+# Link the zsh completion into oh-my-zsh's completions directory. A problem
+# here is reported but does not stop the install.
+install_completions() {
+  COMP_LINE=
+  [ "$COMPLETIONS" = 1 ] || return 0
+  comp_dir=$("$HERE/zsh-completion-dir.sh")
+  if [ -z "$comp_dir" ]; then
+    COMP_LINE='not installed (oh-my-zsh not found)'
+    return 0
+  fi
+  comp_file=$comp_dir/_inbox
+  if [ "$DRY" = 1 ]; then
+    printf 'would link: %s -> %s\n' "$comp_file" "$INBOX_DIR/completions/_inbox"
+    return 0
+  fi
+  if mkdir -p "$comp_dir" && ln -sfn "$INBOX_DIR/completions/_inbox" "$comp_file"; then
+    COMP_LINE="$comp_file (open a new shell to use it)"
+  else
+    COMP_LINE="could not link $comp_file"
+  fi
 }
 
 # The words after the wrapper, one per line, for a plist.
@@ -227,6 +255,7 @@ case $(uname -s) in
 esac
 
 write_wrapper
+install_completions
 if [ "$PLATFORM" = macos ]; then install_macos; else install_linux; fi
 
 if [ "$DRY" = 1 ]; then
@@ -238,6 +267,7 @@ printf 'service:  %s\n' "$SERVICE_FILE"
 printf 'log:      %s\n' "$LOG"
 printf 'store:    %s\n' "$DB"
 printf 'daemon:   %s\n' "$STATE"
+[ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
   *) printf 'note: %s is not on your PATH; add it to use the inbox command\n' "$PREFIX/bin" ;;

@@ -153,28 +153,30 @@ An outside reviewer verifies each item without help from the implementer.
 Each item names its proof. The task moves to `complete/` only when every box
 is ticked.
 
-- [ ] **DoD-1** — A schema 2 file opens as schema 3. Its old rows have a NULL
+- [x] **DoD-1** — A schema 2 file opens as schema 3. Its old rows have a NULL
   `here`, and `channel_here` exists. **Proof:** `cd inbox && node --test --test-name-pattern=TestMigrateToHere test/store.test.js`
-- [ ] **DoD-2** — The precedence is `--here`, then `$INBOX_HERE`, then iTerm
+- [x] **DoD-2** — The precedence is `--here`, then `$INBOX_HERE`, then iTerm
   detection. With `$TMUX` set, detection gives nothing. **Proof:** `node --test --test-name-pattern=TestHerePrecedence test/cli.test.js`
-- [ ] **DoD-3** — `inbox pipe` stores the same `iterm2:UUID` on every line of a
+- [x] **DoD-3** — `inbox pipe` stores the same `iterm2:UUID` on every line of a
   run. `list --json` shows it. **Proof:** `node --test --test-name-pattern=TestPipeStoresHere test/cli.test.js`
-- [ ] **DoD-4** — `--here` rejects `iterm2:xyz`, `url:file:///etc/passwd`,
+- [x] **DoD-4** — `--here` rejects `iterm2:xyz`, `url:file:///etc/passwd`,
   `url:javascript:alert(1)`, and `sh:ls` with exit code 2. **Proof:** `node --test --test-name-pattern=TestHereRejects test/cli.test.js`
-- [ ] **DoD-5** — `inbox here CHANNEL VALUE` sets a fallback, `--clear`
+- [x] **DoD-5** — `inbox here CHANNEL VALUE` sets a fallback, `--clear`
   removes it, and a message with no `here` takes the fallback. A message
   `here` wins over it. **Proof:** `node --test --test-name-pattern=TestChannelFallback test/cli.test.js test/store.test.js`
-- [ ] **DoD-6** — A press on a channel key calls `focus` once with that
+- [x] **DoD-6** — A press on a channel key calls `focus` once with that
   channel's `here`, after the mark. A key with no `here` marks and calls
   nothing. The open press and key 3 call nothing. **Proof:** `node --test --test-name-pattern=TestPressFocuses test/daemon.test.js`
-- [ ] **DoD-7** — `focus` runs `osascript` for `iterm2`, with the UUID as an
+- [x] **DoD-7** — `focus` runs `osascript` for `iterm2`, with the UUID as an
   argument. It runs `open -b` for `app` and `open` for `url`. It uses no
   shell. **Proof:** `node --test test/here.test.js`
 - [ ] **DoD-8** — On the board, a press on a channel key fed by `inbox pipe`
   from an iTerm tab selects that tab and brings iTerm to the front. A
   `--here app:com.tinyspeck.slackmacgap` message brings Slack to the front.
   **Proof:** Keith's check, recorded in Notes
-- [ ] **DoD-9** — `inbox/README.md` "Here" lists the scheme, the capture order,
+  Not confirmed: needs the board. `focus` was run against a live iTerm
+  session and an unknown UUID from a shell (see Notes), but no key was pressed.
+- [x] **DoD-9** — `inbox/README.md` "Here" lists the scheme, the capture order,
   and the Automation prompt. **Proof:** `inbox/README.md`
 - [ ] **DoD-10** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
@@ -228,3 +230,12 @@ Spike, 2026-10-18, on macOS with iTerm 3.7.1:
   `activate`. The daemon logs that line and the mark stands.
 - Not tried: `app:` and `url:` actions, Teams and Outlook IDs, and a Space
   other than the current one.
+
+Implementation, 2026-10-18:
+
+- `focus` run from a shell in iTerm: the current session's UUID gave "focus
+  ok"; an unknown UUID gave `no iTerm session <uuid>`. No key was pressed.
+- A press on a child with no unseen message (count 0, kept in the open
+  layer) calls nothing: `unseen()` has no row for it, so it has no `here`.
+- `inbox here CHANNEL` with no fallback prints a line to standard error and
+  exits 1.

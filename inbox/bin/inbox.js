@@ -3,4 +3,4 @@
 
 import { entry } from '../src/entry.js';
 
-await entry('inbox');
+await entry();

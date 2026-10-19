@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { createAiRenderer } from '../src/ai-render.js';
-import { acquirePidFile, startDaemon } from '../src/daemon.js';
+import { acquirePidFile, pidPath, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
+import ai from '../src/plugins/ai.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
@@ -245,11 +245,17 @@ test('TestPressMarksChannelKeyMap', async (t) => {
 test('TestAiDaemonReadsOwnLayer', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
-  const writer = openStore(sc.db);
+  const writer = openStore(sc.db, undefined, { plugin: 'ai' });
   t.after(() => writer.close());
   writer.insert('a', 'needs input', sc.root, { status: 'waiting' });
-  launch(t, sc, server, { pollMs: 10_000, createRenderer: createAiRenderer });
+  // A basic message in the same store is not the ai daemon's.
+  const basic = openStore(sc.db);
+  t.after(() => basic.close());
+  basic.insert('mine', 'hello', sc.root);
+  launch(t, sc, server, { pollMs: 10_000, plugin: ai });
   await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'the child');
+  assert.equal(server.received.some((m) => m.setLayerKey?.id === 'mine'), false);
+  assert.equal(server.received.find((m) => m.setLayerKey?.id === 'ai-inbox').setLayerKey.status, 'WARN');
   // The inbox daemon's layer is open, not ours: a press on key 0 marks nothing.
   server.layerChanged('inbox');
   press(server, 0);
@@ -385,8 +391,25 @@ test('TestPidFile', (t) => {
   );
   release();
   // A stale file is replaced.
-  writeFileSync(`${sc.db}.daemon.pid`, '999999\n');
+  writeFileSync(pidPath(sc.db, 'basic'), '999999\n');
   const second = acquirePidFile(sc.db, { log: (l) => logs.push(l), alive: () => false });
   assert.ok(logs.some((l) => l.includes('stale')));
+  second();
+});
+
+test('TestPidFilePerPlugin', (t) => {
+  const sc = scratch(t);
+  mkdirSync(path.dirname(sc.db), { recursive: true });
+  // A basic and an ai daemon share one store, each with its own pid file.
+  const basic = acquirePidFile(sc.db, { plugin: 'basic', pid: 4242, alive: () => true });
+  const second = acquirePidFile(sc.db, { plugin: 'ai', pid: 4343, alive: () => true });
+  assert.ok(existsSync(`${sc.db}.basic.daemon.pid`));
+  assert.ok(existsSync(`${sc.db}.ai.daemon.pid`));
+  // A second ai daemon is refused.
+  assert.throws(
+    () => acquirePidFile(sc.db, { plugin: 'ai', pid: 4444, alive: () => true }),
+    (e) => e instanceof DaemonRunningError && e.message.includes('ai daemon') && e.message.includes('(pid 4343)'),
+  );
+  basic();
   second();
 });

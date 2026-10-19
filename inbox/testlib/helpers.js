@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 const BIN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin');
 export const BIN = path.join(BIN_DIR, 'inbox.js');
-export const AI_BIN = path.join(BIN_DIR, 'ai-inbox.js');
 
 // A scratch directory with a source root and a database path inside it.
 export function scratch(t) {
@@ -14,24 +13,22 @@ export function scratch(t) {
   t?.after(() => rmSync(dir, { recursive: true, force: true }));
   const root = path.join(dir, 'src');
   mkdirSync(root);
-  return { dir, root, db: path.join(dir, 'data', 'inbox.db'), aiDb: path.join(dir, 'data', 'ai-inbox.db') };
+  return { dir, root, db: path.join(dir, 'data', 'inbox.db') };
 }
 
-export function envFor({ db, aiDb, root }, extra = {}) {
+export function envFor({ db, root }, extra = {}) {
   return {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     INBOX_DB: db,
     INBOX_SOURCE_ROOT: root,
-    AI_INBOX_DB: aiDb,
     ...extra,
   };
 }
 
-// Runs the CLI to the end. Returns { status, stdout, stderr }. `bin` picks
-// the command: BIN (inbox, the default) or AI_BIN (ai-inbox).
-export function run(args, { sc, cwd = sc.root, input, env = {}, bin = BIN } = {}) {
-  const result = spawnSync(process.execPath, [bin, ...args], {
+// Runs the CLI to the end. Returns { status, stdout, stderr }.
+export function run(args, { sc, cwd = sc.root, input, env = {} } = {}) {
+  const result = spawnSync(process.execPath, [BIN, ...args], {
     cwd,
     env: envFor(sc, env),
     input,
@@ -40,9 +37,9 @@ export function run(args, { sc, cwd = sc.root, input, env = {}, bin = BIN } = {}
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-// Runs the ai-inbox command to the end.
+// Runs the CLI with the ai plugin to the end.
 export function runAi(args, options = {}) {
-  return run(args, { ...options, bin: AI_BIN });
+  return run(['--plugin', 'ai', ...args], options);
 }
 
 // Starts the CLI and returns the child plus a promise for its exit.

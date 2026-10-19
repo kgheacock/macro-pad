@@ -6,8 +6,8 @@ import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
-import { INBOX_PROFILE } from './profiles.js';
-import { DEFAULT_STATUS, openStore } from './store.js';
+import { DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
+import { defaultDbPath, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
 const FLUSH_MS = 200;
@@ -21,14 +21,15 @@ const CHANNEL_RULES = `How the channel is chosen:
 
 const DB_OPTION = `  --db PATH   use this SQLite file instead of $INBOX_DB`;
 const CHANNEL_OPTION = `  --channel C  the CHANNEL, as an option instead of an argument`;
-const STATUS_OPTION = `  --status S  the status of the message: letters, digits, - and _ (default: ${DEFAULT_STATUS})`;
+// The --status line names the statuses of the plugin; helpText fills it in.
+const STATUS_OPTION = '@STATUS@';
 const HERE_OPTION = `  --here H    where a press on the channel key goes: iterm2:UUID, app:BUNDLE_ID, or
               url:URL (default: $INBOX_HERE, else the iTerm session you are in)`;
 
 const HELP = {
   inbox: `inbox - leave short messages per channel, and read them later
 
-Usage: inbox COMMAND [ARGUMENTS] [--db PATH]
+Usage: inbox [--plugin NAME] COMMAND [ARGUMENTS] [--db PATH]
        COMMAND | inbox [OPTIONS]            (same as: inbox pipe [OPTIONS])
        COMMAND | inbox --channel debug
 
@@ -41,12 +42,16 @@ Commands:
   seen       mark messages as seen
   here       show or set where a press on a channel key goes
   daemon     watch the inbox and show it on the macro pad
+  plugins    list the plugins
   help       show help for a command
+
+@PLUGINS@
 
 Examples:
   inbox send debug "build done"
   my_cmd 2>&1 | inbox pipe debug
   echo "hello" | inbox                 (same as: inbox pipe)
+  inbox --plugin ai send --status waiting macro-pad "needs a decision"
 
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
@@ -181,6 +186,16 @@ Examples:
   inbox here chat app:com.tinyspeck.slackmacgap
   inbox here --clear chat`,
 
+  plugins: `Usage: inbox plugins
+
+Print each plugin and what it shows. Pick one with --plugin NAME on any
+command, before or after the command word; without it, the plugin is
+${DEFAULT_PLUGIN}. One store holds every plugin, and each command reads and
+writes only the messages of its plugin.
+
+Example:
+  inbox --plugin ai channels`,
+
   daemon: `Usage: inbox daemon [--port N] [--slot N] [--poll DURATION]
 
 Run until stopped. Watch the store, and send the unseen counts to macropadd
@@ -195,31 +210,41 @@ state again each time it connects. Log lines go to standard error.
                     (default: ${DEFAULT_POLL_MS}ms)
 ${DB_OPTION}
 
-Only one daemon runs per store. A second one exits with code 3.
+Only one daemon runs per store and plugin. A second one exits with code 3.
+Each plugin's daemon draws its own key, so the daemons of two plugins run side
+by side.
 SIGINT and SIGTERM stop it with exit code 0. The keys stay on the pad.
-To run it at login, use inbox/scripts/install.sh.
+To run it at login, use inbox/scripts/install.sh [--plugin NAME].
 
 Example:
   inbox daemon --port 8765`,
 };
 
-// The help of a command, written for the command line of the profile: its
-// name, its store variable, and its statuses.
-function helpText(command, profile) {
-  const text = HELP[command];
-  if (profile.name === INBOX_PROFILE.name) return text;
-  const word = /(^|[\s('|])inbox (?=COMMAND|send|pipe|list|count|channels|seen|here|daemon|help|\[|-| +\()/gm;
-  const statuses = profile.statuses.join(' | ');
-  return `${text
-    .replace(word, `$1${profile.name} `)
-    .replace('$INBOX_DB', `$${profile.dbEnv}`)
-    .replace(/^  --status S .*$/m, `  --status S  the status of the message: ${statuses} (default: ${profile.defaultStatus})`)
-    .replace('inbox/scripts/install.sh', 'inbox/scripts/install.sh --ai')}${
-    command === 'inbox' ? `\n\nA channel shows the highest status of its unseen messages, in the order\nwaiting, running, done. The pip on the key counts the channels that wait.` : ''
-  }`;
+// One line per plugin: its name, its summary, and the default marked.
+function pluginList() {
+  const width = Math.max(...Object.keys(PLUGINS).map((name) => name.length));
+  return Object.values(PLUGINS).map(
+    (p) => `${p.name.padEnd(width)}  ${p.summary}${p.name === DEFAULT_PLUGIN ? ' (default)' : ''}`,
+  );
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon'];
+// The help of a command, for the plugin it runs with: its statuses and its
+// paragraph.
+function helpText(command, plugin) {
+  const statuses = plugin.statuses ? plugin.statuses.join(' | ') : 'letters, digits, - and _';
+  let text = HELP[command]
+    .replace('@STATUS@', `  --status S  the status of the message: ${statuses} (default: ${plugin.defaultStatus})`)
+    .replace(
+      '@PLUGINS@',
+      `Plugins (--plugin NAME, before or after the command):\n${pluginList().map((line) => `  ${line}`).join('\n')}`,
+    );
+  if (plugin.about && ['inbox', 'send', 'pipe'].includes(command)) {
+    text += `\n\nPlugin ${plugin.name}:\n${plugin.about}`;
+  }
+  return text;
+}
+
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'seen', 'here', 'daemon', 'plugins'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen'];
@@ -236,6 +261,7 @@ const OPTIONS = {
   channels: { json: { type: 'boolean' } },
   seen: { 'all-channels': { type: 'boolean' } },
   here: { clear: { type: 'boolean' } },
+  plugins: {},
   daemon: {
     port: { type: 'string' },
     'assets-dir': { type: 'string' },
@@ -305,7 +331,7 @@ function formatTime(ms) {
 }
 
 function parseStatus(io, status) {
-  const { statuses, defaultStatus } = io.profile;
+  const { statuses, defaultStatus } = io.plugin;
   if (status === undefined) return defaultStatus;
   if (statuses !== null && !statuses.includes(status)) {
     throw new UsageError(`bad status "${status}": use ${statuses.join(', ')}`);
@@ -345,9 +371,12 @@ function readScope(io, values, positionals) {
   return inferChannel(io.cwd(), sourceRoot(io.env));
 }
 
+function storeFile(io, values) {
+  return values.db ?? defaultDbPath(io.env);
+}
+
 function withStore(io, values, fn) {
-  const file = values.db ?? io.profile.dbPath(io.env);
-  const store = openStore(file, io.env);
+  const store = openStore(storeFile(io, values), io.env, { plugin: io.plugin.name });
   try {
     return fn(store);
   } finally {
@@ -422,7 +451,7 @@ function pipeLines(io, store, channel, status, here) {
   const warnCut = () => {
     if (warned) return;
     warned = true;
-    io.stderr.write(`${io.profile.name}: cut a line longer than ${MAX_LINE_BYTES / 1024} KiB\n`);
+    io.stderr.write(`inbox: cut a line longer than ${MAX_LINE_BYTES / 1024} KiB\n`);
   };
 
   const flush = () => {
@@ -522,7 +551,7 @@ async function runPipe(io, { values, positionals }) {
       'pipe reads lines from a pipe or file, as in: my_cmd 2>&1 | inbox pipe debug',
     );
   }
-  const store = openStore(values.db ?? io.profile.dbPath(io.env), io.env);
+  const store = openStore(storeFile(io, values), io.env, { plugin: io.plugin.name });
   try {
     return await pipeLines(io, store, channel, status, here);
   } finally {
@@ -597,6 +626,12 @@ function runSeen(io, { values, positionals }) {
   return 0;
 }
 
+function runPlugins(io, { positionals }) {
+  if (positionals.length) throw new UsageError('plugins takes no arguments');
+  for (const line of pluginList()) out(io, line);
+  return 0;
+}
+
 function runHere(io, { values, positionals }) {
   if (positionals.length > 2) throw new UsageError('here takes at most CHANNEL and HERE');
   if (values.clear) {
@@ -611,7 +646,7 @@ function runHere(io, { values, positionals }) {
     const here = detectHere(io.env);
     if (here === null) {
       io.stderr.write(
-        `${io.profile.name}: no "here" found for this shell; pass --here or set INBOX_HERE (iterm2:UUID, app:BUNDLE_ID, or url:URL)\n`,
+        `inbox: no "here" found for this shell; pass --here or set INBOX_HERE (iterm2:UUID, app:BUNDLE_ID, or url:URL)\n`,
       );
       return 1;
     }
@@ -626,7 +661,7 @@ function runHere(io, { values, positionals }) {
   }
   const here = withStore(io, values, (store) => store.channelHere(channel));
   if (here === null) {
-    io.stderr.write(`${io.profile.name}: ${channel} has no fallback "here"\n`);
+    io.stderr.write(`inbox: ${channel} has no fallback "here"\n`);
     return 1;
   }
   out(io, here);
@@ -654,8 +689,8 @@ function parsePoll(text) {
 
 function daemonSettings(io, values) {
   return {
-    file: values.db ?? io.profile.dbPath(io.env),
-    createRenderer: io.profile.createRenderer,
+    file: storeFile(io, values),
+    plugin: io.plugin,
     port:
       values.port === undefined ? DEFAULT_PORT : parseWhole('--port', values.port, 1, 65535, 'use 1 to 65535'),
     slot: values.slot === undefined ? undefined : parseWhole('--slot', values.slot, 0, 5, 'use 0 to 5'),
@@ -666,7 +701,7 @@ function daemonSettings(io, values) {
 async function runDaemon(io, { values, positionals }) {
   if (positionals.length) throw new UsageError('daemon takes no arguments');
   const settings = daemonSettings(io, values);
-  const log = (text) => io.stderr.write(`${io.profile.name}: ${text}\n`);
+  const log = (text) => io.stderr.write(`inbox: ${text}\n`);
   if (values['assets-dir'] !== undefined) {
     log('--assets-dir is unused: the daemon sends icon text, not picture files');
   }
@@ -685,14 +720,14 @@ async function runDaemon(io, { values, positionals }) {
   let release = () => {};
   let daemon;
   try {
-    release = acquirePidFile(settings.file, { log });
+    release = acquirePidFile(settings.file, { plugin: io.plugin.name, log });
     daemon = startDaemon({ ...settings, env: io.env, log });
   } catch (e) {
     forget();
     release();
     throw e;
   }
-  log(`daemon started for ${settings.file} (pid ${process.pid})`);
+  log(`${io.plugin.name} daemon started for ${settings.file} (pid ${process.pid})`);
   await signalled;
   forget();
   await daemon.stop();
@@ -710,6 +745,7 @@ const RUNNERS = {
   seen: runSeen,
   here: runHere,
   daemon: runDaemon,
+  plugins: runPlugins,
 };
 
 function wantsHelp(argv) {
@@ -721,7 +757,7 @@ function wantsHelp(argv) {
 async function dispatch(argv, io) {
   if (wantsHelp(argv)) {
     const command = argv.find((a) => COMMANDS.includes(a)) ?? 'inbox';
-    out(io, helpText(command, io.profile));
+    out(io, helpText(command, io.plugin));
     return 0;
   }
   // Input is piped in and no command is named: read it as a pipe.
@@ -729,14 +765,14 @@ async function dispatch(argv, io) {
     return await runCommand('pipe', argv, io);
   }
   if (argv.length === 0) {
-    io.stderr.write(`${helpText('inbox', io.profile)}\n`);
+    io.stderr.write(`${helpText('inbox', io.plugin)}\n`);
     return 2;
   }
   const [command, ...rest] = argv;
   if (command === 'help') {
     const topic = rest[0];
-    if (topic === undefined) out(io, helpText('inbox', io.profile));
-    else if (COMMANDS.includes(topic)) out(io, helpText(topic, io.profile));
+    if (topic === undefined) out(io, helpText('inbox', io.plugin));
+    else if (COMMANDS.includes(topic)) out(io, helpText(topic, io.plugin));
     else throw unknownCommand(topic);
     return 0;
   }
@@ -779,36 +815,68 @@ async function runCommand(command, args, io) {
 }
 
 function report(e, io) {
-  const name = io.profile.name;
-  // The hints in a message name the inbox command; name this command instead.
-  const message = String(e?.message).replace(/\binbox (?=send |pipe |seen |here |-h)/g, `${name} `);
   if (e instanceof UsageError) {
-    let text = `${name}: ${message}\n`;
-    if (e.help && e.command) text += `run '${name} ${e.command} -h' for help\n`;
+    let text = `inbox: ${e.message}\n`;
+    if (e.help && e.command) text += `run 'inbox ${e.command} -h' for help\n`;
     io.stderr.write(text);
     return 2;
   }
   if (e instanceof DaemonRunningError) {
-    io.stderr.write(`${name}: ${message}\n`);
+    io.stderr.write(`inbox: ${e.message}\n`);
     return 3;
   }
   if (e instanceof StoreError) {
-    io.stderr.write(`${name}: ${e.message.replace('INBOX_DB', io.profile.dbEnv)}\n`);
+    io.stderr.write(`inbox: ${e.message}\n`);
     return 1;
   }
-  let text = `${name}: internal error: ${e?.message ?? e}\n`;
+  let text = `inbox: internal error: ${e?.message ?? e}\n`;
   if (io.env.INBOX_DEBUG === '1' && e?.stack) text += `${e.stack}\n`;
   io.stderr.write(text);
   return 1;
 }
 
-// `profile` says which command line this is (see profiles.js). The runners
-// read it from `io`; Object.create keeps the getters of the real io.
-export async function main(argv, io, profile = INBOX_PROFILE) {
+// Takes --plugin NAME (or --plugin=NAME) out of the arguments, wherever it is
+// before "--". Returns the plugin and the other arguments.
+function takePlugin(argv) {
+  const rest = [];
+  let name;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--') {
+      rest.push(...argv.slice(i));
+      break;
+    }
+    let value;
+    if (arg === '--plugin') {
+      value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        throw new UsageError(`--plugin needs a NAME; use one of: ${Object.keys(PLUGINS).join(', ')}`, {
+          help: false,
+        });
+      }
+      i++;
+    } else if (arg.startsWith('--plugin=')) {
+      value = arg.slice('--plugin='.length);
+    } else {
+      rest.push(arg);
+      continue;
+    }
+    if (name !== undefined && name !== value) {
+      throw new UsageError(`give --plugin once; got ${name} and ${value}`, { help: false });
+    }
+    name = value;
+  }
+  return { plugin: getPlugin(name ?? DEFAULT_PLUGIN), argv: rest };
+}
+
+// The runners read the plugin from `io`; Object.create keeps the getters of
+// the real io.
+export async function main(argv, io) {
   const ctx = Object.create(io);
-  ctx.profile = profile;
   try {
-    return await dispatch(argv, ctx);
+    const taken = takePlugin(argv);
+    ctx.plugin = taken.plugin;
+    return await dispatch(taken.argv, ctx);
   } catch (e) {
     return report(e, ctx);
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reports this Claude Code session's state to ai-inbox, which shows it on the
-# macro pad: running (blue), waiting for you (yellow), done (green).
+# Reports this Claude Code session's state to the ai plugin of inbox
+# (`inbox --plugin ai`), which shows it on the macro pad: running (blue), waiting for you (yellow), done (green).
 # Replaces claude-iterm-badge.sh. Wired from ~/.claude/settings.json hooks.
 #
 #   $1 = prompt    UserPromptSubmit  you sent a prompt            -> running
@@ -10,10 +10,10 @@
 #        end       SessionEnd        the session closed           -> clears a stuck running/waiting
 #
 # One channel per project: the path below ~/source joined by dots, as
-# `ai-inbox send` infers it (else the folder name). Sessions in one project
+# `inbox send` infers it (else the folder name). Sessions in one project
 # share a channel.
 #
-# ai-inbox shows the highest status of the UNSEEN messages (waiting > running >
+# The ai plugin shows the highest status of the UNSEEN messages (waiting > running >
 # done), so a state change marks the channel seen first. Otherwise a `waiting`
 # from a permission prompt would keep the key yellow after you approved it, and
 # `running` would hide `done`. A tool hook sends nothing while the state is
@@ -23,8 +23,8 @@
 
 state="${1:-}"
 payload="$(cat)"
-ai="${AI_INBOX_BIN:-$HOME/.local/bin/ai-inbox}"
-{ [ -x "$ai" ] && command -v jq >/dev/null 2>&1; } || exit 0
+inbox="${INBOX_BIN:-$HOME/.local/bin/inbox}"
+{ [ -x "$inbox" ] && command -v jq >/dev/null 2>&1; } || exit 0
 
 proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
 proj="$(cd "${proj:-$PWD}" 2>/dev/null && pwd -P)" || exit 0
@@ -42,8 +42,8 @@ mkdir -p "$cache" 2>/dev/null
 file="$cache/$channel"
 last="$(cat "$file" 2>/dev/null)"
 
-seen() { "$ai" seen "$channel" >/dev/null 2>&1; }
-send() { "$ai" send --status "$1" -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
+seen() { "$inbox" --plugin ai seen "$channel" >/dev/null 2>&1; }
+send() { "$inbox" --plugin ai send --status "$1" -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
 
 case "$state" in
   prompt)

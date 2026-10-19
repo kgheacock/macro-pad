@@ -7,6 +7,8 @@
 import { createRenderer } from './render.js';
 
 export const AI_INBOX_ID = 'ai-inbox';
+// A picture under macropadd's assets directory.
+export const AI_ICON = 'ai.png';
 export const AI_STATUSES = ['waiting', 'running', 'done'];
 
 // Pad status names (driver/layers/doc.go), by rank. Rank 1 is the lowest.
@@ -27,7 +29,7 @@ export const AI_RULES = {
     return {
       status: PAD_STATUS[highest] ?? '',
       count: unseen.filter((row) => rank(row) === 3).length,
-      iconText: 'ai\ninbox',
+      iconRef: AI_ICON,
     };
   },
   child(row) {

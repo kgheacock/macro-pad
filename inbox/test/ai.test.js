@@ -27,7 +27,7 @@ test('TestAiPlan', () => {
     row('c', { done: 1 }, 7),
   ]);
   const k = keys(messages);
-  assert.deepEqual(k['ai-inbox'], { id: 'ai-inbox', status: 'WARN', count: 1, iconText: 'ai\ninbox' });
+  assert.deepEqual(k['ai-inbox'], { id: 'ai-inbox', status: 'WARN', count: 1, iconRef: 'ai.png' });
   // Waiting first, then running, then done.
   assert.deepEqual(order(messages), ['a', 'b', 'c']);
   assert.deepEqual([k.a, k.b, k.c].map((x) => [x.status, x.count]), [['WARN', 1], ['RUNNING', 0], ['DONE', 0]]);
@@ -50,7 +50,7 @@ test('TestAiPriority', () => {
   assert.equal(top([row('a', { info: 1 }, 1)]).status, 'DONE');
   // Nothing unseen: no status, no pip, no children.
   const messages = plan([]);
-  assert.deepEqual(keys(messages)['ai-inbox'], { id: 'ai-inbox', status: '', count: 0, iconText: 'ai\ninbox' });
+  assert.deepEqual(keys(messages)['ai-inbox'], { id: 'ai-inbox', status: '', count: 0, iconRef: 'ai.png' });
   assert.deepEqual(order(messages), []);
 });
 

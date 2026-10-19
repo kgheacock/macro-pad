@@ -93,7 +93,7 @@ still rejects a wrong status, which A cannot do. The task accepts a profile argu
 | name | `ai-inbox` |
 | store | `$AI_INBOX_DB`, else `$XDG_DATA_HOME/ai-inbox/ai-inbox.db` (default `~/.local/share/ai-inbox/ai-inbox.db`) |
 | statuses | `waiting`, `running`, `done`. Any other `--status` exits with code 2. Default: `done`. |
-| key id | `ai-inbox`, with `iconText` `ai\ninbox` |
+| key id | `ai-inbox`, with `iconRef` `ai.png` (a picture in `assets/`; the channel children keep `iconText`) |
 
 **Store.** `Store.unseen()` rows gain `byStatus`, an object of unseen counts per status. Seen rows never
 appear, so each read calculates the status again.

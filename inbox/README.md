@@ -86,8 +86,15 @@ On a terminal, `inbox` with no command shows help.
 - Lines are saved in a transaction every 200 ms or every 500 lines, whichever
   comes first, and at end of input. A line from a long pipe is readable within
   200 ms.
-- `SIGINT` and `SIGTERM` save the lines already read, then exit 0. A last line
-  without a newline is dropped on a signal, and kept at end of input.
+- The input is copied to standard output as it arrives, as `tee` does, so
+  `cmd | inbox` still shows the text of `cmd`. If standard output closes,
+  `inbox` goes on saving.
+- The first `SIGINT` (Ctrl-C) does not stop `inbox`. The terminal sends it to
+  `cmd` too, and `inbox` reads on until `cmd` closes the pipe, so the last
+  lines of `cmd` are saved and `cmd` does not die of a broken pipe. Then it
+  exits 0. A second `SIGINT`, or `SIGTERM`, saves the lines already read and
+  exits 0 at once. A last line without a newline is dropped on that second
+  signal, and kept at end of input.
 - The channel is resolved before the first line is read.
 
 ## Here

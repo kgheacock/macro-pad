@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -53,6 +54,7 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 	port := fs.Int("port", plugin.DefaultPort, "TCP port the plugin WebSocket server binds on 127.0.0.1")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory where the last state of every key and the layer tree (layers.json) are saved and loaded, so a daemon restart or a host reboot loses nothing; empty keeps it in memory only")
 	assetsDir := fs.String("assets-dir", "assets", "directory the iconRef of a layer key resolves under, and where a child layer finds shift.png (see task 0057)")
+	emojiFont := fs.String("emoji-font", layers.AppleColorEmoji, "color emoji font an emoji ref draws from at run time, falling back to the PNGs under <assets-dir>/emoji/ when the font is missing or has no picture (see task 0074); empty draws only the PNGs")
 	traceFile := fs.String("trace-file", "", "write every device message to this JSONL flight-recorder file (see task 0025); empty disables recording")
 	emulate := fs.Bool("emulate", false, "run against an in-memory emulator instead of a real board, so a virtual pad plugin (see driver/plugin/web/virtualpad.html) can inject presses with no hardware attached")
 	if err := fs.Parse(args); err != nil {
@@ -126,6 +128,13 @@ func runCtx(ctx context.Context, args []string, stdout, stderr io.Writer, onEmul
 	srv.SetLogf(func(format string, args ...any) {
 		fmt.Fprintf(stdout, "macropadd: "+format+"\n", args...)
 	})
+
+	if *emojiFont != "" {
+		layers.UseEmojiFont(*emojiFont)
+		if err := layers.EmojiFontErr(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stdout, "macropadd: emoji font: %v; drawing the emoji under %s\n", err, filepath.Join(*assetsDir, "emoji"))
+		}
+	}
 
 	// The layer tree draws through srv, so a plugin sees every key it
 	// sets, and srv hands it each single press and setLayerKey message.

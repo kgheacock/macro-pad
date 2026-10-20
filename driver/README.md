@@ -173,6 +173,7 @@ constants of `driver/layers/pip.go`; the sheet's layout is in
 |---|---|---|
 | `--state-dir DIR` | `macro-pad` under the user's config directory | Holds `layers.json`, beside `keys.json`. An empty value keeps the object in memory only. |
 | `--assets-dir DIR` | `assets` | Where an `iconRef` resolves, and where a child layer finds `shift.png`. |
+| `--emoji-font FILE` | `/System/Library/Fonts/Apple Color Emoji.ttc` | The color emoji font an emoji ref draws from (task 0074). A missing font, or `''`, draws the Fluent PNGs under `assets/emoji/`. |
 
 `--state-db` and `--state-db-poll` no longer exist: the layer tree replaced
 the SQLite poller of task 0051, and `driver/statedb` is gone. A database file
@@ -226,10 +227,14 @@ the poller used is not read any more; delete it.
   the largest of 20, 18, 16, 14, or 12 px that fits 84 px, above the emoji.
   A third ref, a ref outside `emoji/`, or a longer caption drops the message.
   The count pip covers the lower right of a second emoji.
-- `assets/emoji/` holds Microsoft Fluent Emoji (flat, MIT), one
-  `<codepoints>.png` per line of `assets/emoji/set.txt`, drawn by
-  `tools/emoji/` to fit the round. Any of them also works as an `iconRef`,
-  such as `emoji/1f98a.png`.
+- An emoji ref, in `iconEmoji` or as an `iconRef` such as `emoji/1f98a.png`,
+  draws from Apple Color Emoji on a Mac (task 0074). `macropadd` reads the
+  font's largest PNG strike at run time and fits it to the round; nothing is
+  written to disk, since Apple's pictures may not be copied into the repo.
+  `--emoji-font` names another sbix font, or `--emoji-font ''` turns it off.
+- Where the font is missing or has no picture for a ref, the ref draws
+  `assets/emoji/<codepoints>.png`: Microsoft Fluent Emoji (flat, MIT), one per
+  line of `assets/emoji/set.txt`, drawn by `tools/emoji/` to fit the round.
 - `count` is drawn as a pip, a red disc with a white ring and a white number,
   in the bottom-right corner of the image (see "Count pip," above). A count of
   0 has no pip, and a count above 99 shows `99+`.

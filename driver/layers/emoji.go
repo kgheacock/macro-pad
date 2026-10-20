@@ -123,8 +123,15 @@ func drawIconEmoji(img *image.NRGBA, assetsDir string, refs []string, caption st
 	return nil
 }
 
-// loadIcon reads the 128x128 PNG at ref under assetsDir.
+// loadIcon reads the 128x128 PNG at ref under assetsDir. An emoji ref draws
+// from the emoji font instead, when there is one with its picture (task 0074).
 func loadIcon(assetsDir, ref string) (image.Image, error) {
+	if err := ValidateIconRef(ref); err != nil {
+		return nil, err
+	}
+	if icon := fontIcon(ref); icon != nil {
+		return icon, nil
+	}
 	p, err := assetPath(assetsDir, ref)
 	if err != nil {
 		return nil, err

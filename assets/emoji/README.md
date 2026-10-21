@@ -7,6 +7,9 @@ with `iconEmoji`. The inbox picks them for folders and Claude Code sessions
 
 - Source: Microsoft Fluent Emoji, flat style, MIT (see `LICENSE`), from the npm
   package `@lobehub/fluent-emoji-flat` 1.1.0.
+- On a Mac, `macropadd` draws these refs from Apple Color Emoji instead, at run
+  time (task 0074). These PNGs are the fallback for a ref the font lacks, for a
+  host with no font, and for the tests.
 - Each emoji is scaled so that its farthest pixel of alpha 0x80 or more lies
   50 px from the centre, inside the white round of radius 58.
 

@@ -7,7 +7,6 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -118,25 +117,12 @@ func renderIcon(assetsDir, ref, text, emoji string, count int, keyColor uint16) 
 		keyColor = ColorNone
 	}
 	if ref != "" {
-		p, err := assetPath(assetsDir, ref)
+		icon, err := loadIcon(assetsDir, ref)
 		if err != nil {
 			return nil, err
-		}
-		f, err := os.Open(p)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		icon, err := png.Decode(f)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", ref, err)
-		}
-		b := icon.Bounds()
-		if b.Dx() != transport.CustomGlyphWidth || b.Dy() != transport.CustomGlyphHeight {
-			return nil, fmt.Errorf("%s: %w: got %dx%d", ref, transport.ErrInvalidGlyphSize, b.Dx(), b.Dy())
 		}
 		drawIconRound(canvas, keyColor)
-		draw.Draw(canvas, canvas.Bounds(), icon, b.Min, draw.Over)
+		draw.Draw(canvas, canvas.Bounds(), icon, icon.Bounds().Min, draw.Over)
 	}
 	if count > 0 {
 		if err := DrawPip(canvas, keyColor, count); err != nil {

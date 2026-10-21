@@ -30,10 +30,22 @@ test('TestAiPlan', () => {
   ]);
   const k = keys(messages);
   assert.deepEqual(k['ai-inbox'], { id: 'ai-inbox', status: 'WARN', count: 1, iconRef: 'ai.png' });
-  // Waiting first, then running, then done.
-  assert.deepEqual(order(messages), ['a', 'b', 'c']);
+  // The newest message first, whatever the status.
+  assert.deepEqual(order(messages), ['b', 'c', 'a']);
   assert.deepEqual([k.a, k.b, k.c].map((x) => [x.status, x.count]), [['WARN', 1], ['RUNNING', 0], ['DONE', 0]]);
   assert.equal(k.a.parent, 'ai-inbox');
+});
+
+test('TestAiPlanSeenChannelShows', () => {
+  // A channel with all seen (count 0, no statuses) still shows, with no color.
+  const seen = { channel: 's', byStatus: {}, count: 0, newestId: 8, createdAt: 8 };
+  const messages = plan([row('a', { waiting: 1 }, 5), seen]);
+  const k = keys(messages);
+  assert.deepEqual(order(messages), ['s', 'a']);
+  assert.deepEqual([k.s.status, k.s.count], ['', 0]);
+  assert.deepEqual([k['ai-inbox'].status, k['ai-inbox'].count], ['WARN', 1]);
+  // Only seen channels: the key has no color.
+  assert.equal(keys(plan([seen]))['ai-inbox'].status, '');
 });
 
 test('TestAiPlanPipCountsChannels', () => {
@@ -90,12 +102,36 @@ test('TestAiListWithoutPips', () => {
 
 test('TestAiStableWhileOpen', () => {
   const r = createAiRenderer();
-  r.plan({ unseen: [row('a', { waiting: 1 }, 1), row('b', { done: 1 }, 2)], active: null });
+  r.plan({ unseen: [row('a', { waiting: 1 }, 2), row('b', { done: 1 }, 1)], active: null });
   // The layer is open and a is seen: it stays, with no status, and nothing moves.
-  const open = r.plan({ unseen: [row('b', { done: 1 }, 2)], active: 'ai-inbox' });
+  const open = r.plan({ unseen: [row('b', { done: 1 }, 1)], active: 'ai-inbox' });
   assert.deepEqual(open.filter((m) => m.removeLayerKey), []);
   const k = keys(open);
   assert.deepEqual([k.a.status, k.a.count], ['', 0]);
   assert.equal(r.topId, 'ai-inbox');
   assert.equal(r.target(0).channel, 'a');
+});
+
+test('TestAiRecent', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db, undefined, { plugin: 'ai' });
+  t.after(() => store.close());
+  const hour = ai.rules.activeMs;
+  const now = 10 * hour;
+  store.insert('old', 'x', '/x', { status: 'waiting', now: now - hour - 1 });
+  store.insert('seen', 'x', '/x', { status: 'done', now: now - 1000 });
+  const w = store.insert('live', 'x', '/x', { status: 'waiting', now: now - 500 });
+  store.insert('live', 'y', '/x', { status: 'running', now: now - 100 });
+  store.markSeen('seen', Number.MAX_SAFE_INTEGER, now);
+
+  const rows = store.recent(now - hour);
+  // 'old' is out; 'seen' is in, with nothing unseen.
+  assert.deepEqual(rows.map((r) => r.channel), ['live', 'seen']);
+  const [live, seen] = rows;
+  assert.deepEqual([live.count, live.byStatus, live.createdAt], [2, { waiting: 1, running: 1 }, now - 100]);
+  assert.deepEqual([seen.count, seen.byStatus], [0, {}]);
+  assert.ok(live.newestId > w);
+  // The window is inclusive and a message inside it brings the channel back.
+  assert.equal(store.recent(now - hour - 1).length, 3);
+  assert.deepEqual(plan(rows).filter((m) => m.setLayerKey?.parent).map((m) => m.setLayerKey.id), ['live', 'seen']);
 });

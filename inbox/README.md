@@ -221,6 +221,10 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 - `unseen()` returns, per channel with unseen rows, `{channel, count,
   newestId, createdAt, here}`. `here` is that of the newest unseen row, else
   the channel's fallback, else `null`.
+- `recent(since)` returns the same fields, plus `byStatus`, per channel with
+  a row created at or after `since` (ms), seen or not. `newestId`,
+  `createdAt`, and `here` are those of the newest row of any kind; `count` is
+  the unseen count and can be 0. The `ai` daemon reads this.
 
 ## Environment
 
@@ -419,7 +423,8 @@ inbox --plugin ai seen macro-pad.driver
 | Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` |
 | Colors | yellow when a message is unseen | blue, green, or yellow, by status |
 | Pip | the unseen messages | the channels that wait |
-| Channel order | newest unseen message first | highest status first, then newest |
+| Channels shown | those with an unseen message | those with a message in the last hour, seen or not |
+| Channel order | newest unseen message first | newest message first |
 
 ### The ai plugin
 
@@ -431,25 +436,26 @@ The inbox for AI agents. Agents send; a person looks at the pad.
 | `running` | blue | `RUNNING` | The agent works. |
 | `done` | green | `DONE` | The agent finished. |
 
-A seen message does not count. The daemon reads the unseen messages on every
-change, so the colors and the pip are calculated again each time a message is
-seen. A message with a stored status outside the three counts as `done`.
+A seen message does not count for the colors and the pip. The daemon reads the
+store on every change, so they are calculated again each time a message is
+seen. Which channels show does not depend on what is seen. A message with a stored status outside the three counts as `done`.
 
 - **A channel** shows the highest status of its unseen messages, in the order
-  `waiting`, then `running`, then `done`. A channel with no unseen message is
-  not on the pad.
-- **The `ai-inbox` key** shows the highest status of all channels. It has no
+  `waiting`, then `running`, then `done`. A channel with no unseen message has
+  no color, but it stays on the pad while its newest message is less than an
+  hour old, and leaves within about 30 s after that hour ends.
+- **The `ai-inbox` key** shows the highest status of the channels on the pad.
+  A channel with no message in the last hour does not count. The key has no
   color when every message is seen, and it stays on the pad.
 - **The pip** on the `ai-inbox` key is the number of channels that have an
   unseen `waiting` message. The pip on a channel key is the number of its
   unseen `waiting` messages. A count of 0 draws no pip.
-- **A press** on the `ai-inbox` key opens the list of channels with unseen
-  messages, also when there is no pip: a green or blue key with no pip still
-  lists its channels. At most five show: the highest status first, then the
-  newest unseen message. A channel past the fifth counts in the key's status
-  and pip.
+- **A press** on the `ai-inbox` key opens the list of channels with a message
+  in the last hour, also when there is no pip. At most five show, the channel
+  with the newest message first, whatever its status. A channel past the
+  fifth counts in the key's status and pip.
 - **A press on a channel key** marks the messages it showed seen, then goes
-  to their "here", as for `basic`. The keys do not move while the layer is
+  to the "here" of its newest message (seen or not), as for `basic`. The keys do not move while the layer is
   open; a seen channel keeps its place, with no color, until you leave.
 
 An old `waiting` message keeps the key yellow until it is seen, also after the

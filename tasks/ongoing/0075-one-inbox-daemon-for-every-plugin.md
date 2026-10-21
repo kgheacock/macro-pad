@@ -1,7 +1,7 @@
 ---
 id: "0075"
 title: "One inbox daemon and one login service for every plugin"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-21"
 updated: "2026-10-21"
 owner: "kgheacock"
@@ -94,8 +94,8 @@ basic` and `inbox daemon --plugin ai` and waits for both.
 
 ## Decision
 
-Chosen: **Approach A — one process, one loop per plugin** (pending Keith's
-review).
+Chosen: **Approach A — one process, one loop per plugin**. Keith picked it
+on 2026-10-21.
 
 It gives one process, one service, and one log with the least change to code
 that works. The cost is a second WebSocket and a second poll inside the one
@@ -144,7 +144,9 @@ within 1 s, as today.
 - `--plugin NAME`, once or more, limits the service to those plugins. Without
   it, the service runs every plugin, so a plugin added later shows after
   `install.sh` runs again, or after the service restarts.
-- `--slot N` or `--slot NAME=N`, as for the command.
+- `--slot N` or `--slot NAME=N`, as for the command. `install.sh` checks the
+  range, and refuses a bare `--slot N` (exit 2) unless the service shows one
+  plugin; the daemon checks the rest, so a bad pair shows in the log.
 - Before it starts the new service, it boots out and deletes every
   `com.kgheacock.macropad.inbox.*` plist (macOS) and every
   `inbox-daemon-*.service` unit (Linux) and names each one it removed. Their
@@ -181,13 +183,15 @@ is ticked.
   **Proof:** `node --test --test-name-pattern=TestMergedDaemonRefused test/cli.test.js`
 - [ ] **DoD-4** — A bare `--slot N` with two plugins exits 2; `--slot basic=1
   --slot ai=2` puts each top key in its slot; two plugins on one slot exit 2.
-  **Proof:** `node --test --test-name-pattern=TestDaemonSlots test/cli.test.js`
+  **Proof:** `node --test --test-name-pattern='TestDaemonSlots|TestDaemonBadFlags' test/cli.test.js`
 - [ ] **DoD-5** — `SIGTERM` stops every loop, removes every pid file, and
   exits 0 within 1 s. **Proof:** `node --test --test-name-pattern=TestDaemonSignal test/cli.test.js`
 - [ ] **DoD-6** — With a fake `HOME` that holds both plists of task 0071,
   `install.sh --dry-run` prints the removal of
   `com.kgheacock.macropad.inbox.ai.plist` and the write of one plist with no
-  `--plugin`. **Proof:** running the script, with stub `launchctl` and `uname`
+  `--plugin`; `uninstall.sh` removes both plists.
+  **Proof:** `node --test --test-name-pattern='TestInstallRemovesPerPluginServices|TestUninstallRemovesEveryService' test/cli.test.js`
+  (stub `launchctl` and `uname`)
 - [ ] **DoD-7** — On Keith's Mac, after `install.sh`,
   `launchctl print gui/$UID/com.kgheacock.macropad.inbox` shows
   `state = running`, `launchctl print gui/$UID/com.kgheacock.macropad.inbox.ai`

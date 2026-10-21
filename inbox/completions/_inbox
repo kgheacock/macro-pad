@@ -93,10 +93,10 @@ _inbox() {
         channels)
           _arguments "$db" "$plugin" '--json[print JSON]' && ret=0 ;;
         daemon)
-          _arguments "$db" "$plugin" \
+          _arguments "$db" '*--plugin=[show only this plugin (default: every plugin)]:plugin:_inbox_plugins' \
             '--port=[macropadd port on 127.0.0.1]:port:' \
             '--assets-dir=[unused: the daemon sends icon text]:directory:_directories' \
-            '--slot=[put the Inbox key in this slot]:slot:(0 1 2 3 4 5)' \
+            '*--slot=[put a key in this slot: N, or NAME=N per plugin]:slot:(0 1 2 3 4 5)' \
             '--poll=[how often to look for a change]:duration:' && ret=0 ;;
         plugins | channel)
           _arguments "$plugin" && ret=0 ;;

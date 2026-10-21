@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA_VERSION, openStore } from '../src/store.js';
 import { run, runAi, scratch, start } from '../testlib/helpers.js';
+import { TestServer, waitFor } from '../testlib/wsserver.js';
 
 // Every row of the store, of every plugin, oldest first.
 function rows(sc) {
@@ -519,6 +520,75 @@ test('TestInstallDryRunHasNoAssetsDir', (t) => {
   }
 });
 
+// A HOME with the two per-plugin LaunchAgents of task 0071, and stubs that
+// make the scripts think they run on macOS.
+function oldMacInstall(sc) {
+  const agents = path.join(sc.dir, 'Library', 'LaunchAgents');
+  mkdirSync(agents, { recursive: true });
+  for (const label of ['com.kgheacock.macropad.inbox', 'com.kgheacock.macropad.inbox.ai']) {
+    writeFileSync(path.join(agents, `${label}.plist`), '<plist/>\n');
+  }
+  const stubs = path.join(sc.dir, 'stubs');
+  mkdirSync(stubs);
+  writeFileSync(path.join(stubs, 'uname'), '#!/bin/sh\necho Darwin\n', { mode: 0o755 });
+  writeFileSync(path.join(stubs, 'launchctl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  return {
+    agents,
+    env: { ...process.env, HOME: sc.dir, PREFIX: path.join(sc.dir, 'prefix'), PATH: `${stubs}:${process.env.PATH}` },
+  };
+}
+
+test('TestInstallRemovesPerPluginServices', (t) => {
+  const sc = scratch(t);
+  const { agents, env } = oldMacInstall(sc);
+  const script = path.join(import.meta.dirname, '..', 'scripts', 'install.sh');
+  const old = path.join(agents, 'com.kgheacock.macropad.inbox.ai.plist');
+  const one = path.join(agents, 'com.kgheacock.macropad.inbox.plist');
+
+  let r = spawnSync('sh', [script, '--dry-run', '--no-completions'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(`would run: launchctl bootout gui/${process.getuid()}/com.kgheacock.macropad.inbox.ai\n`), r.stdout);
+  assert.ok(r.stdout.includes(`would remove: ${old}`), r.stdout);
+  // One service, which runs every plugin: no --plugin on its command line.
+  assert.ok(r.stdout.includes(`would write: ${one} (runs: inbox daemon --port 8765)\n`), r.stdout);
+  assert.ok(existsSync(old), 'a dry run removed a file');
+
+  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--plugin', 'ai', '--slot', '2'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --plugin ai --slot 2)'), r.stdout);
+  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--slot', 'basic=0', '--slot', 'ai=1'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --slot basic=0 --slot ai=1)'), r.stdout);
+  r = spawnSync('sh', [script, '--dry-run', '--slot', 'ai=9'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'install.sh: --slot ai=9 is out of range; use 0 to 5\n');
+  r = spawnSync('sh', [script, '--dry-run', '--slot', '2'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr, 'install.sh: --slot 2 names no plugin, and the daemon shows more than one; use --slot NAME=N\n');
+  r = spawnSync('sh', [script, '--dry-run', '--plugin', 'nope'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('unknown plugin "nope"'), r.stderr);
+});
+
+test('TestUninstallRemovesEveryService', (t) => {
+  const sc = scratch(t);
+  const { agents, env } = oldMacInstall(sc);
+  const script = path.join(import.meta.dirname, '..', 'scripts', 'uninstall.sh');
+  let r = spawnSync('sh', [script, '--dry-run'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  for (const label of ['com.kgheacock.macropad.inbox', 'com.kgheacock.macropad.inbox.ai']) {
+    assert.ok(r.stdout.includes(`would run: launchctl bootout gui/${process.getuid()}/${label}\n`), r.stdout);
+    assert.ok(r.stdout.includes(`would run: rm -f ${path.join(agents, `${label}.plist`)}\n`), r.stdout);
+  }
+  // --plugin is accepted, and ignored.
+  r = spawnSync('sh', [script, '--dry-run', '--plugin', 'ai'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stderr.includes('--plugin is unused'), r.stderr);
+  r = spawnSync('sh', [script], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(agents), []);
+});
+
 test('TestStalePidFileIsReplaced', async (t) => {
   const sc = scratch(t);
   mkdirSync(path.dirname(sc.db), { recursive: true });
@@ -562,7 +632,8 @@ test('TestDaemonHelp', () => {
 test('TestDaemonBadFlags', () => {
   const sc = scratch();
   const cases = [
-    [['--slot', '7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
+    [['--plugin', 'basic', '--slot', '7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
+    [['--slot', 'ai=7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
     [['--port', 'x'], 'inbox: --port x is out of range; use 1 to 65535\n'],
     [['--poll', '5'], 'inbox: --poll 5 is not a duration; use a number and a unit, such as 500ms or 2s\n'],
   ];
@@ -573,6 +644,125 @@ test('TestDaemonBadFlags', () => {
   }
   const extra = run(['daemon', 'now'], { sc });
   assert.equal(extra.status, 2);
+});
+
+// A test server in place of macropadd, closed after the test.
+async function serve(t) {
+  const server = new TestServer();
+  server.announceLayer(null);
+  await server.listen();
+  t.after(() => server.close());
+  return server;
+}
+
+// The setLayerKey messages the server got for key id, oldest first.
+const keysOf = (server, id) => server.received.filter((m) => m.setLayerKey?.id === id).map((m) => m.setLayerKey);
+
+// Starts a daemon and stops it at the end of the test.
+function daemon(t, sc, args) {
+  const d = start(['daemon', '--poll', '20ms', ...args], { sc });
+  t.after(() => d.child.kill('SIGKILL'));
+  return d;
+}
+
+test('TestOneDaemonEveryPlugin', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const d = daemon(t, sc, ['--port', String(server.port)]);
+  await stderrHas(d.child, 'ai daemon started');
+  // One process, one connection per plugin, and a top key for each.
+  await waitFor(() => keysOf(server, 'inbox').length && keysOf(server, 'ai-inbox').length, 3000, 'both top keys');
+  assert.equal(server.connections, 2);
+
+  // A message of either plugin reaches the pad within 1 s.
+  let sent = Date.now();
+  assert.equal(run(['send', 'one', 'hello'], { sc }).status, 0);
+  await waitFor(() => keysOf(server, 'inbox').some((k) => k.count === 1), 1000, 'the basic count');
+  assert.ok(Date.now() - sent < 1000);
+  sent = Date.now();
+  assert.equal(runAi(['send', '--status', 'waiting', 'two', 'needs you'], { sc }).status, 0);
+  await waitFor(() => keysOf(server, 'ai-inbox').some((k) => k.status === 'WARN'), 1000, 'the ai status');
+  assert.ok(Date.now() - sent < 1000);
+  // Each channel goes under its own plugin's key.
+  assert.equal(keysOf(server, 'one')[0].parent, 'inbox');
+  assert.equal(keysOf(server, 'two')[0].parent, 'ai-inbox');
+
+  d.child.kill('SIGTERM');
+  const { status, stderr } = await d.exited;
+  assert.equal(status, 0);
+  assert.ok(stderr.includes(`inbox: basic daemon started for ${sc.db} (pid ${d.child.pid})\n`), stderr);
+  for (const plugin of ['basic', 'ai']) assert.equal(existsSync(`${sc.db}.${plugin}.daemon.pid`), false, plugin);
+});
+
+test('TestDaemonOnePlugin', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const d = daemon(t, sc, ['--plugin', 'ai', '--port', String(server.port)]);
+  await stderrHas(d.child, 'ai daemon started');
+  await waitFor(() => keysOf(server, 'ai-inbox').length, 3000, 'the ai key');
+  assert.equal(run(['send', 'one', 'hello'], { sc }).status, 0);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(keysOf(server, 'inbox'), []);
+  assert.equal(server.connections, 1);
+  assert.equal(existsSync(`${sc.db}.basic.daemon.pid`), false);
+  d.child.kill('SIGTERM');
+  const { status, stderr } = await d.exited;
+  assert.equal(status, 0);
+  // With one plugin, the lines have no [plugin] prefix, as before task 0075.
+  assert.ok(!stderr.includes('[ai]'), stderr);
+});
+
+test('TestMergedDaemonRefused', async (t) => {
+  const sc = scratch(t);
+  const ai = daemon(t, sc, ['--plugin', 'ai', '--port', '1']);
+  await stderrHas(ai.child, 'daemon started');
+  const merged = run(['daemon', '--port', '1'], { sc });
+  assert.equal(merged.status, 3);
+  assert.equal(merged.stderr, `inbox: a ai daemon already runs for ${sc.db} (pid ${ai.child.pid})\n`);
+  // It took the basic pid file first, and gave it back.
+  assert.equal(existsSync(`${sc.db}.basic.daemon.pid`), false);
+  ai.child.kill('SIGTERM');
+  assert.equal((await ai.exited).status, 0);
+});
+
+test('TestDaemonSlots', async (t) => {
+  const sc = scratch(t);
+  const usage = [
+    [['--slot', '1'], 'inbox: --slot 1 names no plugin, and the daemon runs basic, ai; use --slot NAME=N, such as --slot basic=1\n'],
+    [['--slot', 'basic=1', '--slot', 'ai=1'], 'inbox: --slot 1 is given to both basic and ai; give each its own slot\n'],
+    [['--slot', 'basic=1', '--slot', 'basic=2'], 'inbox: give --slot once for basic\n'],
+    [['--plugin', 'ai', '--slot', 'basic=1'], 'inbox: --slot basic=1: the daemon does not run plugin "basic"; it runs ai\n'],
+    [['--slot', 'nope=1'], 'inbox: --slot nope=1: the daemon does not run plugin "nope"; it runs basic, ai\n'],
+  ];
+  for (const [flags, message] of usage) {
+    const r = run(['daemon', '--port', '1', ...flags], { sc });
+    assert.equal(r.status, 2, flags.join(' '));
+    assert.equal(r.stderr, message);
+  }
+
+  const server = await serve(t);
+  const d = daemon(t, sc, ['--port', String(server.port), '--slot', 'basic=1', '--slot', 'ai=4']);
+  await waitFor(() => keysOf(server, 'inbox').length && keysOf(server, 'ai-inbox').length, 3000, 'both top keys');
+  assert.equal(keysOf(server, 'inbox')[0].slot, 1);
+  assert.equal(keysOf(server, 'ai-inbox')[0].slot, 4);
+  d.child.kill('SIGTERM');
+  assert.equal((await d.exited).status, 0);
+
+  // With one plugin, a bare --slot N still works.
+  const one = daemon(t, sc, ['--plugin', 'ai', '--port', String(server.port), '--slot', '2']);
+  await waitFor(() => keysOf(server, 'ai-inbox').some((k) => k.slot === 2), 3000, 'the ai key in slot 2');
+  one.child.kill('SIGTERM');
+  assert.equal((await one.exited).status, 0);
+});
+
+test('TestPluginListOnlyForDaemon', () => {
+  const sc = scratch();
+  const r = run(['--plugin', 'basic,ai', 'list'], { sc });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('give --plugin once; got basic and ai'), r.stderr);
+  const bad = run(['daemon', '--plugin', 'basic,nope'], { sc });
+  assert.equal(bad.status, 2);
+  assert.equal(bad.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai\n');
 });
 
 const SESSION = '0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';

@@ -118,11 +118,16 @@ export function startDaemon({
   const topId = renderer.topId;
   const url = `ws://127.0.0.1:${port}/`;
 
+  // The rows to show: the channels with an unseen message, or, for a plugin
+  // with activeMs, the channels with a message in that time.
+  const { activeMs } = plugin.rules;
+  const readRows = () => (activeMs ? db.recent(Date.now() - activeMs) : db.unseen());
+
   let version;
   let unseen;
   try {
     version = db.dataVersion();
-    unseen = db.unseen();
+    unseen = readRows();
   } catch (e) {
     if (!store) db.close();
     throw e;
@@ -205,7 +210,7 @@ export function startDaemon({
     // Show it now rather than at the next poll.
     try {
       version = db.dataVersion();
-      unseen = db.unseen();
+      unseen = readRows();
       lastRead = Date.now();
       readFailed = false;
       push();
@@ -289,7 +294,7 @@ export function startDaemon({
       const v = db.dataVersion();
       if (v === version && Date.now() - lastRead < guardMs) return;
       version = v;
-      unseen = db.unseen();
+      unseen = readRows();
       lastRead = Date.now();
       readFailed = false;
       push();

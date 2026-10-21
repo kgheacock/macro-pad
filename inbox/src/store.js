@@ -136,6 +136,7 @@ export function openStore(file, env = process.env, { plugin = DEFAULT_PLUGIN } =
 // "done,waiting,done" -> { done: 2, waiting: 1 }. A status holds no comma.
 function countStatuses(list) {
   const counts = {};
+  if (list === null) return counts;
   for (const status of list.split(',')) counts[status] = (counts[status] ?? 0) + 1;
   return counts;
 }
@@ -255,6 +256,33 @@ export class Store {
             ORDER BY m.channel`,
         )
         .all(this.#plugin, ...(channel === null ? [] : [channel]));
+      return rows.map(({ statuses, ...row }) => ({ ...row, byStatus: countStatuses(statuses) }));
+    });
+  }
+
+  // Per channel with a message (seen or not) created at or after `since`
+  // (ms): the same fields as unseen(), except that newestId, createdAt, and
+  // here are those of the newest message of any kind, and count and byStatus
+  // are the unseen ones, so a channel with all messages seen has count 0 and
+  // byStatus {}. Ordered by channel.
+  recent(since) {
+    return this.#guard(() => {
+      const rows = this.#db
+        .prepare(
+          `SELECT m.channel AS channel, m.id AS newestId, m.created_at AS createdAt,
+                  COALESCE(m.here, h.here) AS here,
+                  (SELECT COUNT(*) FROM messages u
+                    WHERE u.plugin = m.plugin AND u.channel = m.channel AND u.seen_at IS NULL) AS count,
+                  (SELECT GROUP_CONCAT(u.status) FROM messages u
+                    WHERE u.plugin = m.plugin AND u.channel = m.channel AND u.seen_at IS NULL) AS statuses
+             FROM messages m
+             JOIN (SELECT channel, MAX(id) AS newest
+                     FROM messages WHERE plugin = ? AND created_at >= ? GROUP BY channel) n
+               ON m.id = n.newest
+             LEFT JOIN channel_here h ON h.plugin = m.plugin AND h.channel = m.channel
+            ORDER BY m.channel`,
+        )
+        .all(this.#plugin, since);
       return rows.map(({ statuses, ...row }) => ({ ...row, byStatus: countStatuses(statuses) }));
     });
   }

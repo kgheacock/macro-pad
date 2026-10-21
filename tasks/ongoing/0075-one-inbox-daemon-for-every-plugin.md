@@ -7,7 +7,7 @@ updated: "2026-10-21"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/97"
 branch: "claude/project-thread-w1w7ar"
 related: ["0065", "0066", "0070", "0071"]
 tags: ["inbox", "daemon", "install"]

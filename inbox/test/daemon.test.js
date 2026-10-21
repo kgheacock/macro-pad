@@ -271,6 +271,30 @@ test('TestAiDaemonReadsOwnLayer', async (t) => {
   await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'ai-inbox')?.setLayerKey.status === '', 1000, 'the top key cleared');
 });
 
+test('TestAiDaemonShowsRecentSeenChannels', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db, undefined, { plugin: 'ai' });
+  t.after(() => writer.close());
+  const now = Date.now();
+  writer.insert('old', 'stale', sc.root, { status: 'waiting', now: now - ai.rules.activeMs - 60_000 });
+  writer.insert('seen', 'finished', sc.root, { now: now - 1000 });
+  writer.insert('fresh', 'working', sc.root, { status: 'running', now });
+  writer.markSeen('seen', Number.MAX_SAFE_INTEGER);
+  launch(t, sc, server, { pollMs: 10_000, plugin: ai });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'fresh'), 3000, 'the children');
+  const children = server.received.filter((m) => m.setLayerKey?.parent).map((m) => m.setLayerKey.id);
+  // Newest first; the channel with all seen shows, the one past the hour does not.
+  assert.deepEqual(children, ['fresh', 'seen']);
+  assert.equal(server.received.find((m) => m.setLayerKey?.id === 'seen').setLayerKey.status, '');
+  // Pressing a seen channel is harmless.
+  server.layerChanged('ai-inbox');
+  press(server, 1);
+  await pause(150);
+  // The stale channel is hidden, not marked.
+  assert.deepEqual(counts(writer), { fresh: 1, old: 1 });
+});
+
 test('TestOpenPressMarksNothing', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);

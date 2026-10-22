@@ -11,6 +11,8 @@
 //   defaultStatus  the status of a message sent without --status
 //   about          a paragraph added to the help, or null
 //   rules          what its key and the children show (see render.js)
+//   feed           optional; what the daemon runs to write the plugin's own
+//                  messages (see daemon.js)
 //
 // To add one, write plugins/NAME.js and list it here.
 
@@ -18,9 +20,10 @@ import { UsageError } from '../errors.js';
 import { DEFAULT_PLUGIN } from '../store.js';
 import ai from './ai.js';
 import basic from './basic.js';
+import github from './github.js';
 
 export { DEFAULT_PLUGIN };
-export const PLUGINS = { basic, ai };
+export const PLUGINS = { basic, ai, github };
 
 export function getPlugin(name = DEFAULT_PLUGIN) {
   if (Object.hasOwn(PLUGINS, name)) return PLUGINS[name];

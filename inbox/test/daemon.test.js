@@ -5,6 +5,7 @@ import test from 'node:test';
 import { acquirePidFile, pidPath, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
 import ai from '../src/plugins/ai.js';
+import github from '../src/plugins/github.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
 import { emojiFor } from '../src/emoji.js';
@@ -439,4 +440,60 @@ test('TestPidFilePerPlugin', (t) => {
   );
   basic();
   second();
+});
+
+// The github plugin with a feed that answers from `answers`, one per run; an
+// Error is thrown as a failed read.
+function fedGithub(answers) {
+  let runs = 0;
+  const plugin = {
+    ...github,
+    feed: {
+      ...github.feed,
+      fetch: async () => {
+        const next = answers[Math.min(runs, answers.length - 1)];
+        runs++;
+        if (next instanceof Error) throw next;
+        return next;
+      },
+    },
+  };
+  return { plugin, runs: () => runs };
+}
+
+const onePr = (state) => ({
+  total: 1,
+  pulls: [{ channel: 'kgheacock.macro-pad.97', title: 'x', url: 'https://github.com/kgheacock/macro-pad/pull/97', status: state }],
+});
+
+test('TestDaemonFeed', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const calls = [];
+  const { plugin } = fedGithub([onePr('failing')]);
+  // A slow poll and a slow feed: only the first run, at start, can draw it.
+  const started = Date.now();
+  launch(t, sc, server, { plugin, pollMs: 10_000, feedMs: 10_000, focus: async (here) => calls.push(here) });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'kgheacock.macro-pad.97'), 1000, 'the PR');
+  assert.ok(Date.now() - started < 1000);
+  const top = server.received.findLast((m) => m.setLayerKey?.id === 'github-inbox').setLayerKey;
+  assert.deepEqual([top.status, top.count], ['ERROR', 1]);
+
+  server.layerChanged('github-inbox');
+  press(server, 0);
+  await waitFor(() => calls.length === 1, 1000, 'the focus');
+  assert.equal(calls[0], 'url:https://github.com/kgheacock/macro-pad/pull/97');
+});
+
+test('TestDaemonFeedFails', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const down = new Error('no gh; install the GitHub CLI or set INBOX_GH');
+  const fed = fedGithub([down, down, down, onePr('passing')]);
+  const { logs } = launch(t, sc, server, { plugin: fed.plugin, feedMs: 20 });
+  await waitFor(() => fed.runs() >= 4, 2000, 'four runs');
+  await waitFor(() => logs.includes('GitHub read again'), 1000, 'the recovery');
+  const failures = logs.filter((line) => line.startsWith('cannot read GitHub'));
+  assert.deepEqual(failures, ['cannot read GitHub: no gh; install the GitHub CLI or set INBOX_GH']);
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'kgheacock.macro-pad.97'), 1000, 'the PR');
 });

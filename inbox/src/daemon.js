@@ -98,6 +98,12 @@ export function acquirePidFile(
 //           passes a stub
 // onEvent   (event, { active }) for each event from macropadd, after the daemon
 //           has acted on it
+// feedMs    how often a plugin with a feed runs it; default its everyMs
+//
+// A plugin may have a feed, which writes the plugin's own messages (task
+// 0076): { source, everyMs, fetch({ env }) -> Promise<answer>,
+// sync(store, answer) -> how many messages it wrote }. The daemon runs it at
+// start and every everyMs, one run at a time, and draws what it wrote.
 export function startDaemon({
   file,
   env = process.env,
@@ -111,6 +117,7 @@ export function startDaemon({
   store,
   focus = focusHere,
   onEvent = () => {},
+  feedMs,
   WebSocketImpl = globalThis.WebSocket,
 }) {
   const db = store ?? openStore(file, env, { plugin: plugin.name });
@@ -180,6 +187,44 @@ export function startDaemon({
     push();
   };
 
+  // Reads the store and draws now. A write on this daemon's own connection
+  // does not change data_version, so poll() would not see it.
+  const reread = () => {
+    try {
+      version = db.dataVersion();
+      unseen = readRows();
+      lastRead = Date.now();
+      readFailed = false;
+      push();
+    } catch (e) {
+      log(e.message);
+    }
+  };
+
+  // Runs the plugin's feed. A failure is logged once until a run succeeds.
+  const { feed } = plugin;
+  let feeding = false;
+  let feedFailure = null;
+  const runFeed = async () => {
+    if (stopped || feeding) return;
+    feeding = true;
+    try {
+      const answer = await feed.fetch({ env });
+      if (stopped) return;
+      const wrote = feed.sync(db, answer);
+      if (feedFailure !== null) log(`${feed.source} read again`);
+      feedFailure = null;
+      if (wrote > 0) reread();
+    } catch (e) {
+      if (stopped) return;
+      const text = `cannot read ${feed.source}: ${e.message}`;
+      if (text !== feedFailure) log(text);
+      feedFailure = text;
+    } finally {
+      feeding = false;
+    }
+  };
+
   // Goes to the "here" of a pressed key. A failure is logged and changes
   // nothing else; the mark has already happened.
   const goHere = async (child) => {
@@ -208,15 +253,7 @@ export function startDaemon({
       return;
     }
     // Show it now rather than at the next poll.
-    try {
-      version = db.dataVersion();
-      unseen = readRows();
-      lastRead = Date.now();
-      readFailed = false;
-      push();
-    } catch (e) {
-      log(e.message);
-    }
+    reread();
     if (child.here) goHere(child);
   };
 
@@ -304,14 +341,17 @@ export function startDaemon({
     }
   };
   const pollTimer = setInterval(poll, pollMs);
+  const feedTimer = feed ? setInterval(runFeed, feedMs ?? feed.everyMs) : null;
 
   connect();
+  if (feed) runFeed();
 
   return {
     stop() {
       if (stopped) return Promise.resolve();
       stopped = true;
       clearInterval(pollTimer);
+      clearInterval(feedTimer);
       clearTimeout(layerTimer);
       clearTimeout(reconnectTimer);
       const sock = socket;

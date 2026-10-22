@@ -17,9 +17,9 @@ export const MAX_CHILDREN = 5;
 
 // macropadd takes a caption of at most 16 runes over emoji, and cuts what is
 // still too wide.
-const MAX_CAPTION = 16;
+export const MAX_CAPTION = 16;
 
-function clip(segment, limit) {
+export function clip(segment, limit) {
   const runes = [...segment];
   return runes.length <= limit ? segment : `${runes.slice(0, limit - 1).join('')}…`;
 }
@@ -45,12 +45,22 @@ export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } 
 //                    undefined for a channel that has no unseen message now
 //   before(a, b)     orders two rows; the first five show
 //   sessions         true when a channel may be PROJECT.SID (see channelIcon)
+//   shows(row)       optional; a row it returns false for is left out of the
+//                    top key and the children
+//   icon(channel, set) optional; { iconText, iconEmoji } instead of channelIcon
 // `emojiSet` is the emoji set, for a test; by default assets/emoji/set.txt.
 export function createRenderer({ slot, rules, emojiSet }) {
   // The icon of each channel, worked out once.
   const icons = new Map();
   const iconOf = (channel) => {
-    if (!icons.has(channel)) icons.set(channel, channelIcon(channel, { sessions: rules.sessions === true, set: emojiSet }));
+    if (!icons.has(channel)) {
+      icons.set(
+        channel,
+        rules.icon
+          ? rules.icon(channel, emojiSet)
+          : channelIcon(channel, { sessions: rules.sessions === true, set: emojiSet }),
+      );
+    }
     return icons.get(channel);
   };
   // The last values sent per node, as JSON, so only a change is sent again.
@@ -109,7 +119,8 @@ export function createRenderer({ slot, rules, emojiSet }) {
       return { channel, shownId: shownIds.get(channel) ?? 0, here: shownHere.get(channel) ?? null };
     },
 
-    plan({ unseen, active }) {
+    plan({ unseen: all, active }) {
+      const unseen = rules.shows ? all.filter(rules.shows) : all;
       const out = [];
       const key = { id: rules.id, ...rules.top(unseen) };
       if (slot !== undefined) key.slot = slot;

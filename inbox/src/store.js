@@ -264,13 +264,14 @@ export class Store {
   // (ms): the same fields as unseen(), except that newestId, createdAt, and
   // here are those of the newest message of any kind, and count and byStatus
   // are the unseen ones, so a channel with all messages seen has count 0 and
-  // byStatus {}. Ordered by channel.
+  // byStatus {}. status is the status of that newest message. Ordered by
+  // channel.
   recent(since) {
     return this.#guard(() => {
       const rows = this.#db
         .prepare(
           `SELECT m.channel AS channel, m.id AS newestId, m.created_at AS createdAt,
-                  COALESCE(m.here, h.here) AS here,
+                  m.status AS status, COALESCE(m.here, h.here) AS here,
                   (SELECT COUNT(*) FROM messages u
                     WHERE u.plugin = m.plugin AND u.channel = m.channel AND u.seen_at IS NULL) AS count,
                   (SELECT GROUP_CONCAT(u.status) FROM messages u

@@ -25,7 +25,8 @@ the per-plugin services that older versions made.
 
 It writes:
   \$PREFIX/bin/inbox   a wrapper that runs this checkout with the node found
-                      now (PREFIX defaults to \$HOME/.local)
+                      now (PREFIX defaults to \$HOME/.local), and sets
+                      INBOX_GH to the gh found now, for the github plugin
   _inbox              a link to inbox/completions/_inbox in the completions
                       directory of oh-my-zsh ($ZSH_CACHE_DIR/completions),
                       when oh-my-zsh is installed. Open a new shell to use it.
@@ -135,6 +136,14 @@ NODE_VERSION=$("$NODE" -p 'process.versions.node') || fail "cannot run $NODE --v
 NODE_OK=$("$NODE" -p 'const [a, b] = process.versions.node.split(".").map(Number); a > 22 || (a === 22 && b >= 13)')
 [ "$NODE_OK" = true ] || fail "node $NODE_VERSION is too old; install Node 22.13 or newer"
 
+# gh, by absolute path, for the github plugin's feed (task 0076). Without it
+# the github key stays empty and the log says why.
+GH=$(command -v gh 2>/dev/null) || GH=
+case $GH in
+  /*) plain "gh" "$GH" ;;
+  *) GH= ;;
+esac
+
 # Each plugin must be one this checkout has.
 PLUGINS=$("$NODE" "$INBOX_DIR/bin/inbox.js" plugins | awk '{print $1}') || fail "cannot run inbox plugins"
 for plugin in $PLUGINS_GIVEN; do
@@ -174,12 +183,13 @@ for slot in $SLOTS; do DAEMON_ARGS="$DAEMON_ARGS --slot $slot"; done
 
 write_wrapper() {
   if [ "$DRY" = 1 ]; then
-    printf 'would write: %s (runs %s)\n' "$WRAPPER" "$NODE"
+    printf 'would write: %s (runs %s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}"
     return
   fi
   mkdir -p "$PREFIX/bin" || fail "step failed: mkdir -p $PREFIX/bin"
   {
     printf '#!/bin/sh\n'
+    [ -z "$GH" ] || printf "INBOX_GH=\${INBOX_GH:-'%s'}\nexport INBOX_GH\n" "$GH"
     printf "exec '%s' '%s/bin/%s.js' \"\$@\"\\n" "$NODE" "$INBOX_DIR" "$CMD"
   } >"$WRAPPER.new" || fail "step failed: write $WRAPPER.new"
   chmod 755 "$WRAPPER.new" || fail "step failed: chmod 755 $WRAPPER.new"
@@ -355,6 +365,7 @@ printf 'service:  %s\n' "$SERVICE_FILE"
 printf 'log:      %s\n' "$LOG"
 printf 'plugins:  %s\n' "$SHOWN"
 printf 'store:    %s\n' "$DB"
+printf 'gh:       %s\n' "${GH:-not found; the github plugin shows no PRs}"
 printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"
 case ":$PATH:" in

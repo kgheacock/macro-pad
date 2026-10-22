@@ -22,6 +22,8 @@ export function envFor({ db, root }, extra = {}) {
     HOME: process.env.HOME,
     INBOX_DB: db,
     INBOX_SOURCE_ROOT: root,
+    // No test asks GitHub: the github plugin's feed finds no gh (task 0076).
+    INBOX_GH: '/nonexistent/gh',
     ...extra,
   };
 }

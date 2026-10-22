@@ -7,7 +7,7 @@ updated: "2026-10-22"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/98"
 branch: "claude/project-thread-f9iu7g"
 related: ["0053", "0055", "0057", "0064", "0071", "0075"]
 tags: ["driver", "plugin", "selection", "inbox", "claude"]

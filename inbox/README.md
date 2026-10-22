@@ -249,8 +249,10 @@ error adds `run 'inbox COMMAND -h' for help`.
 
 ## Daemon
 
-`inbox daemon` watches the store and shows the unseen messages of one plugin
-on the macro pad. This section describes the `basic` plugin; "Plugins" says
+`inbox daemon` watches the store and shows the unseen messages of every
+plugin on the macro pad, each on its own key, in one process (task 0075).
+`--plugin NAME`, once or more, shows only those plugins. This section
+describes the `basic` plugin; "Plugins" says
 what the `ai` plugin shows instead. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
 and `event` from it. It draws one `inbox` key with the total unseen count,
@@ -258,15 +260,15 @@ and one child key per channel with unseen messages. A press on a child key
 marks that channel's messages seen, then goes to its "here" (see "Here").
 
 ```
-inbox daemon [--plugin NAME] [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+inbox daemon [--plugin NAME]... [--db PATH] [--port 8765] [--slot [NAME=]N]... [--poll 500ms]
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--plugin NAME` | The plugin to show. Default `basic`. |
+| `--plugin NAME` | Show this plugin. Give it once per plugin, or as `--plugin basic,ai`. Default: every plugin `inbox plugins` lists. |
 | `--port N` | `macropadd`'s port on 127.0.0.1. Default 8765. |
 | `--assets-dir DIR` | Unused. The daemon sends icon text, not picture files, so it needs no assets directory. The flag is still accepted, with one line on standard error, so a service that passes it starts. |
-| `--slot N` | Put the Inbox key in slot N, 0 to 5. Default: the first free slot. |
+| `--slot NAME=N` | Put the key of plugin `NAME` in slot N, 0 to 5, once per plugin. With one plugin, `--slot N` is enough; with more, a bare `--slot N` exits 2, and so do two plugins on one slot. Default: the first free slot. |
 | `--poll DURATION` | How often to look for a change, such as `500ms` or `2s`. Default `500ms`. |
 | `--db PATH` | The store, as for every command. |
 
@@ -321,15 +323,21 @@ How it behaves:
   the full state, then only changes.
 - While `macropadd` is down it keeps reading the store, and sends only the
   newest state on reconnect.
-- One daemon runs per store and plugin. It makes `<db>.<plugin>.daemon.pid`.
-  A second daemon of the same plugin exits with code 3 and `inbox: a basic
-  daemon already runs for <db> (pid N)`. A pid file whose process is gone is
-  replaced. The daemons of two plugins run side by side on one `macropadd`;
-  each draws its own key and reads a press only in the layer of its own key.
-- `SIGINT` and `SIGTERM` close the WebSocket and exit 0. The keys stay on the
+- Each plugin runs its own loop in the process: its own store handle, its
+  own WebSocket to `macropadd`, and its own poll. Each draws its own key and
+  reads a press only in the layer of its own key, and a failed read or a lost
+  link in one loop does not stop the other.
+- One daemon runs per store and plugin. The process makes
+  `<db>.<plugin>.daemon.pid` for each plugin it shows, all before it draws a
+  key. If another daemon shows one of them, it exits with code 3 and `inbox: a
+  basic daemon already runs for <db> (pid N)`, and draws nothing. A pid file
+  whose process is gone is replaced.
+- `SIGINT` and `SIGTERM` close every WebSocket and exit 0. The keys stay on the
   pad: `macropadd` keeps them in `layers.json`, and the next daemon start
   corrects them.
-- Log lines go to standard error, each starting with `inbox:`.
+- Log lines go to standard error, each starting with `inbox:`. It logs one
+  `NAME daemon started` line per plugin. With more than one plugin, the lines of
+  one plugin's loop start with `inbox: [NAME]`.
 
 Start `macropadd` first, for example from the repo root. Use a `macropadd`
 and firmware from this checkout: an older `macropadd` ignores `iconEmoji` (and
@@ -343,14 +351,15 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--plugin NAME] [--port N] [--slot N] [--no-completions] [--dry-run]
-inbox/scripts/uninstall.sh [--plugin NAME] [--purge] [--dry-run]
+inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--no-completions] [--dry-run]
+inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
 
-`--plugin NAME` installs or removes the daemon of that plugin (default
-`basic`). Run `install.sh` once per plugin you want on the pad. The plugins
-share the `inbox` command, the completion, and the store; each has its own
-service. `install.sh` checks the name with `inbox plugins`.
+`install.sh` installs one service that runs `inbox daemon`, so one process
+shows every plugin. `--plugin NAME`, once or more, limits it to those plugins;
+`install.sh` checks each name with `inbox plugins`. Without `--plugin`, a
+plugin added later shows once the service restarts. `--slot` takes the same
+values as the daemon's.
 
 `install.sh` needs Node 22.13 or newer. It records the absolute path of the
 `node` it finds, because launchd and systemd do not see your shell's `PATH`
@@ -359,26 +368,30 @@ service. `install.sh` checks the name with `inbox plugins`.
 1. writes `$PREFIX/bin/inbox` (`PREFIX` defaults to `~/.local`), a wrapper that
    runs `inbox/bin/inbox.js` of this checkout with that `node`;
 2. links the zsh completion, if oh-my-zsh is installed (see "Completions");
-3. writes the service and starts it;
-4. prints where the command, the service file, the log, and the store are,
-   whether the daemon runs, and where the completion link is.
+3. stops and removes the per-plugin services an older `install.sh` made
+   (`com.kgheacock.macropad.inbox.NAME.plist`, `inbox-daemon-NAME.service`),
+   and names each one; their logs stay;
+4. writes the service and starts it;
+5. prints where the command, the service file, the log, and the store are,
+   the plugins it shows, whether the daemon runs, and where the completion
+   link is.
 
 | | macOS | Linux |
 |---|---|---|
 | Service file | `~/Library/LaunchAgents/com.kgheacock.macropad.inbox.plist` | `~/.config/systemd/user/inbox-daemon.service` |
 | Log | `~/Library/Logs/inbox-daemon.log` | `journalctl --user -u inbox-daemon` |
-| Another plugin | `com.kgheacock.macropad.inbox.NAME.plist`, log `inbox-daemon-NAME.log` | `inbox-daemon-NAME.service` |
 | Restart | `KeepAlive`, 5 s throttle | `Restart=always`, `RestartSec=5` |
 
 Run `install.sh` again to upgrade: it rewrites the files and restarts the
 daemon. Keep the checkout where it is; run the script again after you move it
 or change the Node version. `install.sh` does not start `macropadd`.
 
-`uninstall.sh` stops the daemon of the plugin and removes its service. It
-removes the wrapper and the completion link only when no other plugin's
-service is left, and keeps the store. `--purge` also removes the store, its
-`-wal` and `-shm` files, and the pid files; the store holds every plugin, so
-`--purge` is refused while another plugin's service is installed. With nothing installed it says so and exits 0. Both
+`uninstall.sh` stops the daemon and removes its service, any per-plugin
+service an older `install.sh` left, the wrapper, and the completion link. It
+keeps the store. `--purge` also removes the store, its `-wal` and `-shm` files,
+and the pid files. `--plugin NAME` is no longer needed; it is accepted with one
+line on standard error and ignored. With nothing installed it says so and
+exits 0. Both
 scripts take `--dry-run` (print each step, change nothing) and `-h`.
 
 ### Completions
@@ -461,15 +474,13 @@ seen. Which channels show does not depend on what is seen. A message with a stor
 An old `waiting` message keeps the key yellow until it is seen, also after the
 agent went on. Press the channel, or run `inbox --plugin ai seen CHANNEL`.
 
-Run its daemon beside the `basic` one:
+`inbox daemon` and `install.sh` show it beside `basic`, in one process. Give
+the two keys fixed places with `--slot basic=N --slot ai=M`; otherwise each
+takes the first free slot. To show only the ai inbox:
 
 ```
-inbox --plugin ai daemon [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
-inbox/scripts/install.sh --plugin ai
+inbox daemon --plugin ai [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
 ```
-
-Give the two keys different slots with `--slot` if you want them in fixed
-places; otherwise each takes the first free slot.
 
 ### Emoji
 

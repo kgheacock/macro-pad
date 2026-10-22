@@ -233,28 +233,34 @@ writes only the messages of its plugin.
 Example:
   inbox --plugin ai channels`,
 
-  daemon: `Usage: inbox daemon [--port N] [--slot N] [--poll DURATION]
+  daemon: `Usage: inbox daemon [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--poll DURATION]
 
 Run until stopped. Watch the store, and send the unseen counts to macropadd
 over its WebSocket. It starts with or without macropadd, and sends the full
 state again each time it connects. Log lines go to standard error.
 
+One process shows every plugin, each on its own key. --plugin NAME, once or
+more (or --plugin A,B), shows only those plugins.
+
+  --plugin NAME     show this plugin (default: every plugin; see 'inbox plugins')
   --port N          macropadd's port on 127.0.0.1 (default: ${DEFAULT_PORT})
   --assets-dir DIR  unused: the daemon sends icon text, not picture files. It is
                     still accepted, so a service that passes it starts.
-  --slot N          put the Inbox key in slot N, 0 to 5 (default: the first free slot)
+  --slot NAME=N     put the key of plugin NAME in slot N, 0 to 5; once per plugin
+                    (default: the first free slot). With one plugin, --slot N.
   --poll DURATION   how often to look for a change, such as 500ms or 2s
                     (default: ${DEFAULT_POLL_MS}ms)
 ${DB_OPTION}
 
-Only one daemon runs per store and plugin. A second one exits with code 3.
-Each plugin's daemon draws its own key, so the daemons of two plugins run side
-by side.
+Only one daemon runs per store and plugin. A daemon that would show a plugin
+another daemon already shows exits with code 3, and shows nothing.
 SIGINT and SIGTERM stop it with exit code 0. The keys stay on the pad.
-To run it at login, use inbox/scripts/install.sh [--plugin NAME].
+To run it at login, use inbox/scripts/install.sh.
 
-Example:
-  inbox daemon --port 8765`,
+Examples:
+  inbox daemon
+  inbox daemon --slot basic=0 --slot ai=1
+  inbox daemon --plugin ai --slot 2`,
 };
 
 // One line per plugin: its name, its summary, and the default marked.
@@ -304,7 +310,7 @@ const OPTIONS = {
   daemon: {
     port: { type: 'string' },
     'assets-dir': { type: 'string' },
-    slot: { type: 'string' },
+    slot: { type: 'string', multiple: true },
     poll: { type: 'string' },
   },
 };
@@ -765,21 +771,63 @@ function parsePoll(text) {
   return ms;
 }
 
+// --slot N (one plugin) or --slot NAME=N (once per plugin) -> { name: slot }.
+function parseSlots(texts = [], plugins) {
+  const names = plugins.map((p) => p.name);
+  const slots = {};
+  const owner = new Map();
+  for (const text of texts) {
+    const eq = text.indexOf('=');
+    let name;
+    let value = text;
+    if (eq === -1) {
+      if (plugins.length > 1) {
+        throw new UsageError(
+          `--slot ${text} names no plugin, and the daemon runs ${names.join(', ')}; use --slot NAME=N, such as --slot ${names[0]}=${text}`,
+          { help: false },
+        );
+      }
+      name = names[0];
+    } else {
+      name = text.slice(0, eq);
+      value = text.slice(eq + 1);
+      if (!names.includes(name)) {
+        throw new UsageError(`--slot ${text}: the daemon does not run plugin "${name}"; it runs ${names.join(', ')}`, {
+          help: false,
+        });
+      }
+    }
+    const slot = parseWhole('--slot', value, 0, 5, 'use 0 to 5');
+    if (Object.hasOwn(slots, name)) throw new UsageError(`give --slot once for ${name}`, { help: false });
+    if (owner.has(slot)) {
+      throw new UsageError(`--slot ${slot} is given to both ${owner.get(slot)} and ${name}; give each its own slot`, {
+        help: false,
+      });
+    }
+    slots[name] = slot;
+    owner.set(slot, name);
+  }
+  return slots;
+}
+
 function daemonSettings(io, values) {
   return {
     file: storeFile(io, values),
-    plugin: io.plugin,
     port:
       values.port === undefined ? DEFAULT_PORT : parseWhole('--port', values.port, 1, 65535, 'use 1 to 65535'),
-    slot: values.slot === undefined ? undefined : parseWhole('--slot', values.slot, 0, 5, 'use 0 to 5'),
+    slots: parseSlots(values.slot, io.plugins),
     pollMs: values.poll === undefined ? DEFAULT_POLL_MS : parsePoll(values.poll),
   };
 }
 
+// One process shows every plugin in io.plugins: one loop per plugin, each with
+// its own store handle, socket, and pid file (task 0075).
 async function runDaemon(io, { values, positionals }) {
   if (positionals.length) throw new UsageError('daemon takes no arguments');
-  const settings = daemonSettings(io, values);
+  const { slots, ...settings } = daemonSettings(io, values);
   const log = (text) => io.stderr.write(`inbox: ${text}\n`);
+  // With more than one plugin, a loop's lines say which plugin they are from.
+  const logOf = (plugin) => (io.plugins.length > 1 ? (text) => log(`[${plugin.name}] ${text}`) : log);
   if (values['assets-dir'] !== undefined) {
     log('--assets-dir is unused: the daemon sends icon text, not picture files');
   }
@@ -795,21 +843,33 @@ async function runDaemon(io, { values, positionals }) {
     io.process.off('SIGINT', onSignal);
     io.process.off('SIGTERM', onSignal);
   };
-  let release = () => {};
-  let daemon;
+  // Take every pid file before any loop starts, so a daemon that already runs
+  // one of the plugins stops this one before it draws a key.
+  const releases = [];
+  const daemons = [];
+  const releaseAll = () => {
+    for (const release of releases) release();
+  };
   try {
-    release = acquirePidFile(settings.file, { plugin: io.plugin.name, log });
-    daemon = startDaemon({ ...settings, env: io.env, log });
+    for (const plugin of io.plugins) {
+      releases.push(acquirePidFile(settings.file, { plugin: plugin.name, log }));
+    }
+    for (const plugin of io.plugins) {
+      daemons.push(startDaemon({ ...settings, slot: slots[plugin.name], plugin, env: io.env, log: logOf(plugin) }));
+    }
   } catch (e) {
     forget();
-    release();
+    await Promise.all(daemons.map((d) => d.stop()));
+    releaseAll();
     throw e;
   }
-  log(`${io.plugin.name} daemon started for ${settings.file} (pid ${process.pid})`);
+  for (const plugin of io.plugins) {
+    log(`${plugin.name} daemon started for ${settings.file} (pid ${process.pid})`);
+  }
   await signalled;
   forget();
-  await daemon.stop();
-  release();
+  await Promise.all(daemons.map((d) => d.stop()));
+  releaseAll();
   log('daemon stopped');
   return 0;
 }
@@ -915,11 +975,12 @@ function report(e, io) {
   return 1;
 }
 
-// Takes --plugin NAME (or --plugin=NAME) out of the arguments, wherever it is
-// before "--". Returns the plugin and the other arguments.
-function takePlugin(argv) {
+// Takes --plugin NAME (or --plugin=NAME, or --plugin A,B) out of the
+// arguments, wherever it is before "--". Returns the plugin names in order,
+// without repeats, and the other arguments.
+function takePlugins(argv) {
   const rest = [];
-  let name;
+  const names = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') {
@@ -941,12 +1002,22 @@ function takePlugin(argv) {
       rest.push(arg);
       continue;
     }
-    if (name !== undefined && name !== value) {
-      throw new UsageError(`give --plugin once; got ${name} and ${value}`, { help: false });
+    for (const name of value.split(',')) {
+      if (!names.includes(name)) names.push(name);
     }
-    name = value;
   }
-  return { plugin: getPlugin(name ?? DEFAULT_PLUGIN), argv: rest };
+  return { names, argv: rest };
+}
+
+// The daemon runs every plugin it is given, and every plugin when given none.
+// Every other command runs one plugin, the default when given none.
+function choosePlugins({ names, argv }) {
+  const plugins = names.map((name) => getPlugin(name));
+  if (argv[0] === 'daemon') return plugins.length ? plugins : Object.values(PLUGINS);
+  if (plugins.length > 1) {
+    throw new UsageError(`give --plugin once; got ${names[0]} and ${names[1]}`, { help: false });
+  }
+  return plugins.length ? plugins : [getPlugin(DEFAULT_PLUGIN)];
 }
 
 // The runners read the plugin from `io`; Object.create keeps the getters of
@@ -954,8 +1025,9 @@ function takePlugin(argv) {
 export async function main(argv, io) {
   const ctx = Object.create(io);
   try {
-    const taken = takePlugin(argv);
-    ctx.plugin = taken.plugin;
+    const taken = takePlugins(argv);
+    ctx.plugins = choosePlugins(taken);
+    ctx.plugin = ctx.plugins[0];
     return await dispatch(taken.argv, ctx);
   } catch (e) {
     return report(e, ctx);

@@ -5,8 +5,8 @@ Scripts, builds, and agents send; a person (or the daemon, see "Daemon")
 reads. No process must run for a message to be saved.
 
 A plugin decides what the messages mean and how they show on the pad. The
-default, `basic`, counts unseen messages; `ai` shows the state of AI agents.
-Pick one with `--plugin NAME` on any command (see "Plugins").
+default, `basic`, counts unseen messages; `ai` shows the state of AI agents;
+`github` shows your open pull requests, coloured by their checks. Pick one with `--plugin NAME` on any command (see "Plugins").
 
 It is a Node package with no npm dependencies. It uses Node's built-in
 `node:sqlite`, so it needs **Node 22.13 or newer**. No `npm install` is
@@ -235,6 +235,8 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `XDG_DATA_HOME` | Data directory base. | `~/.local/share` |
 | `INBOX_BUSY_TIMEOUT_MS` | Busy timeout. Tests lower it. | `5000` |
 | `INBOX_DEBUG` | `1` adds a stack to an internal error. | unset |
+| `INBOX_GH` | The `gh` program the `github` plugin runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
+| `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. | `is:pr is:open author:@me archived:false` |
 
 ## Exit codes
 
@@ -419,8 +421,10 @@ A plugin holds only what one kind of inbox does differently: the statuses
 `--status` accepts and its default, the key on the pad (id and icon), what
 the key and the channel keys show, the order of the channel keys, and a
 paragraph of help. The store, the commands, "here", the daemon, and the
-install are shared. The plugins live in `src/plugins/`; to add one, write
-`src/plugins/NAME.js` and list it in `src/plugins/index.js`.
+install are shared. A plugin may also have a feed, which the daemon runs to
+write the plugin's own messages (`github` asks GitHub). The plugins live in
+`src/plugins/`; to add one, write `src/plugins/NAME.js` and list it in
+`src/plugins/index.js`.
 
 ```
 inbox plugins
@@ -430,14 +434,14 @@ inbox send --plugin ai macro-pad.driver "tests passed"        # status done
 inbox --plugin ai seen macro-pad.driver
 ```
 
-| | `basic` (default) | `ai` |
-|---|---|---|
-| `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. |
-| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` |
-| Colors | yellow when a message is unseen | blue, green, or yellow, by status |
-| Pip | the unseen messages | the channels that wait |
-| Channels shown | those with an unseen message | those with a message in the last hour, seen or not |
-| Channel order | newest unseen message first | newest message first |
+| | `basic` (default) | `ai` | `github` |
+|---|---|---|---|
+| `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. | `failing`, `pending`, `passing`, `none`, or `closed`; default `none` |
+| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` | `github-inbox`, `assets/github.png` |
+| Colors | yellow when a message is unseen | blue, green, or yellow, by status | red, blue, or green, by the newest message |
+| Pip | the unseen messages | the channels that wait | the failing PRs |
+| Channels shown | those with an unseen message | those with a message in the last hour, seen or not | the open PRs |
+| Channel order | newest unseen message first | newest message first | failing, pending, passing, none |
 
 ### The ai plugin
 
@@ -514,3 +518,41 @@ inbox emoji macro-pad.driver --format name      # char, name, ref, or json
 the ai plugin: running while it works, waiting when it needs you, done when the
 turn ends. See `inbox/claude-code/README.md` for the events, the install
 steps, and the limits.
+
+### The github plugin
+
+One key per open pull request, coloured by the checks of its last commit
+(task 0076). Nobody sends to it: the daemon asks GitHub once a minute, through
+`gh api graphql`, for the PRs of `$INBOX_GITHUB_QUERY` (default
+`is:pr is:open author:@me archived:false`, at most 50), and writes a message
+only when a PR's state changes. `gh` holds the login; run `gh auth login` once.
+
+| Status | Check roll-up | Color | Pad status |
+|---|---|---|---|
+| `failing` | `FAILURE`, `ERROR` | red | `ERROR` |
+| `pending` | `PENDING`, `EXPECTED` | blue | `RUNNING` |
+| `passing` | `SUCCESS` | green | `DONE` |
+| `none` | no checks | none | none |
+| `closed` | the PR is no longer open | the key goes | |
+
+- **A channel** is `OWNER.REPO.NUMBER` (a dot in a name becomes `-`), such as
+  `kgheacock.macro-pad.97`. Its key shows `REPO #NUMBER` over the emoji of
+  `OWNER.REPO`, so the PRs of one repository share an emoji. The body is the
+  PR title, and the "here" is the PR's URL.
+- **The colour** is the status of the newest message, seen or not. The pip on
+  a PR's key counts its unseen changes; a press marks them seen and opens the
+  PR in the browser.
+- **The `github-inbox` key** shows the worst status of the open PRs, and its
+  pip counts the failing ones.
+- **A PR that is no longer open** gets a seen `closed` message and leaves the
+  pad. When the search has more than 50 PRs, nothing is closed.
+- **A failure** (no `gh`, not logged in, no network) changes nothing and logs
+  one line, `inbox: [github] cannot read GitHub: WHY`, until a read succeeds.
+  `launchd` and `systemd` do not see the shell's `PATH`, so `install.sh` writes
+  the `gh` it finds into the wrapper as `INBOX_GH`. To leave the key out, run
+  `install.sh --plugin basic --plugin ai`.
+
+```
+inbox --plugin github list --all-channels
+INBOX_GITHUB_QUERY='is:pr is:open review-requested:@me' inbox daemon --plugin github
+```

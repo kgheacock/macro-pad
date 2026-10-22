@@ -39,8 +39,8 @@ jq --slurpfile h inbox/claude-code/settings-hooks.json '.hooks = $h[0].hooks' \
 ```
 
 This replaces every hook in `settings.json`. Needs `jq` and `inbox` in
-`~/.local/bin` (set `INBOX_BIN` for another path), and the ai daemon
-(`inbox/scripts/install.sh --plugin ai`).
+`~/.local/bin` (set `INBOX_BIN` for another path), and the inbox daemon,
+which shows the ai plugin (`inbox/scripts/install.sh`).
 
 ## Limits
 

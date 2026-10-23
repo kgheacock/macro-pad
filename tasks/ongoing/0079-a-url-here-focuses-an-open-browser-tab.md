@@ -7,7 +7,7 @@ updated: "2026-10-23"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/101"
 branch: "claude/project-thread-bwnpuf"
 related: ["0068", "0076"]
 tags: ["inbox", "here", "github", "browser"]

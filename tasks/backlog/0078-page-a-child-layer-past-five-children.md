@@ -280,9 +280,11 @@ is ticked.
 
 ## Open questions
 
-- [ ] Is key 4 the up key's slot? This spec reads Keith's "key 4" as the
+- [x] Is key 4 the up key's slot? This spec reads Keith's "key 4" as the
   bottom-left key, where the up key sits today, so page 1 holds four
   children, not five, once there is a right arrow. — kgheacock
+  - Yes (Keith, 2026-10-23): exactly 5 children show on one page with no
+    arrows; at 6, page 1 holds 4 and the last page holds 2.
 - [ ] Should an arrow take the status color of the worst child on the pages
   it leads to, so an ERROR on page 3 shows from page 1? The default is no: a
   plain arrow. — kgheacock
@@ -294,3 +296,8 @@ is ticked.
 
 Keith asked for paging "across all apps" on 2026-10-23. Not started; the
 spec waits for Keith's okay.
+
+Keith confirmed the layout on 2026-10-23: "If child length is exactly 5 the
+first page should show 5 (no pagination needed). If it increases to 6, the
+first page will be 4 children (full) and the last page will be 2." This is
+the Layout table as written.

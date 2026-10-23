@@ -7,6 +7,8 @@ import { execFile as nodeExecFile } from 'node:child_process';
 import { UsageError } from './errors.js';
 
 export const FOCUS_TIMEOUT_MS = 5000;
+// How long the search for an open browser tab may take before a new tab opens.
+export const TAB_TIMEOUT_MS = 3000;
 const MAX_HERE_LENGTH = 2048;
 
 const UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
@@ -42,6 +44,49 @@ const ITERM_SCRIPT = [
   'error "no iTerm session " & target',
   'end run',
 ];
+
+// The browsers a press looks in for a tab that already shows an https URL
+// (task 0079), in order. The Chrome family selects a tab by activeTabIndex;
+// Safari by currentTab.
+const BROWSERS = [
+  ['Google Chrome', 'chrome'],
+  ['Brave Browser', 'chrome'],
+  ['Microsoft Edge', 'chrome'],
+  ['Chromium', 'chrome'],
+  ['Safari', 'safari'],
+];
+
+// Runs inside osascript -l JavaScript, so it uses nothing from this file:
+// App is JXA's Application, and a test passes a stub. Brings to the front the
+// first tab whose URL is target, or target followed by /, ? or #. A browser
+// that does not run is not started, and one that throws (not installed, no
+// Automation permission) is skipped. Returns 'focused' or 'none'.
+export function findTab(target, browsers, App) {
+  const matches = (url) =>
+    typeof url === 'string' && (url === target || ['/', '?', '#'].some((c) => url.startsWith(target + c)));
+  for (const [name, kind] of browsers) {
+    try {
+      const app = App(name);
+      if (!app.running()) continue;
+      for (const w of app.windows()) {
+        const urls = w.tabs.url();
+        const i = urls.findIndex(matches);
+        if (i === -1) continue;
+        if (kind === 'safari') w.currentTab = w.tabs[i];
+        else w.activeTabIndex = i + 1;
+        w.index = 1;
+        app.activate();
+        return 'focused';
+      }
+    } catch (e) {
+      // Not installed, or not allowed: look in the next browser.
+    }
+  }
+  return 'none';
+}
+
+const TAB_SCRIPT = `${findTab.toString()}
+function run(argv) { return findTab(argv[0], ${JSON.stringify(BROWSERS)}, Application); }`;
 
 function validUrl(text) {
   if (!URL_START.test(text) || /[\s\u0000-\u001f\u007f]/.test(text)) return false;
@@ -98,15 +143,38 @@ function actionFor({ kind, value }) {
   return { file: 'open', args: [value] };
 }
 
+// Resolves true when a browser tab that shows url came to the front, else
+// false; never rejects.
+function focusTab(url, { execFile, timeoutMs }) {
+  return new Promise((resolve) => {
+    execFile(
+      'osascript',
+      ['-l', 'JavaScript', '-e', TAB_SCRIPT, url],
+      { timeout: timeoutMs, shell: false },
+      (error, stdout) => resolve(!error && String(stdout).trim() === 'focused'),
+    );
+  });
+}
+
 // Brings a "here" to the front. Resolves when the program exits 0; rejects
-// with an Error that says why. execFile and platform are for a test.
-export function focus(
+// with an Error that says why. An https URL first looks for a browser tab
+// that already shows it (task 0079), and opens it only when there is none.
+// execFile and platform are for a test.
+export async function focus(
   here,
-  { execFile = nodeExecFile, platform = process.platform, timeoutMs = FOCUS_TIMEOUT_MS } = {},
+  {
+    execFile = nodeExecFile,
+    platform = process.platform,
+    timeoutMs = FOCUS_TIMEOUT_MS,
+    tabTimeoutMs = TAB_TIMEOUT_MS,
+  } = {},
 ) {
   const parsed = parseHere(here);
-  if (parsed === null) return Promise.reject(new Error(`not a valid "here" (use ${KINDS})`));
-  if (platform !== 'darwin') return Promise.reject(new Error('a "here" works on macOS only'));
+  if (parsed === null) throw new Error(`not a valid "here" (use ${KINDS})`);
+  if (platform !== 'darwin') throw new Error('a "here" works on macOS only');
+  if (parsed.kind === 'url' && /^https:/i.test(parsed.value)) {
+    if (await focusTab(parsed.value, { execFile, timeoutMs: tabTimeoutMs })) return;
+  }
   const { file, args } = actionFor(parsed);
   return new Promise((resolve, reject) => {
     execFile(file, args, { timeout: timeoutMs, shell: false }, (error, stdout, stderr) => {

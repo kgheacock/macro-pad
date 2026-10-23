@@ -28,8 +28,10 @@ type Out interface {
 	// BeginBatch tells the board which keys the next glyphs and key states
 	// belong to, so it draws them together. Bit k of each mask is key k.
 	BeginBatch(glyphMask, stateMask byte) error
-	// LayerChanged reports the active layer: nil for the top layer.
-	LayerChanged(active *string)
+	// LayerChanged reports the active layer, nil for the top layer, and the
+	// page of it the pad shows, from 0, of pages. On the top layer page and
+	// pages are 0 (task 0078).
+	LayerChanged(active *string, page, pages int)
 }
 
 // Options configures Open.
@@ -233,6 +235,26 @@ func (c *Controller) Active() *string {
 	return &a
 }
 
+// Layer returns the active layer, nil for the top layer, the page of it the
+// pad shows, and its page count. On the top layer page and pages are 0.
+func (c *Controller) Layer() (active *string, page, pages int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return layerOf(c.doc)
+}
+
+// layerOf returns the active layer of d, its page, and its page count.
+func layerOf(d Doc) (active *string, page, pages int) {
+	if d.Active == nil {
+		return nil, 0, 0
+	}
+	a := *d.Active
+	if i := d.find(a); i >= 0 {
+		pages = PageCount(len(d.Keys[i].Children))
+	}
+	return &a, d.Page, pages
+}
+
 // Snapshot returns a copy of the object.
 func (c *Controller) Snapshot() Doc {
 	c.mu.Lock()
@@ -344,9 +366,12 @@ func applyRemove(d *Doc, id, parent string) error {
 }
 
 // Press handles a press on a key, the debounced press-down. On the top layer a key with
-// children opens its child layer. In a child layer the up key returns to
-// the top layer. Every other press changes nothing and sends nothing.
-func (c *Controller) Press(keyIndex byte) {
+// children opens its child layer, on its first page. In a child layer the up
+// key returns to the top layer, the left arrow shows the page before, and the
+// right arrow the next page (task 0078). Every other press changes nothing
+// and sends nothing. A press on a child returns the ids of its parent and of
+// the child, as the pad showed them; any other press returns empty ids.
+func (c *Controller) Press(keyIndex byte) (parent, child string) {
 	// A press pauses the preload, so its Store frame messages do not hold up
 	// the switch (task 0061).
 	c.mu.Lock()
@@ -354,10 +379,28 @@ func (c *Controller) Press(keyIndex byte) {
 	c.mu.Unlock()
 	err := c.mutate(func(d *Doc) error {
 		if d.Active != nil {
-			if int(keyIndex) != UpKey {
+			if int(keyIndex) >= KeyCount {
 				return errNoChange
 			}
-			d.Active = nil
+			p := d.find(*d.Active)
+			if p < 0 {
+				return errNoChange
+			}
+			k := d.Keys[p]
+			switch pk := pageLayout(len(k.Children), d.Page)[keyIndex]; pk.role {
+			case roleChild:
+				parent, child = k.ID, k.Children[pk.child].ID
+				return errNoChange
+			case roleUp:
+				d.Active = nil
+				d.Page = 0
+			case roleLeft:
+				d.Page--
+			case roleRight:
+				d.Page++
+			default:
+				return errNoChange
+			}
 			return nil
 		}
 		if int(keyIndex) >= KeyCount {
@@ -369,11 +412,13 @@ func (c *Controller) Press(keyIndex byte) {
 		}
 		id := k.ID
 		d.Active = &id
+		d.Page = 0
 		return nil
 	})
 	if err != nil {
 		c.logf("layers: press on key %d: %v", keyIndex, err)
 	}
+	return parent, child
 }
 
 // mutate applies fn to a copy of the object, and swaps the copy in when it
@@ -393,6 +438,7 @@ func (c *Controller) mutate(fn func(d *Doc) error) error {
 		return err
 	}
 	next.padKeys()
+	next.clampPage()
 	if err := next.Validate(); err != nil {
 		c.mu.Unlock()
 		return err
@@ -400,15 +446,16 @@ func (c *Controller) mutate(fn func(d *Doc) error) error {
 	if !reflect.DeepEqual(c.doc, next) {
 		c.dirty = true
 	}
-	activeChanged := !sameActive(c.doc.Active, next.Active)
+	oldActive, oldPage, oldPages := layerOf(c.doc)
+	active, page, pages := layerOf(next)
+	layerChanged := !sameActive(oldActive, active) || oldPage != page || oldPages != pages
 	c.doc = next
 	want := desired(next)
-	active := next.Active
 	c.mu.Unlock()
 
 	c.flush(want)
-	if activeChanged {
-		c.out.LayerChanged(active)
+	if layerChanged {
+		c.out.LayerChanged(active, page, pages)
 	}
 	c.kickPreload()
 	return nil
@@ -439,10 +486,18 @@ func desired(d Doc) [KeyCount]view {
 	if p < 0 {
 		return out
 	}
-	out[UpKey] = view{kind: kindShift, color: ColorUp, iconRef: ShiftIcon}
-	positions := [MaxChildren]int{0, 1, 2, 4, 5}
-	for j := range d.Keys[p].Children {
-		out[positions[j]] = nodeView(&d.Keys[p].Children[j])
+	children := d.Keys[p].Children
+	for i, pk := range pageLayout(len(children), d.Page) {
+		switch pk.role {
+		case roleChild:
+			out[i] = nodeView(&children[pk.child])
+		case roleUp:
+			out[i] = view{kind: kindShift, color: ColorUp, iconRef: ShiftIcon}
+		case roleLeft:
+			out[i] = view{kind: kindShift, color: ColorUp, iconRef: LeftIcon}
+		case roleRight:
+			out[i] = view{kind: kindShift, color: ColorUp, iconRef: RightIcon}
+		}
 	}
 	return out
 }

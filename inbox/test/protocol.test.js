@@ -27,6 +27,16 @@ test('TestDecodeFixtures', () => {
     kind: 'layerChanged',
     active: 'inbox',
   });
+  assert.deepEqual(decodeMessage(JSON.stringify(fixtures.layerChanged[2])), {
+    kind: 'layerChanged',
+    active: 'inbox',
+  });
+  assert.deepEqual(decodeMessage(JSON.stringify(fixtures.childPressed[0])), {
+    kind: 'childPressed',
+    keyIndex: 1,
+    parent: 'inbox',
+    child: 'macro-pad.driver',
+  });
   assert.deepEqual(decodeMessage(JSON.stringify(fixtures.event[0])), {
     kind: 'event',
     keyIndex: 2,
@@ -40,5 +50,6 @@ test('TestDecodeOddInput', () => {
   assert.equal(decodeMessage('[1]'), null);
   assert.equal(decodeMessage('{"kind":"layerChanged","layerChanged":{"active":3}}'), null);
   assert.equal(decodeMessage('{"kind":"event"}'), null);
+  assert.equal(decodeMessage('{"kind":"childPressed","childPressed":{"keyIndex":1,"parent":"inbox"}}'), null);
   assert.deepEqual(decodeMessage('{"kind":"setKeyState","setKeyState":{"keyIndex":1}}'), { kind: 'other' });
 });

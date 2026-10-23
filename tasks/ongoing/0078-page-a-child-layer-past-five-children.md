@@ -1,13 +1,13 @@
 ---
 id: "0078"
 title: "Page a child layer past five children, with arrow keys"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-23"
 updated: "2026-10-23"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/100"
 branch: "claude/project-thread-lc87yi"
 related: ["0055", "0056", "0057", "0061", "0066", "0067", "0076"]
 tags: ["layers", "driver", "protocol", "inbox"]
@@ -169,9 +169,10 @@ Opening a layer always starts on page 1. Closing it resets `page` to 0.
 ### Arrows
 
 `assets/left.png` and `assets/right.png`, drawn like `assets/shift.png`: a
-black arrow on a white round, on the same dark key color (`ColorUp`). A new
-view kind, `kindArrow`, draws them. They are frames in the cache like the
-shift icon.
+black arrow on a white round, on the same dark key color (`ColorUp`). They
+are `shift.png` turned a quarter, so the three match. They draw as the shift
+icon does, the same view kind with another `iconRef`, and are frames in the
+cache like it.
 
 ### Removing and adding children while a layer is open
 
@@ -181,17 +182,24 @@ shift icon.
 - An added child goes at the end, as today, so it never moves a child the
   person sees. It may turn the last page's key 6/5 from a child into a right
   arrow, and push that child to a new last page. That is the one case where
-  a visible key changes under a finger; the inbox avoids it by not adding
-  children while its layer is open (task 0066's stable rule).
+  a visible key changes under a finger, at 5, 9, 13, and 17 children. The
+  inbox still adds a new channel while its layer is open (task 0066 fills a
+  free position), so it can happen there; it only matters to a person on the
+  last page at that moment.
 
 ### Protocol
 
-- A press `event` gains `child` and `parent` when the key showed a child:
-  `{"kind":"event","type":"press","keyIndex":4,"child":"macro-pad.driver","parent":"inbox"}`.
-  The daemon fills them from the layout before it handles the press, so they
-  name what the person saw. A press on an arrow or the up key carries
-  neither. `keyIndex` stays, so clients that only want raw keys are
-  unaffected.
+- A press on a child sends a new server message, `childPressed`, after the
+  press's `event`:
+  `{"kind":"childPressed","childPressed":{"keyIndex":1,"parent":"inbox","child":"macro-pad.driver"}}`.
+  A press on an arrow, the up key, or a blank key sends none. The `event`
+  itself is unchanged.
+- Why a new message and not fields on `event`: the server broadcasts the
+  `event` as soon as it reads it, while the layer tree handles presses later,
+  in order, from a queue. A quick press right after an arrow would be read on
+  the old page. `childPressed` comes from the queue, after the presses before
+  it, so it names the child of the page the press really landed on.
+  `Controller.Press` returns the parent and child ids for it.
 - `layerChanged` gains `page` and `pages`, for clients that want to show or
   log them. No client needs them.
 
@@ -200,8 +208,8 @@ shift icon.
 - `MAX_CHILDREN` in `inbox/src/render.js` follows the driver's cap, 20.
   Task 0066's "five newest" becomes "twenty newest"; its stable-while-open
   rule is unchanged.
-- `onPress` in `inbox/src/daemon.js` uses `message.child` and drops
-  `CHILD_KEYS` and `UP_KEY`. `renderer.target(position)` becomes
+- `inbox/src/daemon.js` marks a channel on `childPressed` whose parent is its
+  top key, and drops `CHILD_KEYS` and `UP_KEY`. `renderer.target(position)` becomes
   `renderer.target(channel)`.
 - Every inbox plugin (basic, ai, github) gets pages through these two
   changes, with no plugin change.
@@ -248,8 +256,9 @@ is ticked.
 - [ ] **DoD-5** — `page` is saved and read back; a file with a page outside
   the active layer's pages is moved to `.bad`; a file without `page` reads
   as page 0. **Proof:** `go test ./layers -run TestPageSaved`
-- [ ] **DoD-6** — A press on a child carries `child` and `parent` naming the
-  child shown on that page; a press on an arrow or up carries neither.
+- [ ] **DoD-6** — A press on a child sends `childPressed` naming the child
+  shown on that page, also right after an arrow; a press on an arrow or up
+  sends none.
   **Proof:** `go test ./plugin -run TestPressNamesChild`
 - [ ] **DoD-7** — Seven channels with news give seven `inbox` children, and
   a press on the channel shown on page 2 marks that channel seen. **Proof:** `cd inbox && node --test`
@@ -268,10 +277,10 @@ is ticked.
 
 - A client that maps key index to child, other than the inbox, picks the
   wrong child on page 2 → only the inbox does it on main today; the README
-  says to use `child`.
+  says to use `childPressed`.
 - An added child flips the last page's key 6/5 from a child to an arrow
-  under a finger → the inbox does not add children while open; other
-  clients are warned in the README.
+  under a finger → only at 5, 9, 13, or 17 children, and only for a person on
+  the last page; the README says so.
 - More frames than the cache holds → later pages send images on their
   first flip, about 155 ms per key.
 - A layers.json written by this version is rejected by an older
@@ -301,3 +310,16 @@ Keith confirmed the layout on 2026-10-23: "If child length is exactly 5 the
 first page should show 5 (no pagination needed). If it increases to 6, the
 first page will be 4 children (full) and the last page will be 2." This is
 the Layout table as written.
+
+Keith okayed the spec with the defaults on 2026-10-23 ("Defaults are fine"),
+and the work started in PR #100.
+
+Implementation notes, 2026-10-23:
+
+- The press fields became a `childPressed` message (see Protocol), so a
+  quick press after an arrow names the right child.
+- `cd driver && go build ./... && go vet ./... && go test ./...` passes but
+  for `TestIconText`, which fails the same way on main in this container (one
+  gray level of font antialiasing in `icon-text.png`). `cd inbox && npm test`
+  passes, 128 tests, on Node 22.22.
+- DoD-11, the check on the board, waits for Keith.

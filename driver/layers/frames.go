@@ -282,7 +282,10 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 }
 
 // neededFrames returns every frame the layer tree can show, the top layer
-// first, then the child layer of each key that has children, without repeats.
+// first, then the first page of the child layer of each key that has
+// children, then the second pages, and so on, without repeats. The preload
+// stops when the table is full, so the later pages are the ones that miss
+// (task 0078).
 func neededFrames(d Doc) []frameKey {
 	seen := make(map[frameKey]bool)
 	var out []frameKey
@@ -298,16 +301,23 @@ func neededFrames(d Doc) []frameKey {
 	top := d.clone()
 	top.Active = nil
 	add(top)
-	for _, k := range top.Keys {
-		if k == nil || len(k.Children) == 0 {
-			continue
+	for page := 0; ; page++ {
+		found := false
+		for _, k := range top.Keys {
+			if k == nil || len(k.Children) == 0 || page >= PageCount(len(k.Children)) {
+				continue
+			}
+			found = true
+			layer := d.clone()
+			id := k.ID
+			layer.Active = &id
+			layer.Page = page
+			add(layer)
 		}
-		layer := d.clone()
-		id := k.ID
-		layer.Active = &id
-		add(layer)
+		if !found {
+			return out
+		}
 	}
-	return out
 }
 
 // kickPreload asks the preload to look for frames that are not on the board.

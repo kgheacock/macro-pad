@@ -3,7 +3,7 @@ import test from 'node:test';
 import basic from '../src/plugins/basic.js';
 import { emojiFor } from '../src/emoji.js';
 import ai from '../src/plugins/ai.js';
-import { channelIcon, createRenderer } from '../src/render.js';
+import { MAX_CHILDREN, channelIcon, createRenderer } from '../src/render.js';
 
 const row = (channel, count, newestId) => ({ channel, count, newestId, createdAt: newestId });
 const renderer = (extra = {}) => createRenderer({ rules: basic.rules, ...extra });
@@ -42,25 +42,25 @@ test('TestPlan', () => {
 
 test('TestTarget', () => {
   const r = renderer();
-  assert.equal(r.target(0), null);
+  assert.equal(r.target('b'), null);
   r.plan({ unseen: [row('a', 2, 5), row('b', 1, 9)], active: null });
-  assert.deepEqual(r.target(0), { channel: 'b', shownId: 9, here: null });
-  assert.deepEqual(r.target(1), { channel: 'a', shownId: 5, here: null });
-  assert.equal(r.target(2), null);
+  assert.deepEqual(r.target('b'), { channel: 'b', shownId: 9, here: null });
+  assert.deepEqual(r.target('a'), { channel: 'a', shownId: 5, here: null });
+  assert.equal(r.target('c'), null);
   // A channel at zero stays in its place, with nothing to mark.
   r.plan({ unseen: [row('a', 2, 5)], active: 'inbox' });
-  assert.deepEqual(r.target(0), { channel: 'b', shownId: 0, here: null });
+  assert.deepEqual(r.target('b'), { channel: 'b', shownId: 0, here: null });
   r.reset([]);
-  assert.equal(r.target(0), null);
+  assert.equal(r.target('b'), null);
 });
 
 test('TestTargetHere', () => {
   const r = renderer();
   r.plan({ unseen: [{ ...row('a', 1, 5), here: 'app:com.apple.Safari' }, row('b', 1, 9)], active: null });
-  assert.equal(r.target(0).here, null);
-  assert.equal(r.target(1).here, 'app:com.apple.Safari');
+  assert.equal(r.target('b').here, null);
+  assert.equal(r.target('a').here, 'app:com.apple.Safari');
   r.reset([]);
-  assert.equal(r.target(1), null);
+  assert.equal(r.target('a'), null);
 });
 
 test('TestPlanSlot', () => {
@@ -68,19 +68,25 @@ test('TestPlanSlot', () => {
   assert.equal(key.setLayerKey.slot, 2);
 });
 
-test('TestFiveNewest', () => {
+// Task 0078: macropadd pages past five, so seven channels are seven
+// children, and the twenty newest show.
+test('TestSevenChildren', () => {
   const unseen = [];
   for (let i = 1; i <= 7; i++) unseen.push(row(`c${i}`, i, i * 10));
   const messages = renderer().plan({ unseen, active: null });
   const children = brief(messages).filter((m) => m.startsWith('set inbox/'));
-  assert.deepEqual(children, [
-    'set inbox/c7 7 WARN',
-    'set inbox/c6 6 WARN',
-    'set inbox/c5 5 WARN',
-    'set inbox/c4 4 WARN',
-    'set inbox/c3 3 WARN',
-  ]);
+  assert.deepEqual(children, [7, 6, 5, 4, 3, 2, 1].map((i) => `set inbox/c${i} ${i} WARN`));
   assert.equal(messages[0].setLayerKey.count, 28);
+});
+
+test('TestTwentyNewest', () => {
+  const unseen = [];
+  for (let i = 1; i <= 22; i++) unseen.push(row(`c${i}`, 1, i * 10));
+  const messages = renderer().plan({ unseen, active: null });
+  const children = messages.filter((m) => m.setLayerKey?.parent === 'inbox').map((m) => m.setLayerKey.id);
+  assert.equal(children.length, MAX_CHILDREN);
+  assert.deepEqual(children, Array.from({ length: 20 }, (_, i) => `c${22 - i}`));
+  assert.equal(messages[0].setLayerKey.count, 22);
 });
 
 test('TestStableWhileOpen', () => {
@@ -115,12 +121,12 @@ test('TestStableWhileOpen', () => {
 
 test('TestStableWhileOpenFullLayerWaits', () => {
   const r = renderer();
-  const five = [1, 2, 3, 4, 5].map((i) => row(`c${i}`, 1, i));
-  r.plan({ unseen: five, active: null });
-  const open = r.plan({ unseen: [...five, row('late', 1, 99)], active: 'inbox' });
-  // No free position: the sixth waits, and only the Inbox count changes.
-  assert.deepEqual(brief(open), ['set /inbox 6 WARN']);
-  const closed = r.plan({ unseen: [...five, row('late', 1, 99)], active: null });
+  const full = Array.from({ length: MAX_CHILDREN }, (_, i) => row(`c${i + 1}`, 1, i + 1));
+  r.plan({ unseen: full, active: null });
+  const open = r.plan({ unseen: [...full, row('late', 1, 99)], active: 'inbox' });
+  // No free position: the twenty-first waits, and only the Inbox count changes.
+  assert.deepEqual(brief(open), [`set /inbox ${MAX_CHILDREN + 1} WARN`]);
+  const closed = r.plan({ unseen: [...full, row('late', 1, 99)], active: null });
   assert.ok(brief(closed).includes('set inbox/late 1 WARN'));
   assert.ok(brief(closed).includes('remove inbox/c1'));
 });

@@ -11,7 +11,11 @@
   ],
   "layerChanged": [
     {"kind": "layerChanged", "layerChanged": {"active": null}},
-    {"kind": "layerChanged", "layerChanged": {"active": "inbox"}}
+    {"kind": "layerChanged", "layerChanged": {"active": "inbox"}},
+    {"kind": "layerChanged", "layerChanged": {"active": "inbox", "page": 1, "pages": 2}}
+  ],
+  "childPressed": [
+    {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver"}}
   ],
   "event": [
     {"kind": "event", "event": {"keyIndex": 2, "type": "press", "timestamp": 123456}}

@@ -26,6 +26,8 @@ type fakeOut struct {
 	states  []transport.KeyState
 	glyphs  map[byte][]byte
 	changes []*string
+	// pages is the page and page count of every layerChanged, in order.
+	pages [][2]int
 	// calls is every send in order: "batch", "glyph N", "state N".
 	calls []string
 	// batches is the masks of every Begin batch.
@@ -58,10 +60,11 @@ func (f *fakeOut) BeginBatch(glyphMask, stateMask byte) error {
 	return nil
 }
 
-func (f *fakeOut) LayerChanged(active *string) {
+func (f *fakeOut) LayerChanged(active *string, page, pages int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.changes = append(f.changes, active)
+	f.pages = append(f.pages, [2]int{page, pages})
 }
 
 // takeCalls returns every send since the last takeCalls, in order, and the
@@ -158,7 +161,13 @@ func TestDocValidation(t *testing.T) {
 		{"seven keys", `{"version":1,"active":null,"keys":[` + keys(7) + `]}`, false},
 		{"null keys", `{"version":1,"active":null,"keys":[null,` + key("a") + `,null]}`, true},
 		{"five children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(5) + `]}]}`, true},
-		{"six children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, false},
+		{"twenty children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(20) + `]}]}`, true},
+		{"twenty-one children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(21) + `]}]}`, false},
+		{"no page reads as page 0", `{"version":1,"active":"p","keys":[{"id":"p","children":[` + children(6) + `]}]}`, true},
+		{"page the layer has", `{"version":1,"active":"p","page":1,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, true},
+		{"page past the last", `{"version":1,"active":"p","page":2,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, false},
+		{"negative page", `{"version":1,"active":"p","page":-1,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, false},
+		{"page on the top layer", `{"version":1,"active":null,"page":1,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, false},
 		{"unknown status", `{"version":1,"active":null,"keys":[{"id":"p","status":"BROKEN"}]}`, false},
 		{"known statuses", `{"version":1,"active":null,"keys":[{"id":"a","status":"RUNNING"},{"id":"b","status":"DONE"},{"id":"c","status":"ERROR"},{"id":"d","status":"WARN"}]}`, true},
 		{"unknown child status", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","status":"x"}]}]}`, false},

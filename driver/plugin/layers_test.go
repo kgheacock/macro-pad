@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -361,6 +363,8 @@ func TestInboxProtocolFixtures(t *testing.T) {
 	var fixtures struct {
 		RemoveLayerKey []Message `json:"removeLayerKey"`
 		SetLayerKey    []Message `json:"setLayerKey"`
+		LayerChanged   []Message `json:"layerChanged"`
+		ChildPressed   []Message `json:"childPressed"`
 	}
 	if err := json.Unmarshal(data, &fixtures); err != nil {
 		t.Fatal(err)
@@ -375,5 +379,86 @@ func TestInboxProtocolFixtures(t *testing.T) {
 	}
 	if p := fixtures.RemoveLayerKey[0].RemoveLayerKey; p.ID != "build" || p.Parent != "github" {
 		t.Errorf("first fixture is %+v, want build under github", p)
+	}
+	// The inbox decodes what the server encodes (task 0078).
+	for _, m := range fixtures.LayerChanged {
+		data, err := json.Marshal(layerChangedMessage(m.LayerChanged.Active, m.LayerChanged.Page, m.LayerChanged.Pages))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back Message
+		if err := json.Unmarshal(data, &back); err != nil || !reflect.DeepEqual(back.LayerChanged, m.LayerChanged) {
+			t.Errorf("layerChanged fixture %+v does not round-trip: %s", m.LayerChanged, data)
+		}
+	}
+	if len(fixtures.ChildPressed) != 1 {
+		t.Fatalf("fixtures hold %d childPressed messages, want 1", len(fixtures.ChildPressed))
+	}
+	p := fixtures.ChildPressed[0].ChildPressed
+	if fixtures.ChildPressed[0].Kind != KindChildPressed || p == nil {
+		t.Fatalf("fixture %+v is not a childPressed message", fixtures.ChildPressed[0])
+	}
+	want := childPressedMessage(1, "inbox", "macro-pad.driver")
+	if *p != *want.ChildPressed {
+		t.Errorf("childPressed fixture %+v, want %+v", *p, *want.ChildPressed)
+	}
+}
+
+// childPresses returns "parent/child@key" for each childPressed message conn
+// has received so far, in order.
+func childPresses(t *testing.T, conn *fakeConn) []string {
+	t.Helper()
+	var out []string
+	for _, m := range conn.messages(t) {
+		if m.Kind != KindChildPressed {
+			continue
+		}
+		p := m.ChildPressed
+		if p == nil {
+			t.Fatal("childPressed message with no payload")
+		}
+		out = append(out, fmt.Sprintf("%s/%s@%d", p.Parent, p.Child, p.KeyIndex))
+	}
+	return out
+}
+
+// TestPressNamesChild is task 0078's DoD-6: a press on a child names the
+// child of the page the press saw, even right after an arrow, and a press on
+// an arrow or the up key names none.
+func TestPressNamesChild(t *testing.T) {
+	s, ctl, dev, _ := layerServer(t)
+	if err := ctl.SetKey(layers.Update{ID: "inbox"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 7; i++ {
+		if err := ctl.SetKey(layers.Update{ID: fmt.Sprintf("c%d", i), Parent: "inbox"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	waitForLayerChanges(t, conn, []string{""})
+
+	// Open, a child of page 1, the right arrow, and at once a child of page 2.
+	for i, key := range []byte{0, 4, layers.RightKey, 1, layers.LeftKey, layers.UpKey} {
+		dev.InjectEvent(transport.Event{KeyIndex: key, Type: transport.EventPress, Timestamp: uint64(i) * 100_000})
+		dev.InjectEvent(transport.Event{KeyIndex: key, Type: transport.EventRelease, Timestamp: uint64(i)*100_000 + 40_000})
+	}
+	waitForLayerChanges(t, conn, []string{"", "inbox", "inbox", "inbox", ""})
+
+	want := []string{"inbox/c4@4", "inbox/c6@1"}
+	if got := childPresses(t, conn); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("childPressed %v, want %v", got, want)
+	}
+	var pages []int
+	for _, m := range conn.messages(t) {
+		if m.Kind == KindLayerChanged {
+			pages = append(pages, m.LayerChanged.Page, m.LayerChanged.Pages)
+		}
+	}
+	if fmt.Sprint(pages) != fmt.Sprint([]int{0, 0, 0, 2, 1, 2, 0, 2, 0, 0}) {
+		t.Errorf("layerChanged page, pages: %v", pages)
 	}
 }

@@ -21,11 +21,19 @@ const (
 	// KeyCount is the number of keys on the pad, and the most top-level
 	// keys a document holds.
 	KeyCount = 6
-	// MaxChildren is the most children one key holds.
-	MaxChildren = 5
+	// MaxChildren is the most children one key holds. A child layer with
+	// more than OnePage children has pages (task 0078).
+	MaxChildren = 20
 	// UpKey is the key that shows the shift icon in a child layer. A
-	// press on it returns to the parent layer.
+	// press on it returns to the parent layer. On a page after the first it
+	// shows the left arrow instead.
 	UpKey = 3
+	// LeftKey shows the left arrow on a page after the first. A press on it
+	// shows the page before.
+	LeftKey = UpKey
+	// RightKey shows the right arrow on every page but the last. A press on
+	// it shows the next page.
+	RightKey = 5
 )
 
 // Status names. An empty status is also valid: the key has no status.
@@ -75,6 +83,9 @@ type Doc struct {
 	// Active is nil for the top layer. Otherwise it is the id of the
 	// top-level key whose children the pad shows.
 	Active *string `json:"active"`
+	// Page is the page of the active layer the pad shows, from 0. It is 0
+	// on the top layer (task 0078).
+	Page int `json:"page"`
 	// Keys is indexed by key position. A nil entry is an empty key.
 	Keys []*Node `json:"keys"`
 }
@@ -86,7 +97,7 @@ func newDoc() Doc {
 
 // clone returns a deep copy of d.
 func (d Doc) clone() Doc {
-	out := Doc{Version: d.Version, Keys: make([]*Node, len(d.Keys))}
+	out := Doc{Version: d.Version, Page: d.Page, Keys: make([]*Node, len(d.Keys))}
 	if d.Active != nil {
 		a := *d.Active
 		out.Active = &a
@@ -133,9 +144,9 @@ func Parse(data []byte) (Doc, error) {
 }
 
 // Validate checks d against the rules in task 0057: at most six keys, at
-// most five children each, no grandchildren, known statuses, unique ids,
-// iconRefs that stay under assets/, and an active layer that names a key
-// with children.
+// most MaxChildren children each, no grandchildren, known statuses, unique
+// ids, iconRefs that stay under assets/, an active layer that names a key
+// with children, and a page that the active layer has.
 func (d *Doc) Validate() error {
 	if d.Version != Version {
 		return fmt.Errorf("layers: version %d, want %d", d.Version, Version)
@@ -178,6 +189,11 @@ func (d *Doc) Validate() error {
 		if i < 0 || len(d.Keys[i].Children) == 0 {
 			return fmt.Errorf("layers: active %q is not a key with children", *d.Active)
 		}
+		if pages := PageCount(len(d.Keys[i].Children)); d.Page < 0 || d.Page >= pages {
+			return fmt.Errorf("layers: page %d of %q, which has %d pages", d.Page, *d.Active, pages)
+		}
+	} else if d.Page != 0 {
+		return fmt.Errorf("layers: page %d on the top layer, want 0", d.Page)
 	}
 	return nil
 }

@@ -1,11 +1,12 @@
 // The renderer the daemon uses: one top key, and one child per channel with
-// unseen messages, at most five. What the keys show comes from the rules of a
+// unseen messages, at most MAX_CHILDREN; macropadd pages past five (task
+// 0078). What the keys show comes from the rules of a
 // plugin (see plugins/index.js). A renderer has
 //   topId                    -> the id of the top key
 //   plan({ unseen, active }) -> the messages to send macropadd now
 //   reset(channels)          -> forget what it sent (called on every connect)
-//   target(position)         -> { channel, shownId, here } for the child at that
-//                               position (0 to 4), or null
+//   target(channel)          -> { channel, shownId, here } for that child, if
+//                               the pad shows it, or null
 // where `unseen` is Store.unseen(), `active` is the open layer's id or null,
 // and `channels` is every channel the store has ever held, so reset can clear
 // children an earlier daemon left on the pad.
@@ -13,7 +14,8 @@
 import { channelInput, emojiFor, loadEmojiSet, splitSessionChannel } from './emoji.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
 
-export const MAX_CHILDREN = 5;
+// macropadd's layers.MaxChildren.
+export const MAX_CHILDREN = 20;
 
 // macropadd takes a caption of at most 16 runes over emoji, and cuts what is
 // still too wide.
@@ -43,7 +45,7 @@ export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } 
 //   top(unseen)      the fields of the top key, besides id and slot
 //   child(row)       the fields of a child, besides id and parent; row is
 //                    undefined for a channel that has no unseen message now
-//   before(a, b)     orders two rows; the first five show
+//   before(a, b)     orders two rows; the first MAX_CHILDREN show
 //   sessions         true when a channel may be PROJECT.SID (see channelIcon)
 //   shows(row)       optional; a row it returns false for is left out of the
 //                    top key and the children
@@ -113,9 +115,8 @@ export function createRenderer({ slot, rules, emojiSet }) {
       leftovers = channels;
     },
 
-    target(position) {
-      const channel = shown[position];
-      if (channel === undefined) return null;
+    target(channel) {
+      if (!shown.includes(channel)) return null;
       return { channel, shownId: shownIds.get(channel) ?? 0, here: shownHere.get(channel) ?? null };
     },
 
@@ -127,7 +128,7 @@ export function createRenderer({ slot, rules, emojiSet }) {
       set(out, rules.id, key);
 
       const rows = new Map(unseen.map((row) => [row.channel, row]));
-      // Only the first five show.
+      // Only the first MAX_CHILDREN show.
       const wanted = [...unseen]
         .sort(rules.before)
         .slice(0, MAX_CHILDREN)

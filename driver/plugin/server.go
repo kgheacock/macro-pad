@@ -98,10 +98,12 @@ type LayerController interface {
 	SetKey(layers.Update) error
 	// RemoveKey applies one removeLayerKey message.
 	RemoveKey(id, parent string) error
-	// Press handles a debounced press-down on a key.
-	Press(keyIndex byte)
-	// Active is the id of the open key, or nil for the top layer.
-	Active() *string
+	// Press handles a debounced press-down on a key. A press on a child
+	// returns the ids of its parent and of the child.
+	Press(keyIndex byte) (parent, child string)
+	// Layer is the id of the open key, or nil for the top layer, and the
+	// page of it the pad shows, of pages.
+	Layer() (active *string, page, pages int)
 }
 
 // client is one connected plugin.
@@ -383,9 +385,9 @@ func withPip(frame []byte, key uint16, count int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// LayerChanged tells every client which layer is active.
-func (s *Server) LayerChanged(active *string) {
-	s.broadcast(layerChangedMessage(active))
+// LayerChanged tells every client which layer is active, and its page.
+func (s *Server) LayerChanged(active *string, page, pages int) {
+	s.broadcast(layerChangedMessage(active, page, pages))
 }
 
 // Run opens a WebSocket server bound to 127.0.0.1:port and serves it
@@ -446,7 +448,7 @@ func (s *Server) addClient(conn wsConn) *client {
 	s.snapshotTo(c)
 	if l := s.layerController(); l != nil {
 		select {
-		case c.send <- layerChangedMessage(l.Active()):
+		case c.send <- layerChangedMessage(l.Layer()):
 		default:
 		}
 	}
@@ -651,11 +653,16 @@ func (s *Server) queueLayerPress(keyIndex byte) {
 }
 
 // layerPressLoop applies queued press-downs to the layer tree one at a time,
-// in the order they arrived. It ends when dispatchLoop does.
+// in the order they arrived, and tells every client which child a press
+// landed on. The child is read on the page the press saw, after the presses
+// before it, so a quick press after an arrow names the child of the new page.
+// It ends when dispatchLoop does.
 func (s *Server) layerPressLoop() {
 	for keyIndex := range s.layerPresses {
 		if l := s.layerController(); l != nil {
-			l.Press(keyIndex)
+			if parent, child := l.Press(keyIndex); child != "" {
+				s.broadcast(childPressedMessage(keyIndex, parent, child))
+			}
 		}
 	}
 }

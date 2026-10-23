@@ -60,6 +60,11 @@ const (
 	// layer. The server sends it to every client when the layer changes,
 	// and to one client when it connects. See task 0057.
 	KindLayerChanged MessageKind = "layerChanged"
+	// KindChildPressed is a server→client message that names the child a
+	// press landed on: its id and its parent's, as the pad showed them. A
+	// client picks the child by id, not by key index, since the key of a
+	// child depends on the page (task 0078). It follows the press event.
+	KindChildPressed MessageKind = "childPressed"
 )
 
 // Signal names the server itself broadcasts once it resolves a raw
@@ -87,6 +92,7 @@ type Message struct {
 	SetLayerKey    *SetLayerKeyPayload    `json:"setLayerKey,omitempty"`
 	RemoveLayerKey *RemoveLayerKeyPayload `json:"removeLayerKey,omitempty"`
 	LayerChanged   *LayerChangedPayload   `json:"layerChanged,omitempty"`
+	ChildPressed   *ChildPressedPayload   `json:"childPressed,omitempty"`
 }
 
 // EventPayload is transport.Event as JSON. Type is "press" or "release",
@@ -168,14 +174,29 @@ type RemoveLayerKeyPayload struct {
 }
 
 // LayerChangedPayload names the active layer: the id of the key whose
-// children the pad shows, or null for the top layer.
+// children the pad shows, or null for the top layer. Page is the page the
+// pad shows, from 0, of Pages; both are 0 on the top layer (task 0078).
 type LayerChangedPayload struct {
 	Active *string `json:"active"`
+	Page   int     `json:"page"`
+	Pages  int     `json:"pages"`
 }
 
-// layerChangedMessage builds the Message that announces active.
-func layerChangedMessage(active *string) Message {
-	return Message{Kind: KindLayerChanged, LayerChanged: &LayerChangedPayload{Active: active}}
+// layerChangedMessage builds the Message that announces active and its page.
+func layerChangedMessage(active *string, page, pages int) Message {
+	return Message{Kind: KindLayerChanged, LayerChanged: &LayerChangedPayload{Active: active, Page: page, Pages: pages}}
+}
+
+// ChildPressedPayload names the child a press on KeyIndex landed on.
+type ChildPressedPayload struct {
+	KeyIndex byte   `json:"keyIndex"`
+	Parent   string `json:"parent"`
+	Child    string `json:"child"`
+}
+
+// childPressedMessage builds the Message that names a pressed child.
+func childPressedMessage(keyIndex byte, parent, child string) Message {
+	return Message{Kind: KindChildPressed, ChildPressed: &ChildPressedPayload{KeyIndex: keyIndex, Parent: parent, Child: child}}
 }
 
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a

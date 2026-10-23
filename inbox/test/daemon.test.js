@@ -202,6 +202,12 @@ test('TestEventsReachHook', async (t) => {
 
 const press = (server, keyIndex) =>
   server.send({ kind: 'event', event: { keyIndex, type: 'press', timestamp: 1 } });
+// A press on a child, as macropadd sends it: the event, then the child it
+// landed on (task 0078).
+const pressChild = (server, parent, child, keyIndex = 0) => {
+  press(server, keyIndex);
+  server.send({ kind: 'childPressed', childPressed: { keyIndex, parent, child } });
+};
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const counts = (store) => Object.fromEntries(store.unseen().map((row) => [row.channel, row.count]));
 
@@ -227,23 +233,27 @@ test('TestPressMarksChannel', async (t) => {
   for (const key of [3, 4, 5]) press(server, key);
   await pause(150);
   assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1 });
-  press(server, 0);
+  pressChild(server, 'inbox', 'a', 0);
   await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
-  press(server, 1);
+  pressChild(server, 'inbox', 'b', 1);
   await waitFor(() => counts(writer).b === undefined, 1000, 'b seen');
-  press(server, 2);
+  pressChild(server, 'inbox', 'c', 2);
   await waitFor(() => counts(writer).c === undefined, 1000, 'c seen');
 });
 
-test('TestPressMarksChannelKeyMap', async (t) => {
+// Task 0078's DoD-7: seven channels are seven children, and a press on a
+// channel of page 2 marks that channel, whatever key it is on.
+test('TestPressMarksChannelOnPage2', async (t) => {
   const sc = scratch(t);
-  const { server, writer } = await openInbox(t, sc, ['a', 'b', 'c', 'd', 'e']);
-  // Key 3 is the up key, so keys 4 and 5 are children 3 and 4.
-  press(server, 4);
-  await waitFor(() => counts(writer).d === undefined, 1000, 'd seen');
-  press(server, 5);
-  await waitFor(() => counts(writer).e === undefined, 1000, 'e seen');
-  assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1 });
+  const channels = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  const { server, writer } = await openInbox(t, sc, channels);
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'g'), 1000, 'the seventh child');
+  const children = server.received.filter((m) => m.setLayerKey?.parent === 'inbox').map((m) => m.setLayerKey.id);
+  assert.deepEqual(children, channels);
+  // Page 2 shows e, f, g on keys 0, 1, 2.
+  pressChild(server, 'inbox', 'f', 1);
+  await waitFor(() => counts(writer).f === undefined, 1000, 'f seen');
+  assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1, d: 1, e: 1, g: 1 });
 });
 
 test('TestAiDaemonReadsOwnLayer', async (t) => {
@@ -262,12 +272,12 @@ test('TestAiDaemonReadsOwnLayer', async (t) => {
   assert.equal(server.received.find((m) => m.setLayerKey?.id === 'ai-inbox').setLayerKey.status, 'WARN');
   // The inbox daemon's layer is open, not ours: a press on key 0 marks nothing.
   server.layerChanged('inbox');
-  press(server, 0);
+  pressChild(server, 'inbox', 'a');
   await pause(150);
   assert.deepEqual(counts(writer), { a: 1 });
   // Our layer is open: the same press marks the channel.
   server.layerChanged('ai-inbox');
-  press(server, 0);
+  pressChild(server, 'ai-inbox', 'a');
   await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
   await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'ai-inbox')?.setLayerKey.status === '', 1000, 'the top key cleared');
 });
@@ -290,7 +300,7 @@ test('TestAiDaemonShowsRecentSeenChannels', async (t) => {
   assert.equal(server.received.find((m) => m.setLayerKey?.id === 'seen').setLayerKey.status, '');
   // Pressing a seen channel is harmless.
   server.layerChanged('ai-inbox');
-  press(server, 1);
+  pressChild(server, 'ai-inbox', 'seen', 1);
   await pause(150);
   // The stale channel is hidden, not marked.
   assert.deepEqual(counts(writer), { fresh: 1, old: 1 });
@@ -312,7 +322,7 @@ test('TestOpenPressMarksNothing', async (t) => {
   assert.deepEqual(counts(writer), { a: 1 });
   // Once the layer is open the same key marks it.
   server.layerChanged('inbox');
-  press(server, 0);
+  pressChild(server, 'inbox', 'a');
   await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
 });
 
@@ -320,7 +330,7 @@ test('TestLateMessageStaysUnseen', async (t) => {
   const sc = scratch(t);
   const { server, writer } = await openInbox(t, sc, ['a']);
   writer.insert('a', 'late', sc.root);
-  press(server, 0);
+  pressChild(server, 'inbox', 'a');
   // Only the message the key showed is marked; the late one stays.
   await waitFor(() => counts(writer).a === 1, 1000, 'one message marked');
   await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'a').setLayerKey.count === 1, 1000, 'count 1');
@@ -333,7 +343,7 @@ test('TestMarkSendsAtOnce', async (t) => {
   const { server } = await openInbox(t, sc, ['a', 'b']);
   const before = server.received.length;
   const started = Date.now();
-  press(server, 0);
+  pressChild(server, 'inbox', 'a');
   await waitFor(
     () => server.received.slice(before).some((m) => m.setLayerKey?.id === 'inbox'),
     1000,
@@ -359,17 +369,17 @@ test('TestPressFocuses', async (t) => {
 
   // The up key, an empty key, and a channel with no here call nothing.
   for (const key of [3, 4, 5]) press(server, key);
-  press(server, 2);
+  pressChild(server, 'inbox', 'c', 2);
   await waitFor(() => counts(writer).c === undefined, 1000, 'c seen');
   await pause(100);
   assert.deepEqual(calls, []);
 
-  press(server, 0);
+  pressChild(server, 'inbox', 'a', 0);
   await waitFor(() => calls.length === 1, 1000, 'one focus');
   assert.equal(calls[0].here, slack);
   assert.equal(calls[0].unseen.a, undefined, 'a was marked before focus');
   assert.equal(calls[0].unseen.b, 1);
-  press(server, 1);
+  pressChild(server, 'inbox', 'b', 1);
   await waitFor(() => calls.length === 2, 1000, 'two focus');
   assert.equal(calls[1].here, tab);
   await pause(100);
@@ -401,7 +411,7 @@ test('TestFailedFocusKeepsMark', async (t) => {
       throw new Error('no iTerm session gone');
     },
   });
-  press(server, 0);
+  pressChild(server, 'inbox', 'a');
   await waitFor(() => logs.some((l) => l.includes('no iTerm session gone')), 1000, 'the log line');
   assert.ok(logs.some((l) => l.includes('iterm2') && l.includes(' a: ')), logs.join('\n'));
   assert.ok(!logs.some((l) => l.includes(bad)), 'the log names the kind, not the value');
@@ -480,7 +490,7 @@ test('TestDaemonFeed', async (t) => {
   assert.deepEqual([top.status, top.count], ['ERROR', 1]);
 
   server.layerChanged('github-inbox');
-  press(server, 0);
+  pressChild(server, 'github-inbox', 'kgheacock.macro-pad.97');
   await waitFor(() => calls.length === 1, 1000, 'the focus');
   assert.equal(calls[0], 'url:https://github.com/kgheacock/macro-pad/pull/97');
 });

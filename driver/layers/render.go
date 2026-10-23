@@ -21,13 +21,18 @@ const (
 	ColorError   uint16 = 0xF800 // red
 	ColorWarn    uint16 = 0xFFE0 // yellow
 	ColorNone    uint16 = 0x0000 // black: no status
-	// ColorUp is the dark background behind the shift icon.
+	// ColorUp is the dark background behind the shift icon and the arrows.
 	ColorUp uint16 = 0x2104 // #202020
 )
 
 // ShiftIcon is the file under the assets directory that key UpKey shows in
-// a child layer.
-const ShiftIcon = "shift.png"
+// a child layer. LeftIcon and RightIcon are the arrows of a child layer with
+// pages (task 0078), drawn like it.
+const (
+	ShiftIcon = "shift.png"
+	LeftIcon  = "left.png"
+	RightIcon = "right.png"
+)
 
 // StatusColor returns the key color for a status.
 func StatusColor(status string) uint16 {

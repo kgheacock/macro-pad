@@ -17,9 +17,6 @@ const LAYER_WAIT_MS = 1000;
 const CLOSE_WAIT_MS = 300;
 const BACKOFF_FIRST_MS = 250;
 const BACKOFF_MAX_MS = 5000;
-const UP_KEY = 3;
-// The keys of the open Inbox layer, in child order; key 3 is the up key.
-const CHILD_KEYS = [0, 1, 2, null, 3, 4];
 
 function isAlive(pid) {
   try {
@@ -236,15 +233,13 @@ export function startDaemon({
     }
   };
 
-  // A press on a channel key of the open layer of the top key marks the
-  // messages that key showed as seen, then goes to their "here". macropadd
-  // sends the event before it handles the press, so `active` is the layer the
-  // person saw. The press that opens the layer arrives while `active` is
-  // still null, and a press in the layer of another client is not ours.
-  const onPress = (keyIndex) => {
-    if (active !== topId || keyIndex === UP_KEY) return;
-    const position = CHILD_KEYS[keyIndex];
-    const child = position === undefined || position === null ? null : renderer.target(position);
+  // A press on a channel key of the top key's layer marks the messages that
+  // key showed as seen, then goes to their "here". macropadd names the child
+  // a press landed on, on whatever page (task 0078), so the daemon needs no
+  // key map. A press on a child of another client's key is not ours.
+  const onChildPressed = (parent, channel) => {
+    if (parent !== topId) return;
+    const child = renderer.target(channel);
     if (child === null || child.shownId === 0) return;
     try {
       db.markSeen(child.channel, child.shownId);
@@ -269,8 +264,9 @@ export function startDaemon({
       // The first layerChanged after a connect says the replay is done.
       if (!ready) becomeReady();
       else push();
+    } else if (message.kind === 'childPressed') {
+      onChildPressed(message.parent, message.child);
     } else if (message.kind === 'event') {
-      if (message.type === 'press') onPress(message.keyIndex);
       try {
         onEvent(message, { active });
       } catch (e) {

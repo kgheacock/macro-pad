@@ -42,6 +42,11 @@ export function decodeMessage(text) {
     if (!e || !Number.isInteger(e.keyIndex) || typeof e.type !== 'string') return null;
     return { kind: 'event', keyIndex: e.keyIndex, type: e.type, timestamp: e.timestamp ?? 0 };
   }
+  if (message.kind === 'childPressed') {
+    const p = message.childPressed;
+    if (!p || !Number.isInteger(p.keyIndex) || typeof p.parent !== 'string' || typeof p.child !== 'string') return null;
+    return { kind: 'childPressed', keyIndex: p.keyIndex, parent: p.parent, child: p.child };
+  }
   if (message.kind === 'layerChanged') {
     const active = message.layerChanged?.active;
     if (active !== null && typeof active !== 'string') return null;

@@ -271,8 +271,8 @@ plugin on the macro pad, each on its own key, in one process (task 0075).
 `--plugin NAME`, once or more, shows only those plugins. This section
 describes the `basic` plugin; "Plugins" says
 what the `ai` plugin shows instead. It is a client of `macropadd`: it sends `setLayerKey` messages over the
-plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`
-and `event` from it. It draws one `inbox` key with the total unseen count,
+plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`,
+`childPressed`, and `event` from it. It draws one `inbox` key with the total unseen count,
 and one child key per channel with unseen messages. A press on a child key
 marks that channel's messages seen, then goes to its "here" (see "Here").
 
@@ -298,9 +298,9 @@ The keys:
   messages, each with its own count. The key shows the channel's last name
   segment in black letters on a plain white tile, and the segment before it in
   gray letters above (`macro-pad.driver` shows `macro-pad` over `driver`).
-  There are at most five, the channels with the newest unseen messages. A
-  channel past the fifth counts in the `inbox` total, and `inbox channels`
-  lists it.
+  There are at most 20, the channels with the newest unseen messages; past
+  five, `macropadd` shows them on pages with arrows (task 0078). A channel
+  past the 20th counts in the `inbox` total, and `inbox channels` lists it.
 - A channel with no unseen messages leaves the layer, but not while the layer
   is open, so keys do not move under a finger. It stays with count 0 until you
   leave the layer. A new channel takes a free position if one is left, and
@@ -309,8 +309,10 @@ The keys:
 - A press on a channel key marks that channel's unseen messages seen. It
   marks the messages the key showed, so one that lands during the press stays
   unseen. The count on the key, and the total on `inbox`, drop within 1 s. The
-  key stays at 0 until you leave the layer. The press that opens the layer, and
-  the up key (key 3), mark nothing. A press means "I have seen these":
+  key stays at 0 until you leave the layer. The daemon finds the channel from
+  the `childPressed` message `macropadd` sends, so a channel on page 2 works
+  the same. The press that opens the layer, the up key, and the arrows mark
+  nothing. A press means "I have seen these":
   `inbox list CHANNEL` still shows the messages, and a failed mark is logged
   and tried again on the next press. A double or long press on a channel key
   marks it too, on its first press-down.
@@ -483,9 +485,9 @@ seen. Which channels show does not depend on what is seen. A message with a stor
   unseen `waiting` message. The pip on a channel key is the number of its
   unseen `waiting` messages. A count of 0 draws no pip.
 - **A press** on the `ai-inbox` key opens the list of channels with a message
-  in the last hour, also when there is no pip. At most five show, the channel
-  with the newest message first, whatever its status. A channel past the
-  fifth counts in the key's status and pip.
+  in the last hour, also when there is no pip. At most 20 show, on pages past
+  five, the channel with the newest message first, whatever its status. A
+  channel past the 20th counts in the key's status and pip.
 - **A press on a channel key** marks the messages it showed seen, then goes
   to the "here" of its newest message (seen or not), as for `basic`. The keys do not move while the layer is
   open; a seen channel keeps its place, with no color, until you leave.

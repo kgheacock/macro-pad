@@ -117,7 +117,7 @@ layer takes you (see "Daemon"). The press still marks the channel seen. A
 |---|---|---|
 | `iterm2:UUID` | An iTerm session. `UUID` is the session's `unique id`. | `osascript` selects the window, tab, and session, then activates iTerm. |
 | `app:BUNDLE_ID` | A macOS app, such as `com.tinyspeck.slackmacgap`. | `open -b BUNDLE_ID` |
-| `url:URL` | A deep link. The scheme is `slack`, `msteams`, `ms-outlook`, or `https`. | `open URL` |
+| `url:URL` | A deep link. The scheme is `slack`, `msteams`, `ms-outlook`, or `https`. | `open URL`. For `https`, first a tab that already shows it (see below). |
 
 `send` and `pipe` take the first of these that gives a value:
 
@@ -152,6 +152,21 @@ Automation. Until you do, the call waits for about 5 s, then the daemon logs
 where to allow it. A press on a key whose iTerm session is closed logs
 `no iTerm session UUID`; the channel is still marked seen, and iTerm is not
 brought forward.
+
+### A tab that already shows the URL
+
+A press on an `https:` "here", such as a PR key of the `github` plugin, first
+looks for a browser tab that already shows that URL (task 0079). A tab counts
+when its URL is the URL, or the URL followed by `/`, `?`, or `#`, so a PR on
+its `/files` page counts. The first one found is selected, its window raised,
+and its browser activated; only when there is none does `open URL` run.
+
+It looks in Google Chrome, Brave, Microsoft Edge, Chromium, and Safari, in
+that order, and only in the ones that run: none is started to look. Firefox
+and Arc cannot be searched, so a press there opens a new tab. The search is
+one `osascript -l JavaScript` call with a 3 s limit. Each browser asks once
+for the **Automation** permission; until you allow it, or when the search
+fails or runs out of time, a new tab opens as before.
 
 ## Channels
 

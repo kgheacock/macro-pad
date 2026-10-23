@@ -680,6 +680,54 @@ Run it alongside `macropadd` and the hook example above; a real Claude
 Code session's `Notification` and `Stop` hooks then drive the key's
 color with no other process in between.
 
+### Selection actions: `driver/examples/selection-actions`
+
+Select text in any app, then press the key. A single press summarises it, a
+double press translates it, and a long press asks Claude about it. The answer
+lands in the inbox channel `selection.summarise`, `selection.translate`, or
+`selection.ask`, so it shows as a child of the inbox key. See task 0077.
+
+```bash
+go run ./driver/examples/selection-actions                     # key 3, the defaults
+go run ./driver/examples/selection-actions --config sel.json
+```
+
+The key shows blue while an action runs, yellow for a second when nothing
+is selected, and red after a failure, whose reason goes to the inbox too.
+The key works only on the top layer.
+
+The config is JSON, and every field is optional:
+
+```json
+{
+  "id": "selection", "slot": 3, "label": "selection",
+  "channel": "selection", "timeout": "60s", "inbox": "inbox",
+  "actions": [
+    {"click": "single", "name": "define",
+     "command": ["claude", "-p", "Define the word on standard input."]},
+    {"click": "double", "name": "fr", "command": ["trans", "-b", ":fr"]}
+  ]
+}
+```
+
+Each action is a command (argv, no shell) with the selection on standard
+input; its standard output is the answer. `click` is `single`, `double`, or
+`long`. With no `actions`, the three defaults run `claude -p`, so they use
+your Claude Code login and need no API key. Each press costs Claude usage.
+
+The binary reads the selection with `osascript`: Accessibility first, then
+Cmd+C with the clipboard restored. Grant Accessibility to the app that runs
+it (your terminal, or the binary itself under a login service). It is macOS
+only. Under a login service, `PATH` is short: the binary logs any command it
+cannot find at start.
+
+**Privacy.** The selected text goes to whatever each command sends it to;
+for the defaults, that is Anthropic. Do not press the key on passwords or
+other secrets.
+
+This is a standalone binary until the plugin host (task 0055) and selection
+capture (task 0053) are on `main`; then it moves into the host.
+
 ### Virtual pad, with no board attached
 
 `--emulate` opens an in-memory `transport.Emulator` instead of a real

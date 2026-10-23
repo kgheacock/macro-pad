@@ -139,8 +139,9 @@ update still reaches the files at once and `Close` does not wait.
 ## Layers
 
 `macropadd` keeps one JSON object that says what the six keys show. A key can
-hold up to five children. A press on a key with children opens its
-child layer, and a press on key 3 returns. The daemon draws the active
+hold up to 20 children. A press on a key with children opens its
+child layer, and a press on key 3 returns. A child layer with more than five
+children has pages, with arrows (task 0078). The daemon draws the active
 layer, saves the object, and shows the same layer after a restart. See task
 0057.
 
@@ -254,16 +255,37 @@ duplicate `id`, or an `active` that names a key with no children is rejected.
 
 On the top layer, key N shows `keys[N]`.
 
-In a child layer, child N shows on keys 0, 1, 2, 4, and 5, in that order, and
-key 3 shows `assets/shift.png`, a black shift arrow on a white round, on a dark
-key. A key with no
-child in the open layer is blank.
+In a child layer of up to five children, child N shows on keys 0, 1, 2, 4,
+and 5, in that order, and key 3 shows `assets/shift.png`, a black shift arrow
+on a white round, on a dark key. A key with no child in the open layer is
+blank.
+
+A child layer of six children or more has pages (task 0078). Page 1 keeps the
+shift arrow on key 3 and shows `assets/right.png` on key 5. A later page shows
+`assets/left.png` on key 3, and the right arrow on key 5 unless it is the last
+page. So every page but the last holds four children, on keys 0, 1, 2, and 4,
+and the last holds up to five, on keys 0, 1, 2, 4, and 5. Six children are
+four on page 1 and two on page 2; 20 children are five pages.
 
 | Press | Result |
 |---|---|
-| press, top layer, key with children | opens that key's child layer |
-| press, child layer, key 3 | returns to the top layer |
+| press, top layer, key with children | opens that key's child layer, on page 1 |
+| press, child layer, key 3 on page 1 | returns to the top layer |
+| press, child layer, key 3 on a later page | shows the page before |
+| press, child layer, key 5 with the right arrow | shows the next page |
+| press, child layer, a child | sends `childPressed`; the layer stays |
 | any other press | nothing: no key state is sent and `active` stays |
+
+`layers.json` saves the page as `page`, from 0, beside `active`, so a restart
+shows the same page. A removal that empties the shown page shows the new last
+page. A child added while the layer is open goes at the end, so it moves no
+key a person sees, except one: when the last page is full (5, 9, 13, or 17
+children), its key 5 turns into a right arrow, and that child moves to a new
+page.
+
+The preload stores the top layer, then page 1 of every key, then the later
+pages, until the frame table is full. A later page that did not fit sends its
+images on its first visit.
 
 A press is the debounced press-down event. The firmware has already
 debounced it, and the layer tree acts on it at once. It waits for no release
@@ -294,9 +316,11 @@ logged.
 A client changes the object with `setLayerKey`, and removes a key or child
 with `removeLayerKey` (see "Protocol," below). The
 daemon runs all updates one at a time, so any number of clients can write.
-The daemon sends `layerChanged` to every client when the layer changes, and
-to a client when it connects, so a plugin that draws its own keys knows when
-the pad shows a child layer.
+The daemon sends `layerChanged` to every client when the layer or its page
+changes, and to a client when it connects, so a plugin that draws its own keys
+knows when the pad shows a child layer. A press on a child also sends
+`childPressed`, naming the child. A client picks the pressed child by that id,
+never by key index: the key of a child depends on the page.
 
 ### `macro_streamer`
 
@@ -464,11 +488,24 @@ Every message on the connection is JSON, shaped by
   ```
 
 - **`layerChanged`** — server to client. Names the active layer: the `id` of
-  the open key, or `null` for the top layer. The server sends it to every
-  client when the layer changes, and to a client when it connects.
+  the open key, or `null` for the top layer, and the `page` it shows, from 0,
+  of `pages` (both 0 on the top layer, task 0078). The server sends it to
+  every client when the layer or its page changes, and to a client when it
+  connects.
 
   ```json
-  {"kind": "layerChanged", "layerChanged": {"active": null}}
+  {"kind": "layerChanged", "layerChanged": {"active": null, "page": 0, "pages": 0}}
+  {"kind": "layerChanged", "layerChanged": {"active": "inbox", "page": 1, "pages": 2}}
+  ```
+
+- **`childPressed`** — server to client. Names the child a press landed on,
+  and its parent, on the page the press saw (task 0078). It follows the
+  press's `event`, and comes after the presses queued before it, so a quick
+  press after an arrow names a child of the new page. A press on an arrow, the
+  up key, or a blank key sends none.
+
+  ```json
+  {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver"}}
   ```
 
 - **`subscribeAudio`** / **`unsubscribeAudio`** — client to server, no

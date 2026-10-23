@@ -109,7 +109,7 @@ test('TestAiStableWhileOpen', () => {
   const k = keys(open);
   assert.deepEqual([k.a.status, k.a.count], ['', 0]);
   assert.equal(r.topId, 'ai-inbox');
-  assert.equal(r.target(0).channel, 'a');
+  assert.equal(r.target('a').channel, 'a');
 });
 
 test('TestAiRecent', (t) => {

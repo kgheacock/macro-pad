@@ -7,7 +7,7 @@ updated: "2026-10-24"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/102"
 branch: "claude/project-thread-mknkbk"
 related: []
 tags: ["hardware", "enclosure"]

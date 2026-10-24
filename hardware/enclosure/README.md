@@ -38,3 +38,17 @@ All dimensions and tolerances are constants at the top of that script.
 - PLA or PETG, 0.2 mm layers, 4 walls, 15% infill. A brim on the body helps keep its large floor flat.
 - No supports. Edges on the bed have 0.8 mm 45° chamfers, the corner bosses end in 45° cones, and the USB slot is an arch.
 - The corner screws pull along the layer direction. Do not over-tighten them.
+
+## Body for the one-piece 110 × 100 mm panel
+
+`screenkey_panel_3x2.step` is a single 3 mm panel that replaces both the faceplate and the
+mounting plate. The module PCBs screw to its back face. `panel_body.stl` is the body for it.
+Regenerate it with `python hardware/enclosure/build_panel_body.py`.
+
+- The tub is 110 × 100 × 78.6 mm. It keeps the same wall, floor, 63.5 mm of space below the modules
+  and USB-C slot as `body.stl`. The slot is in the 100 mm end wall.
+- Its 4 corner bosses sit under the panel's countersunk holes at (±50, ±45) mm from the centre.
+  Each boss has a 4.0 mm M3 heat-set insert pocket, 12 mm deep.
+- Use 4× **M3 × 10** flat-head screws. With the 3 mm panel, the old M3 × 16 screws would hit
+  the bottom of the pocket.
+- The script checks that every module PCB clears the walls and bosses.

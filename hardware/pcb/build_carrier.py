@@ -304,15 +304,15 @@ def finish():
     pcbnew.SaveBoard(str(HERE / "carrier.kicad_pcb"), board)
 
 
-# JLCPCB assembly: (comment, footprint, manufacturer part). The LCSC column is left for
-# JLCPCB's "Manual Match" to fill. J3, the mic header, is left off so the mic's pin order
+# JLCPCB assembly: (comment, footprint, manufacturer part, LCSC part). An empty LCSC part is left
+# for JLCPCB's "Manual Match" to fill. J3, the mic header, is left off so the mic's pin order
 # can be checked first.
 JLC_PARTS = {
-    "J1": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", ""),
-    "J2": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", ""),
-    "C1": ("10uF 16V aluminium electrolytic radial D5mm P2.0mm", "CP_Radial_D5.0mm_P2.00mm", ""),
+    "J1": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "", ""),
+    "J2": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "", ""),
+    "C1": ("10uF 16V aluminium electrolytic radial D5mm P2.0mm", "CP_Radial_D5.0mm_P2.00mm", "", ""),
     **{f"K{k}": ("1.25mm 9-pin vertical through-hole wafer header (PicoBlade compatible)",
-                 "Molex_PicoBlade_53047-0910_1x09_P1.25mm_Vertical", "A1251WV-9P")
+                 "Molex_PicoBlade_53047-0910_1x09_P1.25mm_Vertical", "530470910", "C564027")
        for k in range(6)},
 }
 
@@ -337,8 +337,8 @@ def jlc():
     with open(HERE / "carrier_bom.csv", "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["Comment", "Designator", "Footprint", "Manufacturer Part", "LCSC Part #"])
-        for (comment, footprint, mpn), refs in groups.items():
-            w.writerow([comment, ",".join(refs), footprint, mpn, ""])
+        for (comment, footprint, mpn, lcsc), refs in groups.items():
+            w.writerow([comment, ",".join(refs), footprint, mpn, lcsc])
 
 
 if __name__ == "__main__":

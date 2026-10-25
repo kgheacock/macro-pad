@@ -24,7 +24,8 @@ so it does not fit the panel, and its corner inserts do not line up with the pan
 ## Goals
 
 - A printable body STL whose outline matches the panel: 110 × 100 mm with 4 mm corner radii.
-- An M3 heat-set insert under each of the panel's 4 countersunk holes, at (±50, ±45) mm.
+- A JLC3DP Type 5 (M3\*4\*5) threaded insert under each of the panel's 4 countersunk holes,
+  at (±50, ±45) mm: a 3.6 mm hole 7 mm deep with at least 3 mm of wall (Keith's ask, 2026-10-25).
 - The same wall, floor and depth as `body.stl`.
 - A 22 mm round hole for the Adafruit 4218 panel-mount USB-C jack, in place of the old slot
   (Keith's ask, 2026-10-25).
@@ -65,5 +66,5 @@ the STEP file, which is committed next to the script.
       110 × 100 × 78.6 mm.
 - [ ] Each insert pocket is centred under a panel hole. Checked by placing the STEP panel on the
       STL.
-- [ ] A test print takes the panel with 4× M3 × 10 flat-head screws into heat-set inserts.
+- [ ] A test print takes the panel with 4× M3 × 8 flat-head screws into the JLC3DP inserts.
 - [ ] The six modules fit in the body with the panel fitted.

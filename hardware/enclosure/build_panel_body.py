@@ -10,13 +10,13 @@ The panel replaces the faceplate and the mounting plate of build_case.py: one
 3 mm plate, the module PCBs screw to its back face, and 4 countersunk M3 holes
 sit 5 mm in from each outer edge. This body is the same open tub as
 build_case.body(), sized to the panel, with an M3 heat-set insert under each
-of the panel's corner holes.
+of the panel's corner holes. The inserts are JLC3DP's threaded insert service, Type 5.
 
 Panel numbers are measured from the STEP file: outline 110 x 100 mm with
 4 mm corner radii, M3 holes at (+-50, +-45), keys on a 30 x 40 mm pitch.
 """
 from build_case import (
-    BED_CHAMFER, BOSS_R, FLOOR_T, M3_INSERT_D, M3_INSERT_DEPTH, OUT,
+    BED_CHAMFER, FLOOR_T, OUT,
     PCB_FRONT_DEPTH, PCB_H, PCB_W, SPACE_BELOW_MODULES, STANDOFF_TIP_DEPTH,
     USB_ABOVE_FLOOR, WALL, Manifold, cyl, placed, slab,
     to_mesh, union,
@@ -33,6 +33,13 @@ KEY_CENTRES = [(x, y) for y in (20.0, -20.0) for x in (-30.0, 0.0, 30.0)]
 # so USB_ABOVE_FLOOR (30 mm to the hole centre) leaves 15 mm below the nut.
 USB_HOLE_D = 22.0
 
+# ---- corner inserts: JLC3DP threaded insert service, Type 5 "M3*4*5" -----------
+# Insert OD 4.0, length 5. JLC3DP asks for a 3.6 mm hole 7 mm deep with at least
+# 3 mm of wall around it, so each corner is a solid block reaching 3.2 mm past the hole.
+INSERT_HOLE_D, INSERT_HOLE_DEPTH = 3.6, 7.0
+INSERT_WALL = 3.2
+BLOCK_HALF = INSERT_HOLE_D / 2 + INSERT_WALL          # hole centre to each block face
+
 # ---- derived ----------------------------------------------------------------
 MODULE_BEHIND_PANEL = STANDOFF_TIP_DEPTH - PCB_FRONT_DEPTH
 CAVITY_DEPTH = MODULE_BEHIND_PANEL + SPACE_BELOW_MODULES
@@ -40,7 +47,7 @@ BODY_H = CAVITY_DEPTH + FLOOR_T
 
 
 def check_fit():
-    """Every module PCB must clear the walls and the corner bosses."""
+    """Every module PCB must clear the walls and the corner blocks."""
     in_x, in_y = PANEL_W / 2 - WALL, PANEL_H / 2 - WALL
     for kx, ky in KEY_CENTRES:
         for sx in (-1, 1):
@@ -48,19 +55,20 @@ def check_fit():
                 px, py = kx + sx * PCB_W / 2, ky + sy * PCB_H / 2
                 assert abs(px) < in_x and abs(py) < in_y, f"PCB corner ({px}, {py}) hits a wall"
                 for bx, by in CORNERS:
-                    d = ((px - bx) ** 2 + (py - by) ** 2) ** 0.5
-                    assert d > BOSS_R + 1.0, f"PCB corner ({px}, {py}) hits the boss at ({bx}, {by})"
+                    clear = max(abs(px - bx), abs(py - by)) - BLOCK_HALF
+                    assert clear > 1.0, f"PCB corner ({px}, {py}) hits the block at ({bx}, {by})"
 
 
 def body():
     z_top, z_bot = 0.0, -BODY_H
     outer = slab(PANEL_W, PANEL_H, PANEL_R, z_bot, z_top, chamfer_bottom=BED_CHAMFER)
     cavity = slab(PANEL_W - 2 * WALL, PANEL_H - 2 * WALL, PANEL_R - WALL / 2, z_bot + FLOOR_T, z_top + 0.01)
-    # The bosses run down to the floor as full-height pillars: nothing overhangs, and the corners are stiffer.
-    bosses = union([cyl(2 * BOSS_R, z_bot + FLOOR_T - 0.01, z_top + 0.02, x, y) for x, y in CORNERS])
-    b = outer - (cavity - bosses)
+    # Full-height corner blocks from the floor up: nothing overhangs, and the corners are stiffer.
+    block = Manifold.cube((2 * BLOCK_HALF, 2 * BLOCK_HALF, BODY_H - FLOOR_T + 0.03), center=True)
+    blocks = union([block.translate((x, y, z_bot + FLOOR_T + (BODY_H - FLOOR_T) / 2)) for x, y in CORNERS])
+    b = outer - (cavity - blocks)
     for x, y in CORNERS:
-        b = b - cyl(M3_INSERT_D, z_top - M3_INSERT_DEPTH, z_top + 0.01, x, y)
+        b = b - cyl(INSERT_HOLE_D, z_top - INSERT_HOLE_DEPTH, z_top + 0.01, x, y)
     # Round hole for the Adafruit 4218 panel-mount USB-C jack, through the short end wall at -X
     zc = z_bot + FLOOR_T + USB_ABOVE_FLOOR
     hole = Manifold.cylinder(WALL + 2, USB_HOLE_D / 2, USB_HOLE_D / 2, 64)

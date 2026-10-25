@@ -18,7 +18,7 @@ Panel numbers are measured from the STEP file: outline 110 x 100 mm with
 from build_case import (
     BED_CHAMFER, BOSS_R, FLOOR_T, M3_INSERT_D, M3_INSERT_DEPTH, OUT,
     PCB_FRONT_DEPTH, PCB_H, PCB_W, SPACE_BELOW_MODULES, STANDOFF_TIP_DEPTH,
-    USB_ABOVE_FLOOR, USB_H, USB_W, WALL, Manifold, cyl, placed, rrect, slab,
+    USB_ABOVE_FLOOR, WALL, Manifold, cyl, placed, slab,
     to_mesh, union,
 )
 
@@ -27,6 +27,11 @@ PANEL_W, PANEL_H = 110.0, 100.0
 PANEL_R = 4.0
 CORNERS = [(sx * 50.0, sy * 45.0) for sx in (-1, 1) for sy in (-1, 1)]
 KEY_CENTRES = [(x, y) for y in (20.0, -20.0) for x in (-30.0, 0.0, 30.0)]
+
+# ---- USB-C: Adafruit 4218 round panel-mount extension ------------------------
+# Adafruit asks for a 21.5 to 27 mm hole; its flange and nut are about 30 mm across,
+# so USB_ABOVE_FLOOR (30 mm to the hole centre) leaves 15 mm below the nut.
+USB_HOLE_D = 22.0
 
 # ---- derived ----------------------------------------------------------------
 MODULE_BEHIND_PANEL = STANDOFF_TIP_DEPTH - PCB_FRONT_DEPTH
@@ -56,11 +61,11 @@ def body():
     b = outer - (cavity - bosses)
     for x, y in CORNERS:
         b = b - cyl(M3_INSERT_D, z_top - M3_INSERT_DEPTH, z_top + 0.01, x, y)
-    # USB-C slot through the short end wall at -X, as in build_case.body()
+    # Round hole for the Adafruit 4218 panel-mount USB-C jack, through the short end wall at -X
     zc = z_bot + FLOOR_T + USB_ABOVE_FLOOR
-    slot = Manifold.extrude(rrect(USB_H, USB_W, USB_H / 2 - 0.01), WALL + 2)
-    slot = slot.rotate((0, 90, 0)).translate((-PANEL_W / 2 - 1, 0, zc))
-    return b - slot
+    hole = Manifold.cylinder(WALL + 2, USB_HOLE_D / 2, USB_HOLE_D / 2, 64)
+    hole = hole.rotate((0, 90, 0)).translate((-PANEL_W / 2 - 1, 0, zc))
+    return b - hole
 
 
 def main():

@@ -25,7 +25,9 @@ so it does not fit the panel, and its corner inserts do not line up with the pan
 
 - A printable body STL whose outline matches the panel: 110 × 100 mm with 4 mm corner radii.
 - An M3 heat-set insert under each of the panel's 4 countersunk holes, at (±50, ±45) mm.
-- The same wall, floor, depth and USB-C slot as `body.stl`.
+- The same wall, floor and depth as `body.stl`.
+- A 22 mm round hole for the Adafruit 4218 panel-mount USB-C jack, in place of the old slot
+  (Keith's ask, 2026-10-25).
 
 ## Non-goals
 

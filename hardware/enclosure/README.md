@@ -50,9 +50,9 @@ Regenerate it with `python hardware/enclosure/build_panel_body.py`.
 - The USB-C opening is a 22 mm round hole for the [Adafruit 4218](https://www.adafruit.com/product/4218)
   panel-mount extension. It sits in the 100 mm end wall, centred 30 mm above the floor. Its ~30 mm flange
   and nut clear the floor and the corner pillars.
-- Its 4 corner bosses sit under the panel's countersunk holes at (±50, ±45) mm from the centre.
-  They are full-height pillars from the floor up, so they print without supports. Each boss has
-  a 4.0 mm M3 heat-set insert pocket, 12 mm deep.
-- Use 4× **M3 × 10** flat-head screws. With the 3 mm panel, the old M3 × 16 screws would hit
-  the bottom of the pocket.
-- The script checks that every module PCB clears the walls and bosses.
+- Its 4 corners are solid full-height blocks from the floor up, so they print without supports.
+  Each block has an insert hole under one of the panel's countersunk holes at (±50, ±45) mm from the centre.
+- The holes are sized for JLC3DP's threaded insert service, **Type 5: M3\*4\*5**. That's a 3.6 mm hole,
+  7 mm deep, with at least 3 mm of wall. When ordering, upload `panel_body_inserts.png` as the insert drawing.
+- Use 4× **M3 × 8** flat-head screws. With the 3 mm panel, a longer screw hits the bottom of the 7 mm hole.
+- The script checks that every module PCB clears the walls and the corner blocks.

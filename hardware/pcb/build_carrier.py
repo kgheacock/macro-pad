@@ -308,8 +308,8 @@ def finish():
 # for JLCPCB's "Manual Match" to fill. J3, the mic header, is left off so the mic's pin order
 # can be checked first.
 JLC_PARTS = {
-    "J1": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "", ""),
-    "J2": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "", ""),
+    "J1": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "PM254-1-20-Z-8.5", "C2897383"),
+    "J2": ("Female header 1x20 2.54mm straight through-hole", "PinSocket_1x20_P2.54mm_Vertical", "PM254-1-20-Z-8.5", "C2897383"),
     "C1": ("10uF 16V aluminium electrolytic radial D5mm P2.0mm", "CP_Radial_D5.0mm_P2.00mm", "", ""),
     **{f"K{k}": ("1.25mm 9-pin vertical through-hole wafer header (PicoBlade compatible)",
                  "Molex_PicoBlade_53047-0910_1x09_P1.25mm_Vertical", "530470910", "C564027")

@@ -49,7 +49,7 @@ Regenerate it with `python hardware/enclosure/build_panel_body.py`.
   as `body.stl`.
 - The USB-C opening is a 22 mm round hole for the [Adafruit 4218](https://www.adafruit.com/product/4218)
   panel-mount extension. It sits in the 100 mm end wall, centred 30 mm above the floor. Its ~30 mm flange
-  and nut clear the floor and the corner pillars.
+  and nut clear the floor and the corner blocks.
 - Its 4 corners are solid full-height blocks from the floor up, so they print without supports.
   Each block has an insert hole under one of the panel's countersunk holes at (±50, ±45) mm from the centre.
 - The holes are sized for JLC3DP's threaded insert service, **Type 5: M3\*4\*5**. That's a 3.6 mm hole,

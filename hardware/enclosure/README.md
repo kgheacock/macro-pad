@@ -45,8 +45,11 @@ All dimensions and tolerances are constants at the top of that script.
 mounting plate. The module PCBs screw to its back face. `panel_body.stl` is the body for it.
 Regenerate it with `python hardware/enclosure/build_panel_body.py`.
 
-- The tub is 110 × 100 × 78.6 mm. It keeps the same wall, floor, 63.5 mm of space below the modules
-  and USB-C slot as `body.stl`. The slot is in the 100 mm end wall.
+- The tub is 110 × 100 × 78.6 mm. It keeps the same wall, floor and 63.5 mm of space below the modules
+  as `body.stl`.
+- The USB-C opening is a 22 mm round hole for the [Adafruit 4218](https://www.adafruit.com/product/4218)
+  panel-mount extension. It sits in the 100 mm end wall, centred 30 mm above the floor. Its ~30 mm flange
+  and nut clear the floor and the corner pillars.
 - Its 4 corner bosses sit under the panel's countersunk holes at (±50, ±45) mm from the centre.
   They are full-height pillars from the floor up, so they print without supports. Each boss has
   a 4.0 mm M3 heat-set insert pocket, 12 mm deep.

@@ -1,0 +1,80 @@
+** Drc report for carrier.kicad_pcb **
+** Created on 2026-10-25 21:42:11 **
+
+** Found 21 DRC violations **
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on F.Cu
+    @(11.7500 mm, 10.0000 mm): PTH pad 4 [GND] of K0
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on F.Cu
+    @(17.0800 mm, 62.0000 mm): PTH pad 3 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on B.Cu
+    @(29.7800 mm, 62.0000 mm): PTH pad 8 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on B.Cu
+    @(42.4800 mm, 62.0000 mm): PTH pad 13 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on F.Cu
+    @(55.1800 mm, 62.0000 mm): PTH pad 18 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on B.Cu
+    @(71.7500 mm, 10.0000 mm): PTH pad 4 [GND] of K2
+[starved_thermal]: Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)
+    Local override; Severity: error
+    @(0.0000 mm, 0.0000 mm): Zone [GND] on B.Cu
+    @(41.7500 mm, 10.0000 mm): PTH pad 4 [GND] of K1
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(4.0000 mm, 4.0000 mm): Footprint H1
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(12.0000 mm, 44.2200 mm): Footprint J2
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(4.0000 mm, 66.0000 mm): Footprint H3
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(68.0000 mm, 26.0000 mm): Footprint K5
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(86.0000 mm, 4.0000 mm): Footprint H2
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(8.0000 mm, 10.0000 mm): Footprint K0
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(86.0000 mm, 66.0000 mm): Footprint H4
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(12.0000 mm, 62.0000 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(22.0000 mm, 37.0000 mm): Footprint C1
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(38.0000 mm, 26.0000 mm): Footprint K4
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(68.0000 mm, 50.0000 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(8.0000 mm, 26.0000 mm): Footprint K3
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(68.0000 mm, 10.0000 mm): Footprint K2
+[lib_footprint_issues]: The current configuration does not include the library ''.
+    Local override; Severity: warning
+    @(38.0000 mm, 10.0000 mm): Footprint K1
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

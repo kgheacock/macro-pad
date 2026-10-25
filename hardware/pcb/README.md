@@ -7,6 +7,13 @@ female headers, each ScreenKey plugs into its own 1.25 mm 9-pin socket, and the 
 **To order:** upload `carrier_jlcpcb.zip` to JLCPCB. The defaults are fine: 2 layers, 1.6 mm, 1 oz, HASL.
 `carrier_top.png` and `carrier_bottom.png` show the copper.
 
+## Assembly by JLCPCB
+
+To have JLCPCB solder the parts on, upload `carrier_bom.csv` and `carrier_cpl.csv` at the PCBA step:
+- Choose **Parts Selection: By JLCPCB (Manual Match)**, since the BOM gives descriptions and an MPN but no LCSC numbers.
+- Set **Confirm Parts Placement: Yes** so they check the through-hole positions and rotations.
+- The mic header (J3) is left off. Solder it yourself once you've checked your mic's pin order.
+
 ## Parts
 
 | Ref | Part | Qty |

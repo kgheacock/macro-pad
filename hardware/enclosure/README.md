@@ -48,7 +48,8 @@ Regenerate it with `python hardware/enclosure/build_panel_body.py`.
 - The tub is 110 × 100 × 78.6 mm. It keeps the same wall, floor, 63.5 mm of space below the modules
   and USB-C slot as `body.stl`. The slot is in the 100 mm end wall.
 - Its 4 corner bosses sit under the panel's countersunk holes at (±50, ±45) mm from the centre.
-  Each boss has a 4.0 mm M3 heat-set insert pocket, 12 mm deep.
+  They are full-height pillars from the floor up, so they print without supports. Each boss has
+  a 4.0 mm M3 heat-set insert pocket, 12 mm deep.
 - Use 4× **M3 × 10** flat-head screws. With the 3 mm panel, the old M3 × 16 screws would hit
   the bottom of the pocket.
 - The script checks that every module PCB clears the walls and bosses.

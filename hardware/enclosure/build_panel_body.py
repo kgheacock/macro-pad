@@ -16,9 +16,9 @@ Panel numbers are measured from the STEP file: outline 110 x 100 mm with
 4 mm corner radii, M3 holes at (+-50, +-45), keys on a 30 x 40 mm pitch.
 """
 from build_case import (
-    BED_CHAMFER, BOSS_LEN, BOSS_R, FLOOR_T, M3_INSERT_D, M3_INSERT_DEPTH, OUT,
+    BED_CHAMFER, BOSS_R, FLOOR_T, M3_INSERT_D, M3_INSERT_DEPTH, OUT,
     PCB_FRONT_DEPTH, PCB_H, PCB_W, SPACE_BELOW_MODULES, STANDOFF_TIP_DEPTH,
-    USB_ABOVE_FLOOR, USB_H, USB_W, WALL, Manifold, cone, cyl, placed, rrect, slab,
+    USB_ABOVE_FLOOR, USB_H, USB_W, WALL, Manifold, cyl, placed, rrect, slab,
     to_mesh, union,
 )
 
@@ -51,8 +51,8 @@ def body():
     z_top, z_bot = 0.0, -BODY_H
     outer = slab(PANEL_W, PANEL_H, PANEL_R, z_bot, z_top, chamfer_bottom=BED_CHAMFER)
     cavity = slab(PANEL_W - 2 * WALL, PANEL_H - 2 * WALL, PANEL_R - WALL / 2, z_bot + FLOOR_T, z_top + 0.01)
-    bosses = union([cyl(2 * BOSS_R, -BOSS_LEN, z_top + 0.02, x, y)
-                    + cone(0.0, 2 * BOSS_R, -BOSS_LEN - BOSS_R, -BOSS_LEN, x, y) for x, y in CORNERS])
+    # The bosses run down to the floor as full-height pillars: nothing overhangs, and the corners are stiffer.
+    bosses = union([cyl(2 * BOSS_R, z_bot + FLOOR_T - 0.01, z_top + 0.02, x, y) for x, y in CORNERS])
     b = outer - (cavity - bosses)
     for x, y in CORNERS:
         b = b - cyl(M3_INSERT_D, z_top - M3_INSERT_DEPTH, z_top + 0.01, x, y)

@@ -1,0 +1,4 @@
+carrier_unrouted.*
+carrier.dsn
+*.kicad_prl
+gerbers/

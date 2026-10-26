@@ -7,7 +7,7 @@ updated: "2026-10-26"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/104"
 branch: "claude/project-thread-ik9h13"
 related: ["0071", "0072", "0073", "0076"]
 tags: ["inbox", "emoji", "github", "ai", "claude-code"]

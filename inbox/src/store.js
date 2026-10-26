@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -39,6 +39,16 @@ const MIGRATIONS = [
    INSERT INTO channel_here_new (plugin, channel, here) SELECT 'basic', channel, here FROM channel_here;
    DROP TABLE channel_here;
    ALTER TABLE channel_here_new RENAME TO channel_here;`,
+  // Task 0081: the Claude session a message is about, and the newest session
+  // on each branch of a repository, shared by every plugin.
+  `ALTER TABLE messages ADD COLUMN session TEXT;
+   CREATE TABLE branch_sessions (
+     repo    TEXT    NOT NULL,
+     branch  TEXT    NOT NULL,
+     session TEXT    NOT NULL,
+     at      INTEGER NOT NULL,
+     PRIMARY KEY (repo, branch)
+   );`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -191,14 +201,15 @@ export class Store {
   }
 
   // Returns the id of the new message. `here` is a "here" string (see
-  // here.js) or null; this file stores it without looking at it.
-  insert(channel, body, cwd, { status = DEFAULT_STATUS, here = null, now = Date.now() } = {}) {
+  // here.js) or null; this file stores it without looking at it. `session`
+  // is the Claude session the message is about, or null.
+  insert(channel, body, cwd, { status = DEFAULT_STATUS, here = null, session = null, now = Date.now() } = {}) {
     return this.#guard(() => {
       const result = this.#db
         .prepare(
-          'INSERT INTO messages (plugin, channel, body, created_at, cwd, status, here) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO messages (plugin, channel, body, created_at, cwd, status, here, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(this.#plugin, channel, body, now, cwd, status, here);
+        .run(this.#plugin, channel, body, now, cwd, status, here, session);
       return Number(result.lastInsertRowid);
     });
   }
@@ -239,7 +250,7 @@ export class Store {
   }
 
   // Per channel with unseen rows: the count, the unseen count per status
-  // (byStatus), the newest unseen id, its created_at, and its here (else the
+  // (byStatus), the newest unseen id, its created_at, its session, and its here (else the
   // channel's fallback, else null). Ordered by channel.
   unseen(channel = null) {
     return this.#guard(() => {
@@ -247,7 +258,7 @@ export class Store {
       const rows = this.#db
         .prepare(
           `SELECT m.channel AS channel, c.count AS count, c.statuses AS statuses, m.id AS newestId,
-                  m.created_at AS createdAt, COALESCE(m.here, h.here) AS here
+                  m.created_at AS createdAt, COALESCE(m.here, h.here) AS here, m.session AS session
              FROM messages m
              JOIN (SELECT channel, COUNT(*) AS count, MAX(id) AS newest, GROUP_CONCAT(status) AS statuses
                      FROM messages WHERE plugin = ? AND seen_at IS NULL ${clause} GROUP BY channel) c
@@ -271,7 +282,7 @@ export class Store {
       const rows = this.#db
         .prepare(
           `SELECT m.channel AS channel, m.id AS newestId, m.created_at AS createdAt,
-                  m.status AS status, COALESCE(m.here, h.here) AS here,
+                  m.status AS status, COALESCE(m.here, h.here) AS here, m.session AS session,
                   (SELECT COUNT(*) FROM messages u
                     WHERE u.plugin = m.plugin AND u.channel = m.channel AND u.seen_at IS NULL) AS count,
                   (SELECT GROUP_CONCAT(u.status) FROM messages u
@@ -295,6 +306,28 @@ export class Store {
         .prepare('SELECT DISTINCT channel FROM messages WHERE plugin = ? ORDER BY channel')
         .all(this.#plugin)
         .map((row) => row.channel),
+    );
+  }
+
+  // Records `session` as the newest Claude session on `branch` of the
+  // repository `repo` (task 0081), for every plugin.
+  linkBranch(repo, branch, session, now = Date.now()) {
+    this.#guard(() => {
+      this.#db
+        .prepare(
+          `INSERT INTO branch_sessions (repo, branch, session, at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (repo, branch) DO UPDATE SET session = excluded.session, at = excluded.at`,
+        )
+        .run(repo, branch, session, now);
+    });
+  }
+
+  // The newest session on `branch` of `repo`, or null.
+  branchSession(repo, branch) {
+    return this.#guard(
+      () => this.#db
+          .prepare('SELECT session FROM branch_sessions WHERE repo = ? AND branch = ?')
+          .get(repo, branch)?.session ?? null,
     );
   }
 

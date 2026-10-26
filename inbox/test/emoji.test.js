@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  channelInput,
+  componentOf,
   emojiChar,
   emojiFor,
   loadEmojiSet,
@@ -56,18 +56,25 @@ test('TestEmojiInputs', () => {
   assert.deepEqual(splitSessionChannel('macro-pad.driver'), { folder: 'macro-pad.driver', session: null });
   assert.deepEqual(splitSessionChannel('3f2a91c0'), { folder: '3f2a91c0', session: null });
   assert.equal(emojiChar('2693'), '⚓️');
+  // Task 0081: the repository of a folder channel.
+  assert.equal(componentOf('github.com.OnePayPal.docreviewonpremnodeweb'), 'docreviewonpremnodeweb');
+  assert.equal(componentOf('github.com.kgheacock.Macro-Pad.inbox'), 'macro-pad');
+  assert.equal(componentOf('macro-pad.driver'), 'macro-pad');
+  assert.equal(componentOf('macro-pad'), 'macro-pad');
+  // Three segments are no HOST.TLD.OWNER.REPO.
+  assert.equal(componentOf('work.com.notes'), 'work');
   assert.equal(emojiChar('1f98a'), '\u{1f98a}');
 });
 
 test('TestFolderIsItsChannel', (t) => {
-  // A folder under the source root hashes as the channel it gives, so a folder
-  // and its key show the same emoji.
+  // A folder under the source root hashes as the repository of the channel it
+  // gives (task 0081), so a folder and its key show the same emoji.
   const sc = scratch(t);
   const dir = `${sc.root}/macro-pad/driver`;
   mkdirSync(dir, { recursive: true });
   const r = run(['emoji', '--folder', dir, '--format', 'ref'], { sc });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), emojiFor(channelInput('macro-pad.driver')).iconRef);
+  assert.equal(r.stdout.trim(), emojiFor('repo:macro-pad').iconRef);
   assert.equal(run(['emoji', 'macro-pad.driver', '--format', 'ref'], { sc }).stdout, r.stdout);
   // Outside the root there is no channel, as for `inbox channel`.
   assert.equal(run(['emoji', '--folder', sc.dir], { sc }).status, 2);
@@ -102,9 +109,9 @@ test('TestEmojiCommand', (t) => {
   assert.equal(r.stdout.trim(), emojiFor('session:3f2a91c0').char);
   // A folder and a session print both, as a session key shows them.
   r = run(['emoji', 'macro-pad', '--session', session, '--format', 'name'], { sc });
-  assert.equal(r.stdout.trim(), `${emojiFor('channel:macro-pad').name} ${emojiFor('session:3f2a91c0').name}`);
+  assert.equal(r.stdout.trim(), `${emojiFor('repo:macro-pad').name} ${emojiFor('session:3f2a91c0').name}`);
   r = run(['emoji', '--channel', 'macro-pad', '--format', 'json'], { sc });
-  assert.deepEqual(JSON.parse(r.stdout).map((e) => e.input), ['channel:macro-pad']);
+  assert.deepEqual(JSON.parse(r.stdout).map((e) => e.input), ['repo:macro-pad']);
   // It needs no store, and makes none.
   assert.equal(run(['emoji', 'x'], { sc }).status, 0);
   assert.ok(!existsSync(sc.db), 'emoji made a store');

@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { channelInput, emojiFor } from '../src/emoji.js';
-import github, { ACTIVE_MS, DEFAULT_QUERY, fetchPulls, parseAnswer, syncPulls } from '../src/plugins/github.js';
+import github, {
+  ACTIVE_MS,
+  DEFAULT_QUERY,
+  fetchPulls,
+  parseAnswer,
+  parseNotifications,
+  syncPulls,
+} from '../src/plugins/github.js';
 import { createRenderer } from '../src/render.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
@@ -124,17 +131,80 @@ function stubGh(results) {
 }
 
 test('TestGithubFetch', async () => {
-  const { calls, execFile } = stubGh([{ stdout: answer([pr('macro-pad', 97, 'ERROR')]) }]);
+  const search = { stdout: answer([pr('macro-pad', 97, 'ERROR')]) };
+  const { calls, execFile } = stubGh([search, { stdout: '[]' }, search]);
   const got = await fetchPulls({ env: { INBOX_GH: '/opt/homebrew/bin/gh' }, execFile });
   assert.deepEqual(got.pulls.map((p) => [p.channel, p.status]), [['kgheacock.macro-pad.97', 'failing']]);
   assert.equal(calls[0].file, '/opt/homebrew/bin/gh');
   assert.deepEqual(calls[0].args.slice(0, 2), ['api', 'graphql']);
   assert.ok(calls[0].args.includes(`q=${DEFAULT_QUERY}`), calls[0].args.join(' '));
   assert.equal(calls[0].options.shell, false);
-  // The query can be set.
-  await fetchPulls({ env: { INBOX_GITHUB_QUERY: 'is:pr is:open review-requested:@me' }, execFile });
-  assert.equal(calls[1].file, 'gh');
-  assert.ok(calls[1].args.includes('q=is:pr is:open review-requested:@me'));
+  // Then the notifications, for watched PRs; none, so nothing more.
+  assert.deepEqual(calls[1].args, ['api', 'notifications?all=true&per_page=50']);
+  assert.equal(calls.length, 2);
+  // The query can be set, and INBOX_GITHUB_WATCHED=0 leaves out the notifications.
+  await fetchPulls({ env: { INBOX_GITHUB_QUERY: 'is:pr is:open review-requested:@me', INBOX_GITHUB_WATCHED: '0' }, execFile });
+  assert.equal(calls[2].file, 'gh');
+  assert.ok(calls[2].args.includes('q=is:pr is:open review-requested:@me'));
+  assert.equal(calls.length, 3);
+});
+
+// A notification thread as GET /notifications gives it.
+const thread = (repo, number, reason, type = 'PullRequest') => ({
+  reason,
+  subject: { type, title: 't', url: `https://api.github.com/repos/kgheacock/${repo}/pulls/${number}` },
+});
+
+test('TestGithubWatched', async () => {
+  // Watched: the repository (subscribed) or the PR (manual). A mention, an
+  // issue, and a repeat are not.
+  const refs = parseNotifications(
+    JSON.stringify([
+      thread('macro-pad', 97, 'subscribed'),
+      thread('dotfiles', 3, 'manual'),
+      thread('dotfiles', 3, 'subscribed'),
+      thread('site', 5, 'mention'),
+      thread('site', 6, 'subscribed', 'Issue'),
+      thread('site', 7, 'author'),
+    ]),
+  );
+  assert.deepEqual(refs, [
+    { owner: 'kgheacock', repo: 'macro-pad', number: 97 },
+    { owner: 'kgheacock', repo: 'dotfiles', number: 3 },
+  ]);
+
+  // The search has 97 already; 3 and 8 are asked for in one query, with
+  // their names as variables. 8 is merged, and a deleted repository gives
+  // null with an error beside the data.
+  const notifications = [thread('macro-pad', 97, 'subscribed'), thread('dotfiles', 3, 'manual'), thread('old', 8, 'manual'), thread('gone', 1, 'manual')];
+  const data = {
+    data: {
+      p0: { pullRequest: { ...pr('dotfiles', 3, 'FAILURE'), state: 'OPEN' } },
+      p1: { pullRequest: { ...pr('old', 8, 'SUCCESS'), state: 'MERGED' } },
+      p2: null,
+    },
+    errors: [{ message: "Could not resolve to a Repository with the name 'kgheacock/gone'." }],
+  };
+  const { calls, execFile } = stubGh([
+    { stdout: answer([pr('macro-pad', 97, 'SUCCESS')]) },
+    { stdout: JSON.stringify(notifications) },
+    { stdout: JSON.stringify(data), error: Object.assign(new Error('exit 1'), { code: 1 }) },
+  ]);
+  const got = await fetchPulls({ env: {}, execFile });
+  assert.deepEqual(got.pulls.map((p) => [p.channel, p.status]), [
+    ['kgheacock.macro-pad.97', 'passing'],
+    ['kgheacock.dotfiles.3', 'failing'],
+  ]);
+  assert.equal(got.total, 2, 'a whole answer, so PRs that left can close');
+  const asked = calls[2].args;
+  assert.ok(asked.includes('o0=kgheacock') && asked.includes('r0=dotfiles') && asked.includes('n0=3'), asked.join(' '));
+  assert.equal(asked[asked.indexOf('n0=3') - 1], '-F', 'the number is sent as an Int');
+  const query = asked[asked.indexOf('-f') + 1];
+  assert.ok(!query.includes('dotfiles'), 'names are variables, not query text');
+
+  // A notifications read that fails says what it was for.
+  const failing = stubGh([{ stdout: answer([]) }, { error: Object.assign(new Error('exit 1'), { code: 1 }), stderr: 'HTTP 403' }]);
+  await assert.rejects(fetchPulls({ env: {}, execFile: failing.execFile }), /cannot read watched PRs: gh failed: HTTP 403/);
 });
 
 test('TestGithubFeedFails', async () => {

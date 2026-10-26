@@ -3,7 +3,7 @@ id: "0076"
 title: "The github inbox plugin: one key per open PR, coloured by its checks, and a press opens it"
 status: "ongoing"
 created: "2026-10-22"
-updated: "2026-10-22"
+updated: "2026-10-26"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -248,3 +248,26 @@ ticked.
   colour? Not in this task. — kgheacock
 
 ## Notes
+
+### 2026-10-26: watched PRs, and the query from install.sh
+
+Keith asked which PRs show and whether the ones he watches can too, and
+asked to change the logic directly rather than write a new spec.
+
+- The feed also shows the open PRs Keith watches. GitHub search has no
+  qualifier for that, so after the search `fetchPulls` reads the 50 newest
+  notification threads (`gh api notifications?all=true&per_page=50`), keeps
+  the PRs whose reason is `subscribed` (a watched repository) or `manual` (a
+  subscribed PR) and that the search did not already return, and asks for
+  them in one GraphQL query (an alias per PR, the names as variables). Only
+  `OPEN` ones show. A PR GitHub cannot give (a deleted repository) is left
+  out. A watched PR shows while it has a notification among those 50; when it
+  drops out it gets `closed`, like a PR that closed.
+- `INBOX_GITHUB_WATCHED=0` turns watched PRs off. A failed notifications read
+  fails the run, logged as `cannot read GitHub: cannot read watched PRs: WHY`.
+- `install.sh --github-query Q` writes `INBOX_GITHUB_QUERY` into the wrapper
+  the service runs. A quote, a backslash, `}`, or a new line exits 2.
+- Proof: `cd inbox && node --test --test-name-pattern='TestGithubWatched|TestGithubFetch' test/github.test.js`
+  and `node --test --test-name-pattern=TestInstallRemovesPerPluginServices test/cli.test.js`.
+  The live notifications and GraphQL reads are not checked here (the cloud
+  sandbox blocks both); they are part of DoD-9 on the board.

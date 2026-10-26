@@ -7,7 +7,7 @@
 
 import { execFile as nodeExecFile } from 'node:child_process';
 import { validateChannel } from '../channel.js';
-import { channelInput, emojiFor } from '../emoji.js';
+import { componentInput, emojiFor } from '../emoji.js';
 import { MAX_CAPTION, clip } from '../render.js';
 
 export const GITHUB_STATUSES = ['failing', 'pending', 'passing', 'none', 'closed'];
@@ -46,7 +46,7 @@ const PAGE = 50;
 
 // The fields of a PR that a key needs.
 const PR_FIELDS =
-  'number title url state repository { name owner { login } } ' +
+  'number title url state repository { name owner { login } } headRefName headRepository { name } ' +
   'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
 
 const GRAPHQL = `query($q: String!) {
@@ -69,21 +69,29 @@ export function channelOf(owner, repo, number) {
 }
 
 // The caption REPO #NUMBER, over the emoji of the repository, so the PRs of
-// one repository share an emoji.
-export function prIcon(channel, set) {
+// one repository and the Claude sessions in its folder share an emoji (task
+// 0081). When a session worked on the PR's branch (row.session), its emoji
+// follows, as on the session's own key.
+export function prIcon(channel, set, row) {
   const parts = channel.split('.');
   const number = parts.at(-1);
-  const repo = parts.length > 1 ? parts.slice(0, -1).join('.') : channel;
   const name = parts.length > 1 ? parts.at(-2) : channel;
   const room = Math.max(1, MAX_CAPTION - number.length - 2);
+  const emoji = [emojiFor(componentInput(name), set).iconRef];
+  if (row?.session) emoji.push(emojiFor(`session:${row.session}`, set).iconRef);
   return {
     iconText: parts.length > 1 ? `${clip(name, room)} #${number}` : clip(channel, MAX_CAPTION),
-    iconEmoji: [emojiFor(channelInput(repo), set).iconRef],
+    iconEmoji: emoji,
   };
 }
 
+// The repository name of a PR's head, as the component of task 0081: the
+// name in lower case, a dot becoming -, as in a channel.
+const headRepo = (name) => segment(name).toLowerCase();
+
 // The PRs of a `gh api graphql` answer: { total, pulls: [{ channel, title,
-// url, status }] }. Throws an Error when the answer is not one.
+// url, status, repo, branch }] }, where repo and branch name the head (null
+// when GitHub gives none). Throws an Error when the answer is not one.
 export function parseAnswer(text) {
   let json;
   try {
@@ -100,7 +108,8 @@ export function parseAnswer(text) {
   return { total: typeof search.issueCount === 'number' ? search.issueCount : pulls.length, pulls };
 }
 
-// One PR node of an answer as { channel, title, url, status }, or null.
+// One PR node of an answer as { channel, title, url, status, repo, branch },
+// or null.
 function pullOf(node) {
   if (!node || typeof node.number !== 'number' || typeof node.url !== 'string') return null;
   const channel = channelOf(node.repository?.owner?.login, node.repository?.name, node.number);
@@ -111,6 +120,8 @@ function pullOf(node) {
     title: String(node.title ?? '').trim() || `#${node.number}`,
     url: node.url,
     status: ROLLUP[state] ?? 'none',
+    repo: typeof node.headRepository?.name === 'string' ? headRepo(node.headRepository.name) : null,
+    branch: typeof node.headRefName === 'string' && node.headRefName !== '' ? node.headRefName : null,
   };
 }
 
@@ -218,23 +229,28 @@ export async function fetchPulls({ env = process.env, execFile = nodeExecFile, t
   return { total: searched.total + extra.length, pulls: [...searched.pulls, ...extra] };
 }
 
-// Writes what changed since the store's last word on each PR, and closes the
-// PRs that are no longer open. Returns how many messages it wrote.
+// Writes what changed since the store's last word on each PR, its status or
+// the Claude session on its branch (task 0081), and closes the PRs that are
+// no longer open. Returns how many messages it wrote.
 export function syncPulls(store, { total, pulls }, { now = Date.now() } = {}) {
   const known = new Map(store.recent(now - ACTIVE_MS).map((row) => [row.channel, row]));
   let wrote = 0;
   const open = new Set();
   for (const pr of pulls) {
     open.add(pr.channel);
-    if (known.get(pr.channel)?.status === pr.status) continue;
-    store.insert(pr.channel, pr.title, NO_FOLDER, { status: pr.status, here: `url:${pr.url}`, now });
+    const session = pr.repo && pr.branch ? store.branchSession(pr.repo, pr.branch) : null;
+    const last = known.get(pr.channel);
+    if (last?.status === pr.status && (last.session ?? null) === session) continue;
+    const id = store.insert(pr.channel, pr.title, NO_FOLDER, { status: pr.status, here: `url:${pr.url}`, session, now });
+    // Only the session changed: no news for the pip, unless some was there.
+    if (last?.status === pr.status && last.count === 0) store.markSeen(pr.channel, id, now);
     wrote++;
   }
   // A cut answer does not say which PRs closed.
   if (total > pulls.length) return wrote;
   for (const [channel, row] of known) {
     if (open.has(channel) || row.status === 'closed') continue;
-    const id = store.insert(channel, 'closed', NO_FOLDER, { status: 'closed', here: row.here, now });
+    const id = store.insert(channel, 'closed', NO_FOLDER, { status: 'closed', here: row.here, session: row.session ?? null, now });
     store.markSeen(channel, id, now);
     wrote++;
   }

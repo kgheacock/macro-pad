@@ -11,7 +11,7 @@
 // and `channels` is every channel the store has ever held, so reset can clear
 // children an earlier daemon left on the pad.
 
-import { channelInput, emojiFor, loadEmojiSet, splitSessionChannel } from './emoji.js';
+import { componentInput, componentOf, emojiFor, loadEmojiSet, splitSessionChannel } from './emoji.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
 
 // macropadd's layers.MaxChildren.
@@ -27,14 +27,14 @@ export function clip(segment, limit) {
 }
 
 // The icon of a channel (task 0073): the last segment of its folder as a
-// caption, over the folder's emoji and, for a session channel, the session's
-// emoji. With `sessions`, a channel PROJECT.SID (task 0072) is the folder
-// PROJECT and the session SID; otherwise the whole channel is the folder.
-// `macro-pad.driver.3f2a91c0` gives "driver" over the emoji of
-// channel:macro-pad.driver and session:3f2a91c0.
+// caption, over the emoji of the folder's repository (task 0081) and, for a
+// session channel, the session's emoji. With `sessions`, a channel
+// PROJECT.SID (task 0072) is the folder PROJECT and the session SID;
+// otherwise the whole channel is the folder. `macro-pad.driver.3f2a91c0`
+// gives "driver" over the emoji of repo:macro-pad and session:3f2a91c0.
 export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } = {}) {
   const { folder, session } = sessions ? splitSessionChannel(channel) : { folder: channel, session: null };
-  const emoji = [emojiFor(channelInput(folder), set).iconRef];
+  const emoji = [emojiFor(componentInput(componentOf(folder)), set).iconRef];
   if (session !== null) emoji.push(emojiFor(`session:${session}`, set).iconRef);
   return { iconText: clip(folder.split('.').at(-1), MAX_CAPTION), iconEmoji: emoji };
 }
@@ -49,21 +49,24 @@ export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } 
 //   sessions         true when a channel may be PROJECT.SID (see channelIcon)
 //   shows(row)       optional; a row it returns false for is left out of the
 //                    top key and the children
-//   icon(channel, set) optional; { iconText, iconEmoji } instead of channelIcon
+//   icon(channel, set, row) optional; { iconText, iconEmoji } instead of
+//                    channelIcon. row may be undefined; its `session` is
+//                    the session of the newest message (task 0081)
 // `emojiSet` is the emoji set, for a test; by default assets/emoji/set.txt.
 export function createRenderer({ slot, rules, emojiSet }) {
-  // The icon of each channel, worked out once.
+  // The icon of each channel and session, worked out once.
   const icons = new Map();
-  const iconOf = (channel) => {
-    if (!icons.has(channel)) {
+  const iconOf = (channel, row) => {
+    const key = `${channel}\n${row?.session ?? ''}`;
+    if (!icons.has(key)) {
       icons.set(
-        channel,
+        key,
         rules.icon
-          ? rules.icon(channel, emojiSet)
+          ? rules.icon(channel, emojiSet, row)
           : channelIcon(channel, { sessions: rules.sessions === true, set: emojiSet }),
       );
     }
-    return icons.get(channel);
+    return icons.get(key);
   };
   // The last values sent per node, as JSON, so only a change is sent again.
   const sent = new Map();
@@ -94,7 +97,7 @@ export function createRenderer({ slot, rules, emojiSet }) {
       id: channel,
       parent: rules.id,
       ...rules.child(row),
-      ...iconOf(channel),
+      ...iconOf(channel, row),
     });
   };
 

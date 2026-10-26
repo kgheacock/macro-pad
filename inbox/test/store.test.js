@@ -41,8 +41,8 @@ test('TestUnseen', (t) => {
   const a2 = store.insert('a', 'two', '/x', { now: 2000 });
   const b1 = store.insert('b', 'three', '/x', { now: 3000 });
   assert.deepEqual(store.unseen(), [
-    { channel: 'a', count: 2, byStatus: { info: 2 }, newestId: a2, createdAt: 2000, here: null },
-    { channel: 'b', count: 1, byStatus: { info: 1 }, newestId: b1, createdAt: 3000, here: null },
+    { channel: 'a', count: 2, byStatus: { info: 2 }, newestId: a2, createdAt: 2000, here: null, session: null },
+    { channel: 'b', count: 1, byStatus: { info: 1 }, newestId: b1, createdAt: 3000, here: null, session: null },
   ]);
   assert.equal(store.count(), 3);
   assert.equal(store.count('a'), 2);
@@ -195,8 +195,38 @@ test('TestMigrateToPlugins', (t) => {
   assert.equal(ai.channelHere('a'), null);
   ai.close();
   const check = new DatabaseSync(db);
-  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   check.close();
+});
+
+test('TestBranchSessions', (t) => {
+  // Task 0081: a schema 4 file gains messages.session and branch_sessions.
+  const { db } = scratch(t);
+  mkdirSync(path.dirname(db), { recursive: true });
+  const raw = new DatabaseSync(db);
+  raw.exec(`CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, body TEXT NOT NULL,
+    created_at INTEGER NOT NULL, seen_at INTEGER, cwd TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'info', here TEXT, plugin TEXT NOT NULL DEFAULT 'basic');
+    CREATE TABLE channel_here (plugin TEXT NOT NULL, channel TEXT NOT NULL, here TEXT NOT NULL,
+      PRIMARY KEY (plugin, channel));
+    INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x');
+    PRAGMA user_version = 4;`);
+  raw.close();
+  const store = openStore(db);
+  t.after(() => store.close());
+  assert.equal(store.unseen()[0].session, null);
+  store.insert('b', 'new', '/x', { session: '3f2a91c0', now: 5 });
+  assert.equal(store.recent(0).find((r) => r.channel === 'b').session, '3f2a91c0');
+  // The newest session on a branch wins, and every plugin reads it.
+  assert.equal(store.branchSession('macro-pad', 'fix-x'), null);
+  store.linkBranch('macro-pad', 'fix-x', '3f2a91c0', 1);
+  store.linkBranch('macro-pad', 'fix-x', '0badf00d', 2);
+  store.linkBranch('other', 'fix-x', '11111111', 3);
+  const github = openStore(db, undefined, { plugin: 'github' });
+  t.after(() => github.close());
+  assert.equal(github.branchSession('macro-pad', 'fix-x'), '0badf00d');
+  assert.equal(github.branchSession('other', 'fix-x'), '11111111');
 });
 
 test('TestPluginScope', (t) => {

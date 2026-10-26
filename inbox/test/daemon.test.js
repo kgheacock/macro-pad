@@ -63,7 +63,7 @@ test('TestChangeReachesPad', async (t) => {
     status: 'WARN',
     count: 1,
     iconText: 'debug',
-    iconEmoji: [emojiFor('channel:debug').iconRef],
+    iconEmoji: [emojiFor('repo:debug').iconRef],
   });
   assert.ok(!existsSync(path.join(sc.dir, 'assets')), 'the daemon wrote under the assets directory');
 });

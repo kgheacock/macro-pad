@@ -5,7 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA_VERSION, openStore } from '../src/store.js';
-import { run, runAi, scratch, start } from '../testlib/helpers.js';
+import { fileURLToPath } from 'node:url';
+import { BIN, envFor, run, runAi, scratch, start } from '../testlib/helpers.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
 
 // Every row of the store, of every plugin, oldest first.
@@ -1039,4 +1040,40 @@ test('TestPluginHelp', (t) => {
   for (const r of [top, runAi(['send', '-h'], { sc }), runAi(['bogus'], { sc }), run(['plugins', '-h'], { sc })]) {
     assert.ok(!`${r.stdout}${r.stderr}`.includes('ai-inbox'), r.stdout + r.stderr);
   }
+});
+
+test('TestSendBranch', (t) => {
+  // Task 0081: --branch links the branch of a session's repository to it.
+  const sc = scratch(t);
+  let r = runAi(['send', '--branch', 'fix-x', 'github.com.OnePayPal.docreviewonpremnodeweb.08709453', 'working'], { sc });
+  assert.equal(r.status, 0, r.stderr);
+  const store = openStore(sc.db);
+  t.after(() => store.close());
+  assert.equal(store.branchSession('docreviewonpremnodeweb', 'fix-x'), '08709453');
+  // A channel without a session has nothing to link.
+  r = runAi(['send', '--branch', 'fix-x', 'macro-pad', 'working'], { sc });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--branch needs a session channel/);
+  assert.match(run(['send', '-h'], { sc }).stdout, /--branch B/);
+});
+
+test('TestHookSendsBranch', (t) => {
+  // The Claude Code hook names the branch of the session's folder.
+  const sc = scratch(t);
+  const repo = path.join(sc.root, 'macro-pad');
+  mkdirSync(repo);
+  const git = (...args) => spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  if (git('init', '-q', '-b', 'claude/fix-x').status !== 0) return t.skip('no git');
+  const hook = fileURLToPath(new URL('../claude-code/claude-ai-inbox.sh', import.meta.url));
+  const r = spawnSync('bash', [hook, 'prompt'], {
+    input: JSON.stringify({ session_id: '3f2a91c0-1111-2222-3333-444455556666', cwd: repo }),
+    env: envFor(sc, { INBOX_BIN: BIN, CLAUDE_AI_INBOX_CACHE: path.join(sc.dir, 'cache') }),
+    encoding: 'utf8',
+  });
+  if (r.error) return t.skip('no bash');
+  assert.equal(r.status, 0, r.stderr);
+  const store = openStore(sc.db, undefined, { plugin: 'ai' });
+  t.after(() => store.close());
+  assert.deepEqual(store.list().map((m) => [m.channel, m.status]), [['macro-pad.3f2a91c0', 'running']]);
+  assert.equal(store.branchSession('macro-pad', 'claude/fix-x'), '3f2a91c0');
 });

@@ -32,7 +32,7 @@ test('TestPlan', () => {
     status: 'WARN',
     count: 1,
     iconText: 'b',
-    iconEmoji: [emojiFor('channel:b').iconRef],
+    iconEmoji: [emojiFor('repo:b').iconRef],
   });
 
   // Nothing unseen: the key stays, with count 0 and no status, and no children.
@@ -169,19 +169,21 @@ test('TestResetSendsEverythingAndClearsLeftovers', () => {
 });
 
 test('TestChannelIcon', () => {
-  const folder = (name) => emojiFor(`channel:${name}`).iconRef;
-  // A channel is a folder: its last segment over its emoji.
-  assert.deepEqual(channelIcon('debug'), { iconText: 'debug', iconEmoji: [folder('debug')] });
+  const repo = (name) => emojiFor(`repo:${name}`).iconRef;
+  // A channel is a folder: its last segment over its repository's emoji.
+  assert.deepEqual(channelIcon('debug'), { iconText: 'debug', iconEmoji: [repo('debug')] });
   assert.deepEqual(channelIcon('macro-pad.driver'), {
     iconText: 'driver',
-    iconEmoji: [folder('macro-pad.driver')],
+    iconEmoji: [repo('macro-pad')],
   });
+  // HOST.TLD.OWNER.REPO: the repository is the fourth segment (task 0081).
+  assert.deepEqual(channelIcon('github.com.kgheacock.macro-pad').iconEmoji, [repo('macro-pad')]);
   // Without sessions, a last segment of 8 hex digits is part of the folder.
-  assert.deepEqual(channelIcon('macro-pad.3f2a91c0').iconEmoji, [folder('macro-pad.3f2a91c0')]);
-  // With sessions, PROJECT.SID is the folder's emoji, then the session's.
+  assert.deepEqual(channelIcon('3f2a91c0').iconEmoji, [repo('3f2a91c0')]);
+  // With sessions, PROJECT.SID is the repository's emoji, then the session's.
   assert.deepEqual(channelIcon('macro-pad.driver.3F2A91C0', { sessions: true }), {
     iconText: 'driver',
-    iconEmoji: [folder('macro-pad.driver'), emojiFor('session:3f2a91c0').iconRef],
+    iconEmoji: [repo('macro-pad'), emojiFor('session:3f2a91c0').iconRef],
   });
   // A long name is cut to the 16 runes macropadd takes as a caption.
   assert.equal(channelIcon(`x.${'n'.repeat(40)}`).iconText, `${'n'.repeat(15)}…`);
@@ -199,10 +201,22 @@ test('TestBasicAndAiShareTheFolderEmoji', () => {
   assert.equal(aiChild.iconEmoji.length, 2);
 });
 
+test('TestOneRepositoryOneEmoji', () => {
+  // Task 0081: a subfolder, a folder under HOST/OWNER, and a session in it
+  // all show the repository's emoji first.
+  const first = (rules, channel) =>
+    createRenderer({ rules }).plan({ unseen: [{ ...row(channel, 1, 1), byStatus: { done: 1 } }], active: null })[1]
+      .setLayerKey.iconEmoji[0];
+  const want = emojiFor('repo:docreviewonpremnodeweb').iconRef;
+  assert.equal(first(basic.rules, 'docreviewonpremnodeweb'), want);
+  assert.equal(first(basic.rules, 'docreviewonpremnodeweb.src'), want);
+  assert.equal(first(ai.rules, 'github.com.OnePayPal.docreviewonpremnodeweb.08709453'), want);
+});
+
 test('TestPlanSendsEmojiNotAPicture', () => {
   const messages = renderer().plan({ unseen: [row('macro-pad.driver', 2, 5)], active: null });
   const child = messages[1].setLayerKey;
   assert.equal(child.iconText, 'driver');
-  assert.deepEqual(child.iconEmoji, [emojiFor('channel:macro-pad.driver').iconRef]);
+  assert.deepEqual(child.iconEmoji, [emojiFor('repo:macro-pad').iconRef]);
   assert.ok(!('iconRef' in child), 'a child sends emoji, and no iconRef');
 });

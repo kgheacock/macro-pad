@@ -5,7 +5,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
-import { channelInput, emojiFor, sessionInput } from './emoji.js';
+import { componentInput, componentOf, emojiFor, sessionInput, splitSessionChannel } from './emoji.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
 import { DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
@@ -60,7 +60,7 @@ Examples:
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
 
-  send: `Usage: inbox send [--status STATUS] [--here HERE] [--channel CHANNEL | CHANNEL] MESSAGE
+  send: `Usage: inbox send [--status STATUS] [--here HERE] [--branch B] [--channel CHANNEL | CHANNEL] MESSAGE
 
 Send one message.
 
@@ -69,6 +69,9 @@ Send one message.
 ${CHANNEL_OPTION}
 ${STATUS_OPTION}
 ${HERE_OPTION}
+  --branch B  the git branch of a Claude Code session channel PROJECT.SID: a PR
+              from branch B of PROJECT's repository then shows the session's
+              emoji (task 0081)
 ${DB_OPTION}
 
 ${CHANNEL_RULES}
@@ -205,10 +208,12 @@ Examples:
 
 Print the emoji a key shows for a folder, a session, or both (task 0073). The
 same input always gives the same emoji, on every machine. It reads no store,
-so a status line can run it often.
+so a status line can run it often. Every channel of one repository gives the
+emoji of that repository (task 0081): macro-pad and macro-pad.driver match,
+and so does github.com.me.macro-pad.
 
-  CHANNEL        the emoji of this channel (or --channel C)
-  --folder DIR   the emoji of this folder: the emoji of the channel it gives
+  CHANNEL        the emoji of this channel's repository (or --channel C)
+  --folder DIR   the emoji of this folder: that of the channel it gives
   --session ID   the emoji of this Claude Code session (its first 8 hex digits)
   --format F     char (default), name, ref (the file under assets/), or json
 
@@ -292,7 +297,7 @@ const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen'
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen', 'emoji'];
 const OPTIONS = {
-  send: { status: { type: 'string' }, here: { type: 'string' } },
+  send: { status: { type: 'string' }, here: { type: 'string' }, branch: { type: 'string' } },
   pipe: { status: { type: 'string' }, here: { type: 'string' } },
   list: {
     'all-channels': { type: 'boolean' },
@@ -461,8 +466,24 @@ function runSend(io, { values, positionals }) {
   const channel = requireChannel(io, explicit, 'inbox send CHANNEL MESSAGE');
   const status = parseStatus(io, values.status);
   const here = resolveHere({ flag: values.here, env: io.env });
-  withStore(io, values, (store) => store.insert(channel, message, io.cwd(), { status, here }));
+  const link = branchLink(channel, values.branch);
+  withStore(io, values, (store) => {
+    if (link !== null) store.linkBranch(link.repo, link.branch, link.session);
+    store.insert(channel, message, io.cwd(), { status, here });
+  });
   return 0;
+}
+
+// The branch link of `send --branch` (task 0081): { repo, branch, session },
+// or null without --branch.
+function branchLink(channel, branch) {
+  if (branch === undefined) return null;
+  if (branch.trim() === '') throw new UsageError('--branch needs a branch name');
+  const { folder, session } = splitSessionChannel(channel);
+  if (session === null) {
+    throw new UsageError(`--branch needs a session channel PROJECT.SID; "${channel}" has no session`);
+  }
+  return { repo: componentOf(folder), branch: branch.trim(), session };
 }
 
 function cutLine(line, warnCut) {
@@ -706,9 +727,10 @@ function runEmoji(io, { values, positionals }) {
   }
   const inputs = [];
   const root = sourceRoot(io.env);
-  if (positionals.length) inputs.push(channelInput(validateChannel(positionals[0])));
-  else if (values.folder !== undefined) inputs.push(channelInput(folderChannel(path.resolve(io.cwd(), values.folder), root)));
-  else if (values.session === undefined) inputs.push(channelInput(folderChannel(io.cwd(), root)));
+  const repo = (channel) => componentInput(componentOf(splitSessionChannel(channel).folder));
+  if (positionals.length) inputs.push(repo(validateChannel(positionals[0])));
+  else if (values.folder !== undefined) inputs.push(repo(folderChannel(path.resolve(io.cwd(), values.folder), root)));
+  else if (values.session === undefined) inputs.push(repo(folderChannel(io.cwd(), root)));
   if (values.session !== undefined) inputs.push(sessionInput(values.session));
   const emoji = inputs.map((input) => ({ input, ...emojiFor(input) }));
   if (format === 'json') out(io, JSON.stringify(emoji));

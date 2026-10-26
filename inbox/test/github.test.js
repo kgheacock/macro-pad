@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { channelInput, emojiFor } from '../src/emoji.js';
+import { emojiFor } from '../src/emoji.js';
 import github, {
   ACTIVE_MS,
   DEFAULT_QUERY,
@@ -9,6 +9,7 @@ import github, {
   parseNotifications,
   syncPulls,
 } from '../src/plugins/github.js';
+import ai from '../src/plugins/ai.js';
 import { createRenderer } from '../src/render.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
@@ -19,6 +20,8 @@ const pr = (repo, number, state, title = `PR ${number}`) => ({
   title,
   url: `https://github.com/kgheacock/${repo}/pull/${number}`,
   repository: { name: repo, owner: { login: 'kgheacock' } },
+  headRefName: `pr-${number}`,
+  headRepository: { name: repo },
   commits: { nodes: [{ commit: { statusCheckRollup: state === null ? null : { state } } }] },
 });
 const answer = (nodes, issueCount = nodes.length) => JSON.stringify({ data: { search: { issueCount, nodes } } });
@@ -102,7 +105,7 @@ test('TestGithubKeys', (t) => {
   assert.deepEqual([red.status, red.count, red.parent], ['ERROR', 1, 'github-inbox']);
   // REPO #NUMBER, over the repository's emoji: both macro-pad PRs share it.
   assert.equal(red.iconText, 'macro-pad #97');
-  assert.deepEqual(red.iconEmoji, [emojiFor(channelInput('kgheacock.macro-pad')).iconRef]);
+  assert.deepEqual(red.iconEmoji, [emojiFor('repo:macro-pad').iconRef]);
   assert.deepEqual(k['kgheacock.macro-pad.98'].iconEmoji, red.iconEmoji);
   assert.equal(k['kgheacock.macro-pad.98'].status, 'DONE');
   // A long name is cut, and the number stays.
@@ -117,6 +120,40 @@ test('TestGithubKeys', (t) => {
   const p = keys(createRenderer({ rules: github.rules }).plan({ unseen: rowsOf(pending, now), active: null }));
   assert.deepEqual([p['github-inbox'].status, p['github-inbox'].count], ['RUNNING', 0]);
   assert.deepEqual([p['kgheacock.macro-pad.98'].status, p['kgheacock.macro-pad.98'].count], ['RUNNING', 0]);
+});
+
+test('TestGithubSessionEmoji', (t) => {
+  // Task 0081: a PR shows its repository's emoji, and the emoji of the Claude
+  // session that worked on its branch, as the session's own key does.
+  const store = storeFor(t);
+  const now = 1_000_000;
+  const both = parseAnswer(answer([pr('docreviewonpremnodeweb', 50, 'SUCCESS'), pr('docreviewonpremnodeweb', 51, 'SUCCESS')]));
+  assert.deepEqual([both.pulls[0].repo, both.pulls[0].branch], ['docreviewonpremnodeweb', 'pr-50']);
+  syncPulls(store, both, { now });
+  store.markSeen('kgheacock.docreviewonpremnodeweb.50', Number.MAX_SAFE_INTEGER, now);
+  const renderer = createRenderer({ rules: github.rules });
+  let k = keys(renderer.plan({ unseen: rowsOf(store, now), active: null }));
+  const repo = emojiFor('repo:docreviewonpremnodeweb').iconRef;
+  assert.deepEqual(k['kgheacock.docreviewonpremnodeweb.50'].iconEmoji, [repo]);
+
+  // The session links the branch after the PR was first written: the next
+  // run writes the link, seen, since only the session changed.
+  store.linkBranch('docreviewonpremnodeweb', 'pr-50', '08709453', now);
+  assert.equal(syncPulls(store, both, { now: now + 1 }), 1);
+  assert.equal(syncPulls(store, both, { now: now + 2 }), 0);
+  k = keys(renderer.plan({ unseen: rowsOf(store, now + 2), active: null }));
+  const pr50 = k['kgheacock.docreviewonpremnodeweb.50'];
+  assert.equal(pr50.count, 0);
+  assert.deepEqual(pr50.iconEmoji, [repo, emojiFor('session:08709453').iconRef]);
+  // The other PR of the repository keeps the repository's emoji alone.
+  assert.deepEqual(k['kgheacock.docreviewonpremnodeweb.51'].iconEmoji, [repo]);
+
+  // The session's own key on the ai plugin shows the same two emoji.
+  const session = createRenderer({ rules: ai.rules }).plan({
+    unseen: [{ channel: 'github.com.OnePayPal.docreviewonpremnodeweb.08709453', count: 1, newestId: 1, createdAt: 1, byStatus: { done: 1 } }],
+    active: null,
+  })[1].setLayerKey;
+  assert.deepEqual(session.iconEmoji, pr50.iconEmoji);
 });
 
 // An execFile stub that answers each call in turn.

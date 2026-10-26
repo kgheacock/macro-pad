@@ -507,16 +507,24 @@ inbox daemon --plugin ai [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
 ### Emoji
 
 Each channel key shows its folder's name over one or two emoji from
-`assets/emoji/` (task 0073): the folder's on the left and, for a Claude Code
-session, the session's on the right. The same folder or session always gets
-the same emoji, on every machine.
+`assets/emoji/` (task 0073): the repository's on the left and, for a Claude
+Code session, the session's on the right. The same repository or session
+always gets the same emoji, on every machine.
 
 - The folder of a channel is the channel itself. For the ai plugin, a channel
   `PROJECT.SID` from the Claude Code hooks, whose last segment is 8 hex digits,
-  is the folder `PROJECT` and the session `SID`. So a folder shows the same
-  emoji in the basic inbox and in the ai inbox.
-- The emoji of a folder is the emoji of `channel:` and its channel; a session
-  hashes `session:` and the first 8 hex digits of its id, in lower case.
+  is the folder `PROJECT` and the session `SID`.
+- Every key of one repository shows the same first emoji, on every plugin
+  (task 0081). It hashes `repo:` and the repository's name in lower case. The
+  name is the fourth segment of `HOST.TLD.OWNER.REPO...` (from
+  `~/source/github.com/OWNER/REPO`), else the first segment (from
+  `~/source/REPO/...`); for a PR, the `REPO` of `OWNER.REPO.NUMBER`. So
+  `macro-pad`, `macro-pad.driver`, `github.com.kgheacock.macro-pad.3f2a91c0`,
+  and the PR `kgheacock.macro-pad.97` all match.
+- A session hashes `session:` and the first 8 hex digits of its id, in lower
+  case. The hooks send the session's git branch (`send --branch`), and the
+  github plugin shows that session's emoji on a PR whose head is that branch,
+  so a PR a Claude session made matches the session's key in full.
 - Every emoji of `assets/emoji/set.txt` gets a score, the first 8 bytes of
   SHA-256 of the input, a line break, and the emoji's code points; the highest
   wins (rendezvous hashing). Adding an emoji to the set moves only the inputs

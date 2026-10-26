@@ -14,6 +14,9 @@
 # first 8 characters of the session id, from `session_id` in the hook payload,
 # else $CLAUDE_CODE_SESSION_ID. Without a session id the channel is PROJECT.
 #
+# Each send also names the git branch checked out in the project folder
+# (--branch), so a PR from that branch shows this session's emoji (task 0081).
+#
 # The ai plugin shows the highest status of the UNSEEN messages (waiting > running >
 # done), so a state change marks the channel seen first. Otherwise a `waiting`
 # from a permission prompt would keep the key yellow after you approved it, and
@@ -39,13 +42,17 @@ session="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
 session="$(printf '%s' "${session:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_-')"
 channel="$project${session:+.${session:0:8}}"
 
+# The branch of the project folder, when it is a git checkout on a branch.
+branch=""
+[ -n "$session" ] && branch="$(git -C "${proj:-$PWD}" branch --show-current 2>/dev/null)"
+
 cache="${CLAUDE_AI_INBOX_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/ai-inbox-claude}"
 mkdir -p "$cache" 2>/dev/null
 file="$cache/${session:-$channel}"
 last="$(cat "$file" 2>/dev/null)"
 
 seen() { "$inbox" --plugin ai seen "$channel" >/dev/null 2>&1; }
-send() { "$inbox" --plugin ai send --status "$1" -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
+send() { "$inbox" --plugin ai send --status "$1" ${branch:+--branch "$branch"} -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
 
 case "$state" in
   prompt)

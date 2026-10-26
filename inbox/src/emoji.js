@@ -6,7 +6,9 @@
 // only the inputs that now score it highest, about 1 in N.
 //
 // The inputs are a kind and a value:
-//   channel:NAME   a channel; a folder hashes as the channel it gives
+//   repo:NAME      a repository, its name in lower case (task 0081); every
+//                  key of one repository shows its emoji first
+//   channel:NAME   a channel, as a whole (task 0073; no key uses it now)
 //   session:SID    the first 8 characters of a session id, in lower case
 
 import { createHash } from 'node:crypto';
@@ -44,6 +46,21 @@ export function loadEmojiSet(file = SET_FILE) {
 
 export function channelInput(channel) {
   return `channel:${channel}`;
+}
+
+// The top-level domains of a host folder, as in ~/source/github.com/OWNER/REPO.
+const HOST_TLDS = new Set(['com', 'org', 'net', 'io', 'dev', 'co']);
+
+// The repository name of a folder channel (task 0081): REPO of
+// HOST.TLD.OWNER.REPO..., else the first segment. Lower case.
+export function componentOf(folder) {
+  const parts = folder.split('.');
+  const hosted = parts.length >= 4 && HOST_TLDS.has(parts[1].toLowerCase());
+  return (hosted ? parts[3] : parts[0]).toLowerCase();
+}
+
+export function componentInput(name) {
+  return `repo:${name.toLowerCase()}`;
 }
 
 // The session input of a session id: its first 8 characters, in lower case.

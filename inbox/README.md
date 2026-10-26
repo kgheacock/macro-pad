@@ -251,7 +251,8 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_BUSY_TIMEOUT_MS` | Busy timeout. Tests lower it. | `5000` |
 | `INBOX_DEBUG` | `1` adds a stack to an internal error. | unset |
 | `INBOX_GH` | The `gh` program the `github` plugin runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
-| `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. | `is:pr is:open author:@me archived:false` |
+| `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. `install.sh --github-query Q` sets it in the wrapper. | `is:pr is:open author:@me archived:false` |
+| `INBOX_GITHUB_WATCHED` | `0` leaves the PRs you watch out of the `github` plugin. | unset (watched PRs show) |
 
 ## Exit codes
 
@@ -543,6 +544,20 @@ One key per open pull request, coloured by the checks of its last commit
 `gh api graphql`, for the PRs of `$INBOX_GITHUB_QUERY` (default
 `is:pr is:open author:@me archived:false`, at most 50), and writes a message
 only when a PR's state changes. `gh` holds the login; run `gh auth login` once.
+
+It also shows the open PRs you watch: GitHub search cannot ask for those, so
+it reads your 50 newest notification threads (`gh api notifications`), read
+or not, keeps the PRs whose reason is `subscribed` (you watch the
+repository) or `manual` (you subscribed to the PR), and asks GitHub for
+their checks in one more query. A watched PR shows while it has a
+notification among those 50; one that drops out leaves the pad as if it
+closed. Set `INBOX_GITHUB_WATCHED=0` to leave watched PRs out.
+
+To change the search for the daemon, run
+`install.sh --github-query 'is:pr is:open involves:@me archived:false'`: it
+writes the query into the `inbox` wrapper the service runs. `involves:@me`
+adds the PRs you are assigned to, mentioned in, or commented on. Running
+`install.sh` again without it goes back to the default.
 
 | Status | Check roll-up | Color | Pad status |
 |---|---|---|---|

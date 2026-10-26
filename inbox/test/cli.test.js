@@ -568,6 +568,15 @@ test('TestInstallRemovesPerPluginServices', (t) => {
   r = spawnSync('sh', [script, '--dry-run', '--plugin', 'nope'], { env, encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.ok(r.stderr.includes('unknown plugin "nope"'), r.stderr);
+
+  // The github plugin's search goes in the wrapper; a quote cannot.
+  const query = 'is:pr is:open involves:@me archived:false';
+  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--github-query', query], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(`INBOX_GITHUB_QUERY=${query})`), r.stdout);
+  r = spawnSync('sh', [script, '--dry-run', '--github-query', "it's"], { env, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('--github-query may not hold a quote'), r.stderr);
 });
 
 test('TestUninstallRemovesEveryService', (t) => {

@@ -7,7 +7,7 @@ NAME=install.sh
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--no-completions] [--dry-run]
+Usage: install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q] [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. One daemon,
 and one service, shows every plugin, each on its own key. Run it again to
@@ -19,6 +19,9 @@ the per-plugin services that older versions made.
   --port N          macropadd's port (default: 8765)
   --slot NAME=N     put the key of plugin NAME in slot N, 0 to 5; once per
                     plugin. With one --plugin, --slot N.
+  --github-query Q  the GitHub search of the github plugin, such as
+                    'is:pr is:open involves:@me archived:false' (default:
+                    \$INBOX_GITHUB_QUERY if set, else the plugin's own)
   --no-completions  do not install the zsh completions
   --dry-run         print each action; change nothing
   -h, --help        show this text
@@ -54,18 +57,20 @@ SLOTS=
 DRY=0
 COMPLETIONS=1
 PLUGINS_GIVEN=
+GITHUB_QUERY=${INBOX_GITHUB_QUERY:-}
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
     --no-completions) COMPLETIONS=0 ;;
-    --assets-dir | --port | --slot | --plugin)
+    --assets-dir | --port | --slot | --plugin | --github-query)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
         --assets-dir) printf '%s: --assets-dir is unused: the daemon sends icon text, not picture files; ignoring it\n' "$NAME" >&2 ;;
         --port) PORT=$2 ;;
         --slot) SLOTS="$SLOTS${SLOTS:+ }$2" ;;
         --plugin) PLUGINS_GIVEN="$PLUGINS_GIVEN${PLUGINS_GIVEN:+ }$2" ;;
+        --github-query) GITHUB_QUERY=$2 ;;
       esac
       shift ;;
     *) printf '%s: unknown option "%s"; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2 ;;
@@ -91,6 +96,13 @@ for slot in $SLOTS; do
   esac
   [ "$n" -le 5 ] || fail "--slot $slot is out of range; use 0 to 5"
 done
+
+# The query goes in the wrapper between single quotes.
+case $GITHUB_QUERY in
+  *[\'\\\}$(printf '\n')]*)
+    printf '%s: --github-query may not hold a quote, a backslash, } or a new line\n' "$NAME" >&2
+    exit 2 ;;
+esac
 
 for plugin in $PLUGINS_GIVEN; do
   case $plugin in
@@ -183,13 +195,14 @@ for slot in $SLOTS; do DAEMON_ARGS="$DAEMON_ARGS --slot $slot"; done
 
 write_wrapper() {
   if [ "$DRY" = 1 ]; then
-    printf 'would write: %s (runs %s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}"
+    printf 'would write: %s (runs %s%s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}" "${GITHUB_QUERY:+, INBOX_GITHUB_QUERY=$GITHUB_QUERY}"
     return
   fi
   mkdir -p "$PREFIX/bin" || fail "step failed: mkdir -p $PREFIX/bin"
   {
     printf '#!/bin/sh\n'
     [ -z "$GH" ] || printf "INBOX_GH=\${INBOX_GH:-'%s'}\nexport INBOX_GH\n" "$GH"
+    [ -z "$GITHUB_QUERY" ] || printf "INBOX_GITHUB_QUERY=\${INBOX_GITHUB_QUERY:-'%s'}\nexport INBOX_GITHUB_QUERY\n" "$GITHUB_QUERY"
     printf "exec '%s' '%s/bin/%s.js' \"\$@\"\\n" "$NODE" "$INBOX_DIR" "$CMD"
   } >"$WRAPPER.new" || fail "step failed: write $WRAPPER.new"
   chmod 755 "$WRAPPER.new" || fail "step failed: chmod 755 $WRAPPER.new"
@@ -366,6 +379,7 @@ printf 'log:      %s\n' "$LOG"
 printf 'plugins:  %s\n' "$SHOWN"
 printf 'store:    %s\n' "$DB"
 printf 'gh:       %s\n' "${GH:-not found; the github plugin shows no PRs}"
+[ -z "$GITHUB_QUERY" ] || printf 'github:   %s\n' "$GITHUB_QUERY"
 printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"
 case ":$PATH:" in

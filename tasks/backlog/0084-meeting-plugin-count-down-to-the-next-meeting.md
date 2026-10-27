@@ -7,7 +7,7 @@ updated: "2026-10-27"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/107"
 branch: "claude/project-thread-ez2284"
 related: ["0064", "0068", "0069", "0073", "0075", "0076", "0079", "0082"]
 tags: ["inbox", "plugin", "calendar", "meeting", "teams"]

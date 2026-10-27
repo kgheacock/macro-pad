@@ -7,7 +7,9 @@ NAME=install.sh
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q] [--no-completions] [--dry-run]
+Usage: install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q]
+                  [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
+                  [--no-completions] [--dry-run]
 
 Install the inbox command and start the inbox daemon at login. One daemon,
 and one service, shows every plugin, each on its own key. Run it again to
@@ -22,6 +24,12 @@ the per-plugin services that older versions made.
   --github-query Q  the GitHub search of the github plugin, such as
                     'is:pr is:open involves:@me archived:false' (default:
                     \$INBOX_GITHUB_QUERY if set, else the plugin's own)
+  --apps-root DIR   the folder of the apps plugin's repositories, such as
+                    ~/source/github.com/acme (default: \$INBOX_APPS_ROOT if
+                    set; without it the apps plugin shows no keys)
+  --apps-count N    how many app keys, 1 to 5 (default: 3)
+  --apps-run NAME=CMD  how the app NAME runs, instead of the command its
+                    Makefile or package.json gives; once per app
   --no-completions  do not install the zsh completions
   --dry-run         print each action; change nothing
   -h, --help        show this text
@@ -29,7 +37,8 @@ the per-plugin services that older versions made.
 It writes:
   \$PREFIX/bin/inbox   a wrapper that runs this checkout with the node found
                       now (PREFIX defaults to \$HOME/.local), and sets
-                      INBOX_GH to the gh found now, for the github plugin
+                      INBOX_GH to the gh found now, for the github plugin,
+                      and INBOX_GIT to the git found now, for the apps plugin
   _inbox              a link to inbox/completions/_inbox in the completions
                       directory of oh-my-zsh ($ZSH_CACHE_DIR/completions),
                       when oh-my-zsh is installed. Open a new shell to use it.
@@ -58,12 +67,16 @@ DRY=0
 COMPLETIONS=1
 PLUGINS_GIVEN=
 GITHUB_QUERY=${INBOX_GITHUB_QUERY:-}
+APPS_ROOT=${INBOX_APPS_ROOT:-}
+APPS_COUNT=${INBOX_APPS_COUNT:-}
+APPS_RUN=${INBOX_APPS_RUN:-}
+APPS_RUN_GIVEN=0
 while [ $# -gt 0 ]; do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
     --no-completions) COMPLETIONS=0 ;;
-    --assets-dir | --port | --slot | --plugin | --github-query)
+    --assets-dir | --port | --slot | --plugin | --github-query | --apps-root | --apps-count | --apps-run)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
         --assets-dir) printf '%s: --assets-dir is unused: the daemon sends icon text, not picture files; ignoring it\n' "$NAME" >&2 ;;
@@ -71,6 +84,17 @@ while [ $# -gt 0 ]; do
         --slot) SLOTS="$SLOTS${SLOTS:+ }$2" ;;
         --plugin) PLUGINS_GIVEN="$PLUGINS_GIVEN${PLUGINS_GIVEN:+ }$2" ;;
         --github-query) GITHUB_QUERY=$2 ;;
+        --apps-root) APPS_ROOT=$2 ;;
+        --apps-count) APPS_COUNT=$2 ;;
+        --apps-run)
+          # The --apps-run flags replace $INBOX_APPS_RUN.
+          [ "$APPS_RUN_GIVEN" = 1 ] || APPS_RUN=
+          APPS_RUN_GIVEN=1
+          case $2 in
+            ?*=?*) ;;
+            *) printf '%s: --apps-run "%s" is not NAME=CMD\n' "$NAME" "$2" >&2; exit 2 ;;
+          esac
+          APPS_RUN="$APPS_RUN${APPS_RUN:+;}$2" ;;
       esac
       shift ;;
     *) printf '%s: unknown option "%s"; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2 ;;
@@ -103,6 +127,30 @@ case $GITHUB_QUERY in
     printf '%s: --github-query may not hold a quote, a backslash, } or a new line\n' "$NAME" >&2
     exit 2 ;;
 esac
+
+# The apps settings go in the wrapper between single quotes too.
+case $APPS_ROOT in
+  *[\'\\\}$(printf '\n')]*)
+    printf '%s: --apps-root may not hold a quote, a backslash, } or a new line\n' "$NAME" >&2
+    exit 2 ;;
+esac
+case $APPS_RUN in
+  *[\'\\\}$(printf '\n')]*)
+    printf '%s: --apps-run may not hold a quote, a backslash, } or a new line\n' "$NAME" >&2
+    exit 2 ;;
+esac
+case $APPS_COUNT in
+  '' | [1-5]) ;;
+  *) printf '%s: --apps-count %s is out of range; use 1 to 5\n' "$NAME" "$APPS_COUNT" >&2; exit 2 ;;
+esac
+if [ -n "$APPS_ROOT" ]; then
+  case $APPS_ROOT in
+    '~') APPS_ROOT=$HOME ;;
+    '~/'*) APPS_ROOT=$HOME/${APPS_ROOT#'~/'} ;;
+  esac
+  [ -d "$APPS_ROOT" ] || fail "--apps-root $APPS_ROOT is not a folder"
+  APPS_ROOT=$(cd "$APPS_ROOT" && pwd) || fail "cannot open --apps-root $APPS_ROOT"
+fi
 
 for plugin in $PLUGINS_GIVEN; do
   case $plugin in
@@ -156,6 +204,13 @@ case $GH in
   *) GH= ;;
 esac
 
+# git, by absolute path, for the apps plugin's Pull key (task 0085).
+GIT=$(command -v git 2>/dev/null) || GIT=
+case $GIT in
+  /*) plain "git" "$GIT" ;;
+  *) GIT= ;;
+esac
+
 # Each plugin must be one this checkout has.
 PLUGINS=$("$NODE" "$INBOX_DIR/bin/inbox.js" plugins | awk '{print $1}') || fail "cannot run inbox plugins"
 for plugin in $PLUGINS_GIVEN; do
@@ -195,7 +250,8 @@ for slot in $SLOTS; do DAEMON_ARGS="$DAEMON_ARGS --slot $slot"; done
 
 write_wrapper() {
   if [ "$DRY" = 1 ]; then
-    printf 'would write: %s (runs %s%s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}" "${GITHUB_QUERY:+, INBOX_GITHUB_QUERY=$GITHUB_QUERY}"
+    printf 'would write: %s (runs %s%s%s%s%s%s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}" "${GIT:+, INBOX_GIT=$GIT}" \
+      "${GITHUB_QUERY:+, INBOX_GITHUB_QUERY=$GITHUB_QUERY}" "${APPS_ROOT:+, INBOX_APPS_ROOT=$APPS_ROOT}" "${APPS_COUNT:+, INBOX_APPS_COUNT=$APPS_COUNT}" "${APPS_RUN:+, INBOX_APPS_RUN=$APPS_RUN}"
     return
   fi
   mkdir -p "$PREFIX/bin" || fail "step failed: mkdir -p $PREFIX/bin"
@@ -203,6 +259,10 @@ write_wrapper() {
     printf '#!/bin/sh\n'
     [ -z "$GH" ] || printf "INBOX_GH=\${INBOX_GH:-'%s'}\nexport INBOX_GH\n" "$GH"
     [ -z "$GITHUB_QUERY" ] || printf "INBOX_GITHUB_QUERY=\${INBOX_GITHUB_QUERY:-'%s'}\nexport INBOX_GITHUB_QUERY\n" "$GITHUB_QUERY"
+    [ -z "$GIT" ] || printf "INBOX_GIT=\${INBOX_GIT:-'%s'}\nexport INBOX_GIT\n" "$GIT"
+    [ -z "$APPS_ROOT" ] || printf "INBOX_APPS_ROOT=\${INBOX_APPS_ROOT:-'%s'}\nexport INBOX_APPS_ROOT\n" "$APPS_ROOT"
+    [ -z "$APPS_COUNT" ] || printf "INBOX_APPS_COUNT=\${INBOX_APPS_COUNT:-'%s'}\nexport INBOX_APPS_COUNT\n" "$APPS_COUNT"
+    [ -z "$APPS_RUN" ] || printf "INBOX_APPS_RUN=\${INBOX_APPS_RUN:-'%s'}\nexport INBOX_APPS_RUN\n" "$APPS_RUN"
     printf "exec '%s' '%s/bin/%s.js' \"\$@\"\\n" "$NODE" "$INBOX_DIR" "$CMD"
   } >"$WRAPPER.new" || fail "step failed: write $WRAPPER.new"
   chmod 755 "$WRAPPER.new" || fail "step failed: chmod 755 $WRAPPER.new"
@@ -380,6 +440,7 @@ printf 'plugins:  %s\n' "$SHOWN"
 printf 'store:    %s\n' "$DB"
 printf 'gh:       %s\n' "${GH:-not found; the github plugin shows no PRs}"
 [ -z "$GITHUB_QUERY" ] || printf 'github:   %s\n' "$GITHUB_QUERY"
+printf 'apps:     %s\n' "${APPS_ROOT:-no --apps-root; the apps plugin shows no keys}"
 printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"
 case ":$PATH:" in

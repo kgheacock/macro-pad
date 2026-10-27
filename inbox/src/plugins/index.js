@@ -13,17 +13,21 @@
 //   rules          what its key and the children show (see render.js)
 //   feed           optional; what the daemon runs to write the plugin's own
 //                  messages (see daemon.js)
+//   createRenderer optional; draws the plugin's own keys, more than one top
+//                  key (see daemon.js; apps, task 0085)
+//   press          optional; acts on a press on a child of those keys
 //
 // To add one, write plugins/NAME.js and list it here.
 
 import { UsageError } from '../errors.js';
 import { DEFAULT_PLUGIN } from '../store.js';
 import ai from './ai.js';
+import apps from './apps.js';
 import basic from './basic.js';
 import github from './github.js';
 
 export { DEFAULT_PLUGIN };
-export const PLUGINS = { basic, ai, github };
+export const PLUGINS = { basic, ai, github, apps };
 
 export function getPlugin(name = DEFAULT_PLUGIN) {
   if (Object.hasOwn(PLUGINS, name)) return PLUGINS[name];

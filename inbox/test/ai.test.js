@@ -112,6 +112,16 @@ test('TestAiStableWhileOpen', () => {
   assert.equal(r.target('a').channel, 'a');
 });
 
+test('TestAiStableWhileADeeperLayerIsOpen', () => {
+  // Task 0086: a layer under the key's own keeps its children still too.
+  const r = createAiRenderer();
+  r.plan({ unseen: [row('a', { waiting: 1 }, 2), row('b', { done: 1 }, 1)], active: null, path: [] });
+  const open = r.plan({ unseen: [row('b', { done: 1 }, 1)], active: 'a', path: ['ai-inbox', 'a'] });
+  assert.deepEqual(open.filter((m) => m.removeLayerKey), []);
+  const closed = r.plan({ unseen: [row('b', { done: 1 }, 1)], active: null, path: [] });
+  assert.notDeepEqual(closed.filter((m) => m.removeLayerKey), []);
+});
+
 test('TestAiRecent', (t) => {
   const { db } = scratch(t);
   const store = openStore(db, undefined, { plugin: 'ai' });

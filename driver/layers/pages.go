@@ -67,22 +67,52 @@ func pageLayout(n, page int) [KeyCount]pageKey {
 	return out
 }
 
-// clampPage keeps d.Page on a page the active layer has, after a change to
-// its children, and at 0 on the top layer.
-func (d *Doc) clampPage() {
-	if d.Active == nil {
-		d.Page = 0
+// settle keeps the active layer and its pages valid after a change to the
+// tree. While the active node is gone or has no children, the pad goes up
+// one level, to the page that layer showed (task 0086). Then every page on
+// the path is clamped to its layer, and the top layer has page 0.
+func (d *Doc) settle() {
+	for len(d.Active) > 0 {
+		if n := d.open(); n != nil && len(n.Children) > 0 {
+			break
+		}
+		d.up()
+	}
+	if len(d.Active) == 0 {
+		d.Active, d.Page, d.ParentPages = nil, 0, nil
 		return
 	}
-	i := d.find(*d.Active)
-	if i < 0 {
-		d.Page = 0
-		return
+	for len(d.ParentPages) < len(d.Active)-1 {
+		d.ParentPages = append(d.ParentPages, 0)
 	}
-	if last := PageCount(len(d.Keys[i].Children)) - 1; d.Page > last {
-		d.Page = last
+	d.ParentPages = d.ParentPages[:len(d.Active)-1]
+	for i := range d.ParentPages {
+		d.ParentPages[i] = clamp(d.ParentPages[i], len(d.nodeAt(d.Active[:i+1]).Children))
 	}
-	if d.Page < 0 {
-		d.Page = 0
+	d.Page = clamp(d.Page, len(d.open().Children))
+}
+
+// up closes the active layer and shows the one it was opened from, on the
+// page it showed then.
+func (d *Doc) up() {
+	d.Active = d.Active[:len(d.Active)-1]
+	d.Page = 0
+	if n := len(d.ParentPages); n > 0 {
+		d.Page = d.ParentPages[n-1]
+		d.ParentPages = d.ParentPages[:n-1]
 	}
+	if len(d.Active) == 0 {
+		d.Active, d.Page, d.ParentPages = nil, 0, nil
+	}
+}
+
+// clamp keeps page on a page a layer of n children has.
+func clamp(page, n int) int {
+	if last := PageCount(n) - 1; page > last {
+		page = last
+	}
+	if page < 0 {
+		page = 0
+	}
+	return page
 }

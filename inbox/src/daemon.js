@@ -129,7 +129,6 @@ export function startDaemon({
     ? plugin.createRenderer({ slot, env })
     : createRenderer({ slot, rules: plugin.rules });
   const topId = renderer.topId;
-  if (plugin.createRenderer && slot !== undefined) log(`--slot is ignored for ${plugin.name}: its keys take the free slots`);
   const url = `ws://127.0.0.1:${port}/`;
 
   // The rows to show: the channels with an unseen message, or, for a plugin
@@ -154,6 +153,8 @@ export function startDaemon({
   let socket = null;
   let ready = false;
   let active = null;
+  // The ids down to the open layer, [] on the top layer (task 0086).
+  let path = [];
   let linkState = null;
   let delay = BACKOFF_FIRST_MS;
   let stopped = false;
@@ -172,7 +173,7 @@ export function startDaemon({
   // keeps the newest state, and the next connect sends all of it.
   const push = () => {
     if (!ready || !socket) return;
-    for (const message of renderer.plan({ unseen, active, fed })) {
+    for (const message of renderer.plan({ unseen, active, path, fed })) {
       try {
         socket.send(JSON.stringify(message));
       } catch (e) {
@@ -292,6 +293,7 @@ export function startDaemon({
     }
     if (message.kind === 'layerChanged') {
       active = message.active;
+      path = message.path;
       // The first layerChanged after a connect says the replay is done.
       if (!ready) becomeReady();
       else push();
@@ -299,7 +301,7 @@ export function startDaemon({
       onChildPressed(message.parent, message.child);
     } else if (message.kind === 'event') {
       try {
-        onEvent(message, { active });
+        onEvent(message, { active, path });
       } catch (e) {
         log(`event handler failed: ${e.message}`);
       }

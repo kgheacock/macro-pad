@@ -3,19 +3,23 @@
   "setLayerKey": [
     {"kind": "setLayerKey", "setLayerKey": {"id": "github", "status": "ERROR", "count": 1, "iconRef": "github.png"}},
     {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR", "iconText": "github\nbuild"}},
-    {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
+    {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}},
+    {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}}
   ],
   "removeLayerKey": [
     {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}},
-    {"kind": "removeLayerKey", "removeLayerKey": {"id": "github"}}
+    {"kind": "removeLayerKey", "removeLayerKey": {"id": "github"}},
+    {"kind": "removeLayerKey", "removeLayerKey": {"id": "code", "path": ["apps", "app.pad"]}}
   ],
   "layerChanged": [
-    {"kind": "layerChanged", "layerChanged": {"active": null}},
-    {"kind": "layerChanged", "layerChanged": {"active": "inbox"}},
-    {"kind": "layerChanged", "layerChanged": {"active": "inbox", "page": 1, "pages": 2}}
+    {"kind": "layerChanged", "layerChanged": {"active": null, "path": [], "page": 0, "pages": 0}},
+    {"kind": "layerChanged", "layerChanged": {"active": "inbox", "path": ["inbox"], "page": 0, "pages": 1}},
+    {"kind": "layerChanged", "layerChanged": {"active": "inbox", "path": ["inbox"], "page": 1, "pages": 2}},
+    {"kind": "layerChanged", "layerChanged": {"active": "app.pad", "path": ["apps", "app.pad"], "page": 0, "pages": 1}}
   ],
   "childPressed": [
-    {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver"}}
+    {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver", "path": ["inbox"]}},
+    {"kind": "childPressed", "childPressed": {"keyIndex": 0, "parent": "app.pad", "child": "code", "path": ["apps", "app.pad"]}}
   ],
   "event": [
     {"kind": "event", "event": {"keyIndex": 2, "type": "press", "timestamp": 123456}}

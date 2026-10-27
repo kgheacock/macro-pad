@@ -26,6 +26,8 @@ type fakeOut struct {
 	states  []transport.KeyState
 	glyphs  map[byte][]byte
 	changes []*string
+	// paths is the path of each LayerChanged (task 0086).
+	paths [][]string
 	// pages is the page and page count of every layerChanged, in order.
 	pages [][2]int
 	// calls is every send in order: "batch", "glyph N", "state N".
@@ -60,10 +62,11 @@ func (f *fakeOut) BeginBatch(glyphMask, stateMask byte) error {
 	return nil
 }
 
-func (f *fakeOut) LayerChanged(active *string, page, pages int) {
+func (f *fakeOut) LayerChanged(path []string, page, pages int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.changes = append(f.changes, active)
+	f.changes = append(f.changes, lastID(path))
+	f.paths = append(f.paths, path)
 	f.pages = append(f.pages, [2]int{page, pages})
 }
 
@@ -171,7 +174,18 @@ func TestDocValidation(t *testing.T) {
 		{"unknown status", `{"version":1,"active":null,"keys":[{"id":"p","status":"BROKEN"}]}`, false},
 		{"known statuses", `{"version":1,"active":null,"keys":[{"id":"a","status":"RUNNING"},{"id":"b","status":"DONE"},{"id":"c","status":"ERROR"},{"id":"d","status":"WARN"}]}`, true},
 		{"unknown child status", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","status":"x"}]}]}`, false},
-		{"grandchild", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, false},
+		{"grandchild", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, true},
+		{"level four", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g","children":[{"id":"h"}]}]}]}]}`, true},
+		{"level five", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g","children":[{"id":"h","children":[{"id":"i"}]}]}]}]}]}`, false},
+		{"duplicate grandchild id", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"},{"id":"g"}]}]}]}`, false},
+		{"same id under two parents", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]},{"id":"d","children":[{"id":"g"}]}]}]}`, true},
+		{"unknown grandchild status", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g","status":"x"}]}]}]}`, false},
+		{"active path", `{"version":1,"active":["p","c"],"parentPages":[0],"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, true},
+		{"active path without parent pages", `{"version":1,"active":["p","c"],"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, false},
+		{"active path to a leaf", `{"version":1,"active":["p","c","g"],"parentPages":[0,0],"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, false},
+		{"active path, parent page past the last", `{"version":1,"active":["p","c"],"parentPages":[1],"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g"}]}]}]}`, false},
+		{"active as a list of one", `{"version":1,"active":["p"],"keys":[{"id":"p","children":[{"id":"c"}]}]}`, true},
+		{"parent pages on the top layer", `{"version":1,"active":null,"parentPages":[0],"keys":[]}`, false},
 		{"duplicate key id", `{"version":1,"active":null,"keys":[` + key("a") + `,` + key("a") + `]}`, false},
 		{"empty id", `{"version":1,"active":null,"keys":[{"id":""}]}`, false},
 		{"negative count", `{"version":1,"active":null,"keys":[{"id":"a","count":-1}]}`, false},
@@ -503,8 +517,10 @@ func TestPersistAndRestore(t *testing.T) {
 	path := filepath.Join(dir, FileName)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), `"active": "github"`) {
-			break
+		if data, err := os.ReadFile(path); err == nil {
+			if d, err := Parse(data); err == nil && reflect.DeepEqual(d.Active, []string{"github"}) {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("layers.json did not hold the active layer within 2 s")

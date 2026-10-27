@@ -7,7 +7,7 @@ updated: "2026-10-27"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/106"
 branch: "claude/project-thread-n6s0ey"
 related: ["0068", "0071", "0073", "0075", "0076", "0078"]
 tags: ["inbox", "plugin", "jira", "sprint"]

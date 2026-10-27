@@ -223,7 +223,7 @@ the poller used is not read any more; delete it.
   same text share one frame on the board, whatever their colors.
 - `iconEmoji` is one or two pictures under `assets/emoji/` (task 0073), and it
   excludes `iconRef`. They sit on an opaque white tile with the key color as a
-  14 px strip across the bottom (task 0082). Each picture is cropped to its
+  22 px strip across the bottom (task 0082). Each picture is cropped to its
   art; the first is the hero, 80 px, and the second a 40 px sticker with a
   white outline over the hero's lower left (96 px and 48 px with no caption,
   and one emoji alone is 80 px, or 100 px). With `iconEmoji`, `iconText` is a

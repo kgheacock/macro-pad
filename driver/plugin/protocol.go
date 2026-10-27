@@ -146,18 +146,20 @@ type SignalPayload struct {
 }
 
 // SetLayerKeyPayload is layers.Update as JSON: the full values of one key
-// or child. Parent names the key a child belongs to; it is empty for a
-// top-level key. Slot (0 to 5) puts a top-level key in that slot: another
+// or child. Parent names the top-level key a child belongs to, and Path the
+// ids from a top-level key down to the parent of a child at any depth (task
+// 0086); both are empty for a top-level key. Slot (0 to 5) puts a top-level key in that slot: another
 // id on the slot drops the message. A message with only ID and Slot
 // reserves the slot. See task 0057.
 type SetLayerKeyPayload struct {
-	ID      string `json:"id"`
-	Parent  string `json:"parent,omitempty"`
-	Slot    *int   `json:"slot,omitempty"`
-	Icon    byte   `json:"icon"`
-	Status  string `json:"status"`
-	Count   int    `json:"count"`
-	IconRef string `json:"iconRef"`
+	ID      string   `json:"id"`
+	Parent  string   `json:"parent,omitempty"`
+	Path    []string `json:"path,omitempty"`
+	Slot    *int     `json:"slot,omitempty"`
+	Icon    byte     `json:"icon"`
+	Status  string   `json:"status"`
+	Count   int      `json:"count"`
+	IconRef string   `json:"iconRef"`
 	// IconText is words drawn as the icon instead of IconRef (task 0069), or
 	// the caption over IconEmoji.
 	IconText string `json:"iconText,omitempty"`
@@ -165,38 +167,58 @@ type SetLayerKeyPayload struct {
 	IconEmoji []string `json:"iconEmoji,omitempty"`
 }
 
-// RemoveLayerKeyPayload names the node to remove. With Parent, it is that
-// child of Parent. Without, it is the top-level key with this id, and its
-// children go with it. See task 0066.
+// RemoveLayerKeyPayload names the node to remove. With Parent or Path, it
+// is that child of the node they name, as in SetLayerKeyPayload. Without,
+// it is the top-level key with this id. Its children go with it. See tasks
+// 0066 and 0086.
 type RemoveLayerKeyPayload struct {
-	ID     string `json:"id"`
-	Parent string `json:"parent,omitempty"`
+	ID     string   `json:"id"`
+	Parent string   `json:"parent,omitempty"`
+	Path   []string `json:"path,omitempty"`
 }
 
-// LayerChangedPayload names the active layer: the id of the key whose
-// children the pad shows, or null for the top layer. Page is the page the
-// pad shows, from 0, of Pages; both are 0 on the top layer (task 0078).
+// LayerChangedPayload names the active layer: the id of the node whose
+// children the pad shows, or null for the top layer, and Path, its path
+// from a top-level key, empty on the top layer (task 0086). Page is the
+// page the pad shows, from 0, of Pages; both are 0 on the top layer (task
+// 0078).
 type LayerChangedPayload struct {
-	Active *string `json:"active"`
-	Page   int     `json:"page"`
-	Pages  int     `json:"pages"`
+	Active *string  `json:"active"`
+	Path   []string `json:"path"`
+	Page   int      `json:"page"`
+	Pages  int      `json:"pages"`
 }
 
-// layerChangedMessage builds the Message that announces active and its page.
-func layerChangedMessage(active *string, page, pages int) Message {
-	return Message{Kind: KindLayerChanged, LayerChanged: &LayerChangedPayload{Active: active, Page: page, Pages: pages}}
+// layerChangedMessage builds the Message that announces the layer at path
+// and its page.
+func layerChangedMessage(path []string, page, pages int) Message {
+	p := LayerChangedPayload{Path: []string{}, Page: page, Pages: pages}
+	if len(path) > 0 {
+		a := path[len(path)-1]
+		p.Active = &a
+		p.Path = append(p.Path, path...)
+	}
+	return Message{Kind: KindLayerChanged, LayerChanged: &p}
 }
 
-// ChildPressedPayload names the child a press on KeyIndex landed on.
+// ChildPressedPayload names the child a press on KeyIndex landed on: its
+// id, the id of its parent, and Path, the ids from a top-level key down to
+// that parent (task 0086).
 type ChildPressedPayload struct {
-	KeyIndex byte   `json:"keyIndex"`
-	Parent   string `json:"parent"`
-	Child    string `json:"child"`
+	KeyIndex byte     `json:"keyIndex"`
+	Parent   string   `json:"parent"`
+	Child    string   `json:"child"`
+	Path     []string `json:"path"`
 }
 
-// childPressedMessage builds the Message that names a pressed child.
-func childPressedMessage(keyIndex byte, parent, child string) Message {
-	return Message{Kind: KindChildPressed, ChildPressed: &ChildPressedPayload{KeyIndex: keyIndex, Parent: parent, Child: child}}
+// childPressedMessage builds the Message that names a pressed child of the
+// node at path.
+func childPressedMessage(keyIndex byte, path []string, child string) Message {
+	p := ChildPressedPayload{KeyIndex: keyIndex, Child: child, Path: append([]string{}, path...)}
+	if len(path) > 0 {
+		p.Parent = path[len(path)-1]
+	}
+	return Message{Kind: KindChildPressed, ChildPressed: &p}
 }
 
 // errMissingPayload is returned by SetKeyStatePayload.toKeyState when a

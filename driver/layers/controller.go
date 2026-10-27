@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,10 +30,10 @@ type Out interface {
 	// BeginBatch tells the board which keys the next glyphs and key states
 	// belong to, so it draws them together. Bit k of each mask is key k.
 	BeginBatch(glyphMask, stateMask byte) error
-	// LayerChanged reports the active layer, nil for the top layer, and the
-	// page of it the pad shows, from 0, of pages. On the top layer page and
-	// pages are 0 (task 0078).
-	LayerChanged(active *string, page, pages int)
+	// LayerChanged reports the path of the active layer, empty for the top
+	// layer (task 0086), and the page of it the pad shows, from 0, of pages.
+	// On the top layer page and pages are 0 (task 0078).
+	LayerChanged(path []string, page, pages int)
 }
 
 // Options configures Open.
@@ -55,9 +57,13 @@ type Options struct {
 // Update is one setLayerKey message: the full values of one key or child.
 type Update struct {
 	ID string
-	// Parent is the id of the key a child belongs to. Empty for a
-	// top-level key.
+	// Parent is the id of the top-level key a child belongs to. It is a
+	// shorthand for a Path of one id.
 	Parent string
+	// Path is the ids from a top-level key down to the parent of a child at
+	// any depth (task 0086). Empty, with an empty Parent, for a top-level
+	// key. An update may not carry both.
+	Path []string
 	// Slot is the key position (0 to 5) a top-level key must take. Nil
 	// leaves a known key where it is, and puts a new one in the first
 	// free slot. A child has no slot.
@@ -223,36 +229,60 @@ func (c *Controller) load() error {
 	return nil
 }
 
-// Active returns the id of the key whose children the pad shows, or nil
+// Active returns the id of the node whose children the pad shows, or nil
 // for the top layer.
 func (c *Controller) Active() *string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.doc.Active == nil {
-		return nil
-	}
-	a := *c.doc.Active
-	return &a
+	active, _, _ := c.Layer()
+	return active
 }
 
-// Layer returns the active layer, nil for the top layer, the page of it the
-// pad shows, and its page count. On the top layer page and pages are 0.
+// Layer returns the id of the active layer, nil for the top layer, the page
+// of it the pad shows, and its page count. On the top layer page and pages
+// are 0.
 func (c *Controller) Layer() (active *string, page, pages int) {
+	path, page, pages := c.LayerPath()
+	return lastID(path), page, pages
+}
+
+// LayerPath returns the path of the active layer, empty for the top layer,
+// the page of it the pad shows, and its page count (task 0086).
+func (c *Controller) LayerPath() (path []string, page, pages int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return layerOf(c.doc)
 }
 
-// layerOf returns the active layer of d, its page, and its page count.
-func layerOf(d Doc) (active *string, page, pages int) {
+// lastID returns the last id of path, or nil for an empty path.
+func lastID(path []string) *string {
+	if len(path) == 0 {
+		return nil
+	}
+	a := path[len(path)-1]
+	return &a
+}
+
+// layerOf returns the path of the active layer of d, its page, and its page
+// count.
+func layerOf(d Doc) (path []string, page, pages int) {
 	if d.Active == nil {
 		return nil, 0, 0
 	}
-	a := *d.Active
-	if i := d.find(a); i >= 0 {
-		pages = PageCount(len(d.Keys[i].Children))
+	if n := d.open(); n != nil {
+		pages = PageCount(len(n.Children))
 	}
-	return &a, d.Page, pages
+	return append([]string{}, d.Active...), d.Page, pages
+}
+
+// parentPath returns the path to the parent of the node u names, empty for
+// a top-level key.
+func (u Update) parentPath() ([]string, error) {
+	if u.Parent != "" && len(u.Path) > 0 {
+		return nil, errors.New("layers: an update has a parent or a path, not both")
+	}
+	if u.Parent != "" {
+		return []string{u.Parent}, nil
+	}
+	return u.Path, nil
 }
 
 // Snapshot returns a copy of the object.
@@ -275,20 +305,22 @@ func applyUpdate(d *Doc, u Update) error {
 		return errors.New("layers: update has no id")
 	}
 
-	if u.Parent != "" {
+	path, err := u.parentPath()
+	if err != nil {
+		return err
+	}
+	if len(path) > 0 {
 		if u.Slot != nil {
 			return errors.New("layers: a child has no slot")
 		}
-		p := d.find(u.Parent)
-		if p < 0 {
-			return fmt.Errorf("layers: no key %q for child %q", u.Parent, u.ID)
+		parent := d.nodeAt(path)
+		if parent == nil {
+			return fmt.Errorf("layers: no key %q for child %q", strings.Join(path, "/"), u.ID)
 		}
-		parent := d.Keys[p]
-		for i := range parent.Children {
-			if parent.Children[i].ID == u.ID {
-				parent.Children[i] = node
-				return nil
-			}
+		if cur := parent.child(u.ID); cur != nil {
+			node.Children = cur.Children
+			*cur = node
+			return nil
 		}
 		parent.Children = append(parent.Children, node)
 		return nil
@@ -326,31 +358,37 @@ func applyUpdate(d *Doc, u Update) error {
 	return nil
 }
 
-// RemoveKey removes one node. With a parent, it removes that child, and the
-// children after it move up one position. Without, it removes the top-level
-// key with its children, and frees its slot. An unknown id changes nothing
-// and sends nothing. When the removal empties the open layer, the active
-// layer returns to the top.
+// RemoveKey removes one node. With a parent, it removes that child of the
+// top-level key parent; see RemoveNode.
 func (c *Controller) RemoveKey(id, parent string) error {
-	return c.mutate(func(d *Doc) error { return applyRemove(d, id, parent) })
+	var path []string
+	if parent != "" {
+		path = []string{parent}
+	}
+	return c.RemoveNode(id, path)
 }
 
-func applyRemove(d *Doc, id, parent string) error {
-	if parent != "" {
-		p := d.find(parent)
-		if p < 0 {
+// RemoveNode removes one node with its children. With a path, the ids from a
+// top-level key down to its parent, it removes that child, and the children
+// after it move up one position. Without, it removes the top-level key, and
+// frees its slot. An unknown id changes nothing and sends nothing. When the
+// removal takes away the open layer, the pad goes up to the deepest layer
+// left on its path (task 0086).
+func (c *Controller) RemoveNode(id string, path []string) error {
+	return c.mutate(func(d *Doc) error { return applyRemove(d, id, path) })
+}
+
+func applyRemove(d *Doc, id string, path []string) error {
+	if len(path) > 0 {
+		parent := d.nodeAt(path)
+		if parent == nil {
 			return errNoChange
 		}
-		k := d.Keys[p]
-		for i := range k.Children {
-			if k.Children[i].ID != id {
-				continue
+		for i := range parent.Children {
+			if parent.Children[i].ID == id {
+				parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
+				return nil
 			}
-			k.Children = append(k.Children[:i], k.Children[i+1:]...)
-			if len(k.Children) == 0 && d.Active != nil && *d.Active == parent {
-				d.Active = nil
-			}
-			return nil
 		}
 		return errNoChange
 	}
@@ -359,19 +397,28 @@ func applyRemove(d *Doc, id, parent string) error {
 		return errNoChange
 	}
 	d.Keys[i] = nil
-	if d.Active != nil && *d.Active == id {
-		d.Active = nil
-	}
 	return nil
 }
 
-// Press handles a press on a key, the debounced press-down. On the top layer a key with
-// children opens its child layer, on its first page. In a child layer the up
-// key returns to the top layer, the left arrow shows the page before, and the
-// right arrow the next page (task 0078). Every other press changes nothing
-// and sends nothing. A press on a child returns the ids of its parent and of
-// the child, as the pad showed them; any other press returns empty ids.
+// Press handles a press on a key; see PressNode. A press on a child returns
+// the ids of its parent and of the child; any other press returns empty ids.
 func (c *Controller) Press(keyIndex byte) (parent, child string) {
+	path, child := c.PressNode(keyIndex)
+	if p := lastID(path); p != nil {
+		parent = *p
+	}
+	return parent, child
+}
+
+// PressNode handles a press on a key, the debounced press-down. On the top
+// layer a key with children opens its child layer, on its first page. In a
+// child layer a child with children opens its layer (task 0086), the up key
+// goes back one level, to the page it showed, the left arrow shows the page
+// before, and the right arrow the next page (task 0078). Every other press
+// changes nothing and sends nothing. A press on a child with no children
+// returns the path to its parent and the child's id, as the pad showed them;
+// any other press returns nil and an empty id.
+func (c *Controller) PressNode(keyIndex byte) (path []string, child string) {
 	// A press pauses the preload, so its Store frame messages do not hold up
 	// the switch (task 0061).
 	c.mu.Lock()
@@ -382,18 +429,23 @@ func (c *Controller) Press(keyIndex byte) (parent, child string) {
 			if int(keyIndex) >= KeyCount {
 				return errNoChange
 			}
-			p := d.find(*d.Active)
-			if p < 0 {
+			k := d.open()
+			if k == nil {
 				return errNoChange
 			}
-			k := d.Keys[p]
 			switch pk := pageLayout(len(k.Children), d.Page)[keyIndex]; pk.role {
 			case roleChild:
-				parent, child = k.ID, k.Children[pk.child].ID
+				ch := &k.Children[pk.child]
+				if len(ch.Children) > 0 {
+					d.Active = append(d.Active, ch.ID)
+					d.ParentPages = append(d.ParentPages, d.Page)
+					d.Page = 0
+					return nil
+				}
+				path, child = append([]string{}, d.Active...), ch.ID
 				return errNoChange
 			case roleUp:
-				d.Active = nil
-				d.Page = 0
+				d.up()
 			case roleLeft:
 				d.Page--
 			case roleRight:
@@ -410,15 +462,15 @@ func (c *Controller) Press(keyIndex byte) (parent, child string) {
 		if k == nil || len(k.Children) == 0 {
 			return errNoChange
 		}
-		id := k.ID
-		d.Active = &id
+		d.Active = []string{k.ID}
 		d.Page = 0
+		d.ParentPages = nil
 		return nil
 	})
 	if err != nil {
 		c.logf("layers: press on key %d: %v", keyIndex, err)
 	}
-	return parent, child
+	return path, child
 }
 
 // mutate applies fn to a copy of the object, and swaps the copy in when it
@@ -438,7 +490,7 @@ func (c *Controller) mutate(fn func(d *Doc) error) error {
 		return err
 	}
 	next.padKeys()
-	next.clampPage()
+	next.settle()
 	if err := next.Validate(); err != nil {
 		c.mu.Unlock()
 		return err
@@ -446,26 +498,19 @@ func (c *Controller) mutate(fn func(d *Doc) error) error {
 	if !reflect.DeepEqual(c.doc, next) {
 		c.dirty = true
 	}
-	oldActive, oldPage, oldPages := layerOf(c.doc)
-	active, page, pages := layerOf(next)
-	layerChanged := !sameActive(oldActive, active) || oldPage != page || oldPages != pages
+	oldPath, oldPage, oldPages := layerOf(c.doc)
+	path, page, pages := layerOf(next)
+	layerChanged := !slices.Equal(oldPath, path) || oldPage != page || oldPages != pages
 	c.doc = next
 	want := desired(next)
 	c.mu.Unlock()
 
 	c.flush(want)
 	if layerChanged {
-		c.out.LayerChanged(active, page, pages)
+		c.out.LayerChanged(path, page, pages)
 	}
 	c.kickPreload()
 	return nil
-}
-
-func sameActive(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 // desired returns what each key must show for d.
@@ -482,11 +527,11 @@ func desired(d Doc) [KeyCount]view {
 		}
 		return out
 	}
-	p := d.find(*d.Active)
-	if p < 0 {
+	n := d.open()
+	if n == nil {
 		return out
 	}
-	children := d.Keys[p].Children
+	children := n.Children
 	for i, pk := range pageLayout(len(children), d.Page) {
 		switch pk.role {
 		case roleChild:

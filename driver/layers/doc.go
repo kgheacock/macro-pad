@@ -21,9 +21,14 @@ const (
 	// KeyCount is the number of keys on the pad, and the most top-level
 	// keys a document holds.
 	KeyCount = 6
-	// MaxChildren is the most children one key holds. A child layer with
+	// MaxChildren is the most children one node holds. A child layer with
 	// more than OnePage children has pages (task 0078).
 	MaxChildren = 20
+	// MaxDepth is the most levels a tree has: a top-level key is level 1,
+	// and a node on level MaxDepth has no children (task 0086).
+	MaxDepth = 4
+	// MaxNodes is the most nodes the whole tree holds (task 0086).
+	MaxNodes = 200
 	// UpKey is the key that shows the shift icon in a child layer. A
 	// press on it returns to the parent layer. On a page after the first it
 	// shows the left arrow instead.
@@ -53,8 +58,8 @@ func ValidStatus(s string) bool {
 	return false
 }
 
-// Node is a top-level key or a child. A child has the same fields, and no
-// children of its own.
+// Node is a top-level key or a child. A child has the same fields, and
+// children of its own down to MaxDepth (task 0086).
 type Node struct {
 	ID      string `json:"id"`
 	Icon    byte   `json:"icon"`
@@ -80,12 +85,16 @@ func (n *Node) hasContent() bool {
 // Doc is the whole layers.json object.
 type Doc struct {
 	Version int `json:"version"`
-	// Active is nil for the top layer. Otherwise it is the id of the
-	// top-level key whose children the pad shows.
-	Active *string `json:"active"`
+	// Active is nil for the top layer. Otherwise it is the path of the node
+	// whose children the pad shows: the id of a top-level key, then the id
+	// of each child down to it (task 0086).
+	Active []string `json:"active"`
 	// Page is the page of the active layer the pad shows, from 0. It is 0
 	// on the top layer (task 0078).
 	Page int `json:"page"`
+	// ParentPages is the page each layer above the active one showed when
+	// the next one opened, so it has one entry fewer than Active.
+	ParentPages []int `json:"parentPages,omitempty"`
 	// Keys is indexed by key position. A nil entry is an empty key.
 	Keys []*Node `json:"keys"`
 }
@@ -95,22 +104,60 @@ func newDoc() Doc {
 	return Doc{Version: Version, Keys: make([]*Node, KeyCount)}
 }
 
+// UnmarshalJSON reads a Doc. An active saved before task 0086 is a string,
+// and reads as a path of one id.
+func (d *Doc) UnmarshalJSON(data []byte) error {
+	type plain Doc
+	var raw struct {
+		plain
+		Active json.RawMessage `json:"active"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*d = Doc(raw.plain)
+	d.Active = nil
+	if len(raw.Active) == 0 || string(raw.Active) == "null" {
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(raw.Active, &one); err == nil {
+		d.Active = []string{one}
+		return nil
+	}
+	return json.Unmarshal(raw.Active, &d.Active)
+}
+
 // clone returns a deep copy of d.
 func (d Doc) clone() Doc {
 	out := Doc{Version: d.Version, Page: d.Page, Keys: make([]*Node, len(d.Keys))}
 	if d.Active != nil {
-		a := *d.Active
-		out.Active = &a
+		out.Active = append([]string{}, d.Active...)
+	}
+	if d.ParentPages != nil {
+		out.ParentPages = append([]int{}, d.ParentPages...)
 	}
 	for i, k := range d.Keys {
 		if k == nil {
 			continue
 		}
-		n := *k
-		n.Children = append([]Node(nil), k.Children...)
+		n := k.clone()
 		out.Keys[i] = &n
 	}
 	return out
+}
+
+// clone returns a deep copy of n and its children.
+func (n Node) clone() Node {
+	if n.Children == nil {
+		return n
+	}
+	children := make([]Node, len(n.Children))
+	for i := range n.Children {
+		children[i] = n.Children[i].clone()
+	}
+	n.Children = children
+	return n
 }
 
 // padKeys makes d.Keys exactly KeyCount long, so a position always indexes.
@@ -130,6 +177,42 @@ func (d *Doc) find(id string) int {
 	return -1
 }
 
+// nodeAt returns the node at path, the id of a top-level key and then the id
+// of each child down to it, or nil.
+func (d *Doc) nodeAt(path []string) *Node {
+	if len(path) == 0 {
+		return nil
+	}
+	i := d.find(path[0])
+	if i < 0 {
+		return nil
+	}
+	n := d.Keys[i]
+	for _, id := range path[1:] {
+		n = n.child(id)
+		if n == nil {
+			return nil
+		}
+	}
+	return n
+}
+
+// child returns the child of n with this id, or nil.
+func (n *Node) child(id string) *Node {
+	for i := range n.Children {
+		if n.Children[i].ID == id {
+			return &n.Children[i]
+		}
+	}
+	return nil
+}
+
+// open returns the node whose children the pad shows, or nil on the top
+// layer.
+func (d *Doc) open() *Node {
+	return d.nodeAt(d.Active)
+}
+
 // Parse decodes and validates a layers.json file.
 func Parse(data []byte) (Doc, error) {
 	var d Doc
@@ -144,9 +227,10 @@ func Parse(data []byte) (Doc, error) {
 }
 
 // Validate checks d against the rules in task 0057: at most six keys, at
-// most MaxChildren children each, no grandchildren, known statuses, unique
-// ids, iconRefs that stay under assets/, an active layer that names a key
-// with children, and a page that the active layer has.
+// most MaxChildren children each, no node deeper than MaxDepth and no more
+// than MaxNodes in all (task 0086), known statuses, ids unique among
+// siblings, iconRefs that stay under assets/, an active path that ends on a
+// node with children, and pages that its layers have.
 func (d *Doc) Validate() error {
 	if d.Version != Version {
 		return fmt.Errorf("layers: version %d, want %d", d.Version, Version)
@@ -155,45 +239,77 @@ func (d *Doc) Validate() error {
 		return fmt.Errorf("layers: %d keys, at most %d", len(d.Keys), KeyCount)
 	}
 	seen := make(map[string]bool)
+	nodes := 0
 	for i, k := range d.Keys {
 		if k == nil {
 			continue
 		}
+		where := fmt.Sprintf("key %d", i)
 		if err := k.validate(); err != nil {
-			return fmt.Errorf("layers: key %d: %w", i, err)
+			return fmt.Errorf("layers: %s: %w", where, err)
 		}
 		if seen[k.ID] {
-			return fmt.Errorf("layers: key %d: duplicate id %q", i, k.ID)
+			return fmt.Errorf("layers: %s: duplicate id %q", where, k.ID)
 		}
 		seen[k.ID] = true
-		if len(k.Children) > MaxChildren {
-			return fmt.Errorf("layers: key %d (%s): %d children, at most %d", i, k.ID, len(k.Children), MaxChildren)
-		}
-		childSeen := make(map[string]bool)
-		for j := range k.Children {
-			c := &k.Children[j]
-			if err := c.validate(); err != nil {
-				return fmt.Errorf("layers: key %d (%s) child %d: %w", i, k.ID, j, err)
-			}
-			if len(c.Children) > 0 {
-				return fmt.Errorf("layers: key %d (%s) child %d: a child has no children", i, k.ID, j)
-			}
-			if childSeen[c.ID] {
-				return fmt.Errorf("layers: key %d (%s) child %d: duplicate id %q", i, k.ID, j, c.ID)
-			}
-			childSeen[c.ID] = true
+		if err := k.validateChildren(where, 1, &nodes); err != nil {
+			return err
 		}
 	}
 	if d.Active != nil {
-		i := d.find(*d.Active)
-		if i < 0 || len(d.Keys[i].Children) == 0 {
-			return fmt.Errorf("layers: active %q is not a key with children", *d.Active)
+		if len(d.ParentPages) != len(d.Active)-1 {
+			return fmt.Errorf("layers: %d parent pages for an active path of %d, want %d", len(d.ParentPages), len(d.Active), len(d.Active)-1)
 		}
-		if pages := PageCount(len(d.Keys[i].Children)); d.Page < 0 || d.Page >= pages {
-			return fmt.Errorf("layers: page %d of %q, which has %d pages", d.Page, *d.Active, pages)
+		for depth := 1; depth <= len(d.Active); depth++ {
+			path := d.Active[:depth]
+			n := d.nodeAt(path)
+			if n == nil || len(n.Children) == 0 {
+				return fmt.Errorf("layers: active %q is not a key with children", strings.Join(path, "/"))
+			}
+			page := d.Page
+			if depth < len(d.Active) {
+				page = d.ParentPages[depth-1]
+			}
+			if pages := PageCount(len(n.Children)); page < 0 || page >= pages {
+				return fmt.Errorf("layers: page %d of %q, which has %d pages", page, strings.Join(path, "/"), pages)
+			}
 		}
-	} else if d.Page != 0 {
+	} else if d.Page != 0 || len(d.ParentPages) != 0 {
 		return fmt.Errorf("layers: page %d on the top layer, want 0", d.Page)
+	}
+	return nil
+}
+
+// validateChildren checks the children of n, a node on level depth, and
+// theirs, and adds n and every node under it to *nodes.
+func (n *Node) validateChildren(where string, depth int, nodes *int) error {
+	*nodes++
+	if *nodes > MaxNodes {
+		return fmt.Errorf("layers: more than %d nodes", MaxNodes)
+	}
+	if len(n.Children) == 0 {
+		return nil
+	}
+	if depth >= MaxDepth {
+		return fmt.Errorf("layers: %s (%s): a node on level %d has no children", where, n.ID, MaxDepth)
+	}
+	if len(n.Children) > MaxChildren {
+		return fmt.Errorf("layers: %s (%s): %d children, at most %d", where, n.ID, len(n.Children), MaxChildren)
+	}
+	childSeen := make(map[string]bool)
+	for j := range n.Children {
+		c := &n.Children[j]
+		cwhere := fmt.Sprintf("%s (%s) child %d", where, n.ID, j)
+		if err := c.validate(); err != nil {
+			return fmt.Errorf("layers: %s: %w", cwhere, err)
+		}
+		if childSeen[c.ID] {
+			return fmt.Errorf("layers: %s: duplicate id %q", cwhere, c.ID)
+		}
+		childSeen[c.ID] = true
+		if err := c.validateChildren(cwhere, depth+1, nodes); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -369,7 +369,7 @@ func TestInboxProtocolFixtures(t *testing.T) {
 	if err := json.Unmarshal(data, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixtures.RemoveLayerKey) != 2 || len(fixtures.SetLayerKey) == 0 {
+	if len(fixtures.RemoveLayerKey) != 3 || len(fixtures.SetLayerKey) == 0 {
 		t.Fatalf("fixtures hold %d removeLayerKey and %d setLayerKey messages", len(fixtures.RemoveLayerKey), len(fixtures.SetLayerKey))
 	}
 	for _, m := range fixtures.RemoveLayerKey {
@@ -380,9 +380,12 @@ func TestInboxProtocolFixtures(t *testing.T) {
 	if p := fixtures.RemoveLayerKey[0].RemoveLayerKey; p.ID != "build" || p.Parent != "github" {
 		t.Errorf("first fixture is %+v, want build under github", p)
 	}
+	if p := fixtures.RemoveLayerKey[2].RemoveLayerKey; p.ID != "code" || !reflect.DeepEqual(p.Path, []string{"apps", "app.pad"}) {
+		t.Errorf("third fixture is %+v, want code under apps/app.pad", p)
+	}
 	// The inbox decodes what the server encodes (task 0078).
 	for _, m := range fixtures.LayerChanged {
-		data, err := json.Marshal(layerChangedMessage(m.LayerChanged.Active, m.LayerChanged.Page, m.LayerChanged.Pages))
+		data, err := json.Marshal(layerChangedMessage(m.LayerChanged.Path, m.LayerChanged.Page, m.LayerChanged.Pages))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -391,16 +394,21 @@ func TestInboxProtocolFixtures(t *testing.T) {
 			t.Errorf("layerChanged fixture %+v does not round-trip: %s", m.LayerChanged, data)
 		}
 	}
-	if len(fixtures.ChildPressed) != 1 {
-		t.Fatalf("fixtures hold %d childPressed messages, want 1", len(fixtures.ChildPressed))
+	if len(fixtures.ChildPressed) != 2 {
+		t.Fatalf("fixtures hold %d childPressed messages, want 2", len(fixtures.ChildPressed))
 	}
-	p := fixtures.ChildPressed[0].ChildPressed
-	if fixtures.ChildPressed[0].Kind != KindChildPressed || p == nil {
-		t.Fatalf("fixture %+v is not a childPressed message", fixtures.ChildPressed[0])
+	wants := []Message{
+		childPressedMessage(1, []string{"inbox"}, "macro-pad.driver"),
+		childPressedMessage(0, []string{"apps", "app.pad"}, "code"),
 	}
-	want := childPressedMessage(1, "inbox", "macro-pad.driver")
-	if *p != *want.ChildPressed {
-		t.Errorf("childPressed fixture %+v, want %+v", *p, *want.ChildPressed)
+	for i, want := range wants {
+		m := fixtures.ChildPressed[i]
+		if m.Kind != KindChildPressed || m.ChildPressed == nil {
+			t.Fatalf("fixture %+v is not a childPressed message", m)
+		}
+		if !reflect.DeepEqual(m.ChildPressed, want.ChildPressed) {
+			t.Errorf("childPressed fixture %+v, want %+v", *m.ChildPressed, *want.ChildPressed)
+		}
 	}
 }
 

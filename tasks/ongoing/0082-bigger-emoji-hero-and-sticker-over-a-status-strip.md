@@ -53,7 +53,7 @@ rounds of mock-ups (in the project files, `specs/key-layouts/0082-round2.png`).
 ### Approach A: hero, sticker, caption, and strip on an opaque tile (chosen)
 
 Layout 1 Overlap: a white tile, the caption on top, the hero, the sticker,
-and a 14 px strip of the status color at the bottom. Every picture is cropped
+and a 22 px strip of the status color at the bottom. Every picture is cropped
 to its art before it is scaled.
 
 - Good, because the hero is about 2.3 times as wide as today's emoji and the
@@ -84,18 +84,18 @@ the status color shows only as a strip, not around the whole picture.
 All in `driver/layers/emoji.go` (`drawIconEmoji`) and `render.go`.
 
 - **Tile.** The whole 128x128 key is opaque white. A strip of the status color
-  covers y 114 to 128. With no status the strip is black, as the corners were.
+  covers y 106 to 128 (22 px; 14 px in the first version). With no status the strip is black, as the corners were.
 - **Crop.** Each picture is cut to the box of its pixels with alpha above
   0x08 before it is scaled, so the size below is the size of the art. The
   longer side of the art takes the size; the shorter side keeps the ratio.
 - **With a caption**, centred at y 14, black `gobold`, the largest of 22, 20,
   18, 16, 14 px that fits 120 px, cut with `…`:
   - two emoji: the hero 80 px centred at (62, 64), the sticker 40 px centred
-    at (24, 90);
+    at (24, 82);
   - one emoji: 80 px centred at (56, 66).
 - **With no caption:**
   - two emoji: the hero 96 px centred at (70, 50), the sticker 48 px centred
-    at (28, 88);
+    at (28, 78);
   - one emoji: 100 px centred at (60, 56).
 - **Sticker.** A 3 px white outline (the art's alpha grown by 3 px, with an
   antialiased edge) is drawn under the sticker, so it reads where it covers
@@ -144,3 +144,5 @@ and `icon-emoji-caption-pip.png`, a new golden `testdata/icon-emoji-alone.png`,
   Round 1 (`specs/key-layouts/0082-layouts-1.png`, `-2.png`) had 8 layouts;
   Keith picked H, then asked to combine it with A's hero and sticker. Round 2
   (`0082-round2.png`) had 5; Keith picked 1 Overlap.
+- 2026-10-27: after PR #105, Keith asked for a taller strip: 14 px became
+  22 px, and the sticker moved up 8 px (10 px with no caption) so it and its outline clear it.

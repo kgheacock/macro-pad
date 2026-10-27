@@ -7,7 +7,7 @@ updated: "2026-10-27"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/109"
 branch: "claude/project-thread-2g96mq"
 related: ["0068", "0072", "0075", "0076", "0078", "0081", "0082"]
 tags: ["inbox", "plugin", "apps", "iterm", "vscode"]

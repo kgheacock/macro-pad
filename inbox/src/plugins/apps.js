@@ -1,11 +1,12 @@
-// The apps plugin (task 0085): a top key for each app Keith works on today,
-// among the repositories in one root folder ($INBOX_APPS_ROOT, such as
-// ~/source/github.com/acme). A press on an app key opens five children:
-// Code, Claude, Run, Pull, Term.
+// The apps plugin (task 0085): one top key, `apps`, that opens a key for
+// each app Keith works on today, among the repositories in one root folder
+// ($INBOX_APPS_ROOT, such as ~/source/github.com/acme). A press on an app
+// opens its five actions (task 0086's nested layers): Code, Claude, Run,
+// Pull, Term.
 //
 // The feed scans the root every 30 s. An app's activity is the newest of its
 // .git/logs/HEAD and .git/index mtimes and of an ai-plugin session today in
-// its folder. The keys show the pinned apps, then the apps active today,
+// its folder. The apps show the pinned apps, then the apps active today,
 // newest first, at most $INBOX_APPS_COUNT. The store holds pins (NAME.pin),
 // runs (NAME.run) and pulls (NAME.pull); the newest message of each is its
 // state.
@@ -18,11 +19,12 @@ import { inferChannel, sourceRoot } from '../channel.js';
 import { componentInput, componentOf, emojiFor, splitSessionChannel } from '../emoji.js';
 import { focus as focusHere } from '../here.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from '../protocol.js';
-import { MAX_CAPTION, clip } from '../render.js';
+import { MAX_CAPTION, MAX_CHILDREN, clip } from '../render.js';
 
 export const APPS_STATUSES = ['pinned', 'unpinned', 'running', 'stopped', 'crashed', 'pulling', 'pulled', 'failed'];
-export const DEFAULT_COUNT = 3;
-export const MAX_COUNT = 5;
+// Five apps fill one page of the apps layer (task 0078).
+export const DEFAULT_COUNT = 5;
+export const MAX_COUNT = MAX_CHILDREN;
 export const FEED_EVERY_MS = 30 * 1000;
 // Pins and run state are kept for good; the feed decides what is active.
 export const ACTIVE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
@@ -46,7 +48,9 @@ export function appName(dirName) {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : null;
 }
 
-export const topId = (name) => `app.${name}`;
+// The top key, and the id of an app's child under it.
+export const TOP_ID = 'apps';
+export const appId = (name) => `app.${name}`;
 
 function expandHome(p) {
   return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p;
@@ -188,15 +192,16 @@ export function scan({ env = process.env, store, now = Date.now() }) {
   return { root, since, apps };
 }
 
-// The renderer of the apps plugin: a top key per app, five children each.
-// Unlike render.js it draws several top keys, so it says which keys are its
-// own (owns). A key keeps its slot while it shows; one that leaves frees its
-// slot for the next. The key of the open layer stays until the layer closes.
-export function createAppsRenderer({ env = process.env, emojiSet } = {}) {
+// The renderer of the apps plugin (task 0086's nested layers): one top key,
+// `apps`, with a child per app, and the five actions as each app's
+// children. While the apps layer, or an app's layer under it, is open, no
+// app moves or goes, and a new one goes at the end; while it is closed, the
+// apps follow chooseApps. On a connect it removes the `apps` key once, with
+// whatever an earlier daemon left under it, and draws it again.
+export function createAppsRenderer({ slot, env = process.env, emojiSet } = {}) {
   const sent = new Map();
   let shown = [];
   let known = false;
-  let leftovers = [];
   const emojiOf = (name) => emojiFor(componentInput(name), emojiSet).iconRef;
 
   const set = (out, key, fields) => {
@@ -206,74 +211,86 @@ export function createAppsRenderer({ env = process.env, emojiSet } = {}) {
     out.push(setLayerKeyMessage(fields));
   };
 
+  // Removes an app with its actions.
   const remove = (out, name) => {
-    const id = topId(name);
-    for (const key of [...sent.keys()]) if (key === id || key.startsWith(`${id}.`)) sent.delete(key);
-    out.push(removeLayerKeyMessage(id));
+    const id = appId(name);
+    for (const key of [...sent.keys()]) if (key === id || key.startsWith(`${id}/`)) sent.delete(key);
+    out.push(removeLayerKeyMessage(id, TOP_ID));
+  };
+
+  // The status of an app: ERROR after a crash or a failed pull, RUNNING while
+  // it runs or pulls.
+  const statusOf = (name, rows) => {
+    const both = [RUN_PAD[rows.get(`${name}.run`)?.status] ?? '', PULL_PAD[rows.get(`${name}.pull`)?.status] ?? ''];
+    return { run: both[0], pull: both[1], app: worst(both) };
   };
 
   const draw = (out, name, app, rows) => {
-    const id = topId(name);
+    const id = appId(name);
     const emoji = [emojiOf(name)];
-    const run = RUN_PAD[rows.get(`${name}.run`)?.status] ?? '';
-    const pulled = PULL_PAD[rows.get(`${name}.pull`)?.status] ?? '';
-    const both = [run, pulled];
-    const status = both.includes('ERROR') ? 'ERROR' : both.includes('RUNNING') ? 'RUNNING' : '';
-    set(out, id, { id, status, count: 0, iconText: clip(name, MAX_CAPTION), iconEmoji: emoji });
+    const status = statusOf(name, rows);
+    set(out, id, { id, parent: TOP_ID, status: status.app, count: 0, iconText: clip(name, MAX_CAPTION), iconEmoji: emoji });
     for (const [action, caption] of ACTIONS) {
-      const child = { id: `${id}.${action}`, parent: id, status: '', count: 0, iconText: caption, iconEmoji: emoji };
+      const child = { id: action, path: [TOP_ID, id], status: '', count: 0, iconText: caption, iconEmoji: emoji };
       if (action === 'run') {
-        child.status = run;
+        child.status = status.run;
         if (app?.run !== undefined) child.iconText = clip(app.run ?? 'no run', MAX_CAPTION);
       } else if (action === 'pull') {
-        child.status = pulled;
+        child.status = status.pull;
       }
-      set(out, child.id, child);
+      set(out, `${id}/${action}`, child);
     }
   };
 
   return {
-    topId: null,
+    topId: TOP_ID,
 
-    owns: (parent) => shown.some((name) => topId(name) === parent),
+    owns: (parent) => shown.some((name) => appId(name) === parent),
 
-    reset(channels = []) {
+    reset() {
       sent.clear();
-      leftovers = [...new Set([...shown, ...channels.map((c) => c.split('.')[0])])];
       shown = [];
       known = false;
     },
 
     target: () => null,
 
-    plan({ unseen: rows, active, fed }) {
+    plan({ unseen: rows, active, path, fed }) {
       // The apps are not known before the first scan.
       if (!fed) return [];
       const out = [];
+      if (!known) {
+        out.push(removeLayerKeyMessage(TOP_ID));
+        known = true;
+      }
       const byChannel = new Map(rows.map((row) => [row.channel, row]));
       const byName = new Map(fed.apps.map((app) => [app.name, app]));
       const wanted = chooseApps(fed, rows, appsCount(env));
-      if (!known) {
-        // An earlier daemon may have left app keys: remove every app key
-        // that should not show.
-        for (const name of new Set([...leftovers, ...byName.keys()])) {
-          if (!wanted.includes(name)) remove(out, name);
-        }
-        leftovers = [];
-        known = true;
+
+      const top = { id: TOP_ID, status: worst(wanted.map((name) => statusOf(name, byChannel).app)), count: 0, iconText: 'Apps' };
+      if (slot !== undefined) top.slot = slot;
+      set(out, TOP_ID, top);
+
+      const open = path ? path[0] === TOP_ID : active === TOP_ID;
+      if (open) {
+        // Nothing a person sees moves: a new app goes at the end.
+        for (const name of wanted) if (!shown.includes(name) && shown.length < MAX_CHILDREN) shown.push(name);
+      } else {
+        for (const name of shown) if (!wanted.includes(name)) remove(out, name);
+        const stay = shown.filter((name) => wanted.includes(name));
+        // Apps that sit in another order than wanted go and come back.
+        let same = 0;
+        while (same < stay.length && stay[same] === wanted[same]) same++;
+        for (const name of stay.slice(same)) remove(out, name);
+        shown = wanted;
       }
-      const open = shown.find((name) => topId(name) === active);
-      for (const name of shown) {
-        if (!wanted.includes(name) && name !== open) remove(out, name);
-      }
-      const next = shown.filter((name) => wanted.includes(name) || name === open);
-      for (const name of wanted) if (!next.includes(name)) next.push(name);
-      shown = next;
       for (const name of shown) draw(out, name, byName.get(name), byChannel);
       return out;
     },
   };
 }
+
+const worst = (statuses) => (statuses.includes('ERROR') ? 'ERROR' : statuses.includes('RUNNING') ? 'RUNNING' : '');
 
 // The newest message of one channel, or undefined.
 const newest = (store, channel) => store.list({ channel, includeSeen: true, limit: 1 })[0];
@@ -306,7 +323,7 @@ export async function press({ parent, child, store, file, env = process.env, fed
     log(`no app ${name} under ${fed?.root ?? 'INBOX_APPS_ROOT'}`);
     return;
   }
-  const action = child.slice(parent.length + 1);
+  const action = child;
   const { dir } = app;
   const cd = `cd ${shellWord(dir)}`;
   const focusWith = (here) => focus(here, deps);
@@ -362,24 +379,26 @@ export async function press({ parent, child, store, file, env = process.env, fed
   } else if (action === 'term') {
     if (await focusKept(store, `${name}.term`, focusWith)) return;
     await keepNewTab(store, `${name}.term`, cd, deps);
+  } else {
+    log(`no action ${action} on ${name}`);
   }
 }
 
 export default {
   name: 'apps',
-  summary: 'a key per app you work on today: code, Claude, run, pull, terminal',
+  summary: 'the apps you work on today, each with code, Claude, run, pull, terminal',
   statuses: APPS_STATUSES,
   defaultStatus: 'stopped',
-  about: `A top key per app in $INBOX_APPS_ROOT (install.sh --apps-root DIR) that
-you worked on today, or pinned, at most $INBOX_APPS_COUNT (default ${DEFAULT_COUNT}).
-Its five children open VS Code, focus or open a Claude session, run the
+  about: `The apps key opens a key per app in $INBOX_APPS_ROOT (install.sh --apps-root
+DIR) that you worked on today, or pinned, at most $INBOX_APPS_COUNT (default
+${DEFAULT_COUNT}). An app's five children open VS Code, focus or open a Claude session, run the
 app in its own iTerm tab, git pull --rebase, and open a terminal.
 Pin an app with 'inbox --plugin apps pin NAME'.`,
   rules: {
-    id: 'apps',
+    id: TOP_ID,
     activeMs: ACTIVE_MS,
   },
-  createRenderer: ({ env }) => createAppsRenderer({ env }),
+  createRenderer: ({ slot, env }) => createAppsRenderer({ slot, env }),
   press,
   feed: {
     source: 'apps',

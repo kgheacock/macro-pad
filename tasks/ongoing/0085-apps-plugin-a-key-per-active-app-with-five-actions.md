@@ -9,7 +9,7 @@ issue: null
 issue_url: null
 pr: "https://github.com/kgheacock/macro-pad/pull/109"
 branch: "claude/project-thread-2g96mq"
-related: ["0068", "0072", "0075", "0076", "0078", "0081", "0082"]
+related: ["0068", "0072", "0075", "0076", "0078", "0081", "0082", "0086"]
 tags: ["inbox", "plugin", "apps", "iterm", "vscode"]
 ---
 
@@ -39,13 +39,14 @@ test and example uses a placeholder (`acme`).
 
 ## Goals
 
-- A plugin `apps` (`inbox --plugin apps`). It shows one **top key per active
-  app**, at most `INBOX_APPS_COUNT` (default 3). Each key shows the app's
-  name over the emoji of its repository (task 0081), so it matches the app's
-  Claude sessions and its PRs on the github key.
+- A plugin `apps` (`inbox --plugin apps`). Its one top key, `apps`, opens a
+  **key per active app**, at most `INBOX_APPS_COUNT` (default 5, one page).
+  Each app key shows the app's name over the emoji of its repository (task
+  0081), so it matches the app's Claude sessions and its PRs on the github
+  key. (The first version drew a top key per app; see Notes.)
 - A press on an app key opens its layer of exactly **five children**: Code,
-  Claude, Run, Pull, Term. Five children and the up key fit one page (task
-  0078).
+  Claude, Run, Pull, Term, one level down (task 0086). Five children and the
+  up key fit one page (task 0078).
 - **Active** is cheap to work out, without a `git status` over 60
   repositories: the newest of `.git/logs/HEAD` (a checkout or commit),
   `.git/index` (staging), and a Claude session of today in that repository
@@ -113,7 +114,7 @@ in `apps.js`, and two optional plugin fields the daemon reads:
 | Variable | Meaning | Default |
 |---|---|---|
 | `INBOX_APPS_ROOT` | the folder that holds the app repositories, such as `~/source/github.com/acme` | unset: no app keys, and one log line says so |
-| `INBOX_APPS_COUNT` | how many app keys, 1 to 5 | 3 |
+| `INBOX_APPS_COUNT` | how many apps, 1 to 20 | 5 |
 | `INBOX_APPS_RUN` | Run overrides, `NAME=CMD;NAME=CMD` (CMD split on spaces) | none |
 | `INBOX_GIT` | the `git` program | `git` on the `PATH` |
 
@@ -141,24 +142,23 @@ The apps that show, at most `INBOX_APPS_COUNT`:
 2. then the apps whose activity is today (since local midnight), newest
    first.
 
-A key keeps its position while it shows: a new app takes the slot of the one
-that left, and keys do not reorder. While the pad shows an app's layer, that
-app's key stays until the layer closes.
+While the apps layer, or an app's layer under it, is open, no app moves or
+goes, and a new one goes at the end. While it is closed, the apps follow the
+list above, in order.
 
 ### The keys
 
 | Key | id | Shows |
 |---|---|---|
-| app | `app.NAME` | caption `NAME` (cut to 16 runes) over the repository's emoji; RUNNING while it runs or pulls, ERROR after a crash or a failed pull |
-| Code | `app.NAME.code` | caption `Code` over the same emoji |
-| Claude | `app.NAME.claude` | caption `Claude` |
-| Run | `app.NAME.run` | caption: the command (`make dev`, `pnpm dev`), or `no run`; RUNNING while it runs, ERROR after a crash |
-| Pull | `app.NAME.pull` | caption `Pull`; RUNNING while it pulls, DONE after a good pull, ERROR after a failed one |
-| Term | `app.NAME.term` | caption `Term` |
+| apps | `apps` (top key) | caption `Apps`; ERROR if an app shows ERROR, else RUNNING if one runs or pulls |
+| app | `app.NAME`, parent `apps` | caption `NAME` (cut to 16 runes) over the repository's emoji; RUNNING while it runs or pulls, ERROR after a crash or a failed pull |
+| Code | `code`, path `apps`, `app.NAME` | caption `Code` over the same emoji |
+| Claude | `claude` | caption `Claude` |
+| Run | `run` | caption: the command (`make dev`, `pnpm dev`), or `no run`; RUNNING while it runs, ERROR after a crash |
+| Pull | `pull` | caption `Pull`; RUNNING while it pulls, DONE after a good pull, ERROR after a failed one |
+| Term | `term` | caption `Term` |
 
-`--slot apps=N` is ignored, with a log line: the app keys take the free
-slots. Each other plugin takes one slot, so with `basic`, `ai` and `github`
-the pad is full at three app keys.
+The `apps` key takes one slot like every plugin; `--slot apps=N` places it.
 
 ### The actions
 
@@ -284,9 +284,8 @@ An outside reviewer verifies each item without help from the implementer.
 
 ## Risks
 
-- **The pad is full.** Six keys hold `basic`, `ai`, `github` and three apps;
-  the meeting or jira key would not fit. → `INBOX_APPS_COUNT` and
-  `install.sh --plugin` choose; the README says so.
+- **Too many apps.** Past five, the apps layer pages (task 0078). →
+  `INBOX_APPS_COUNT` defaults to 5.
 - **Text typed into a reused tab** lands in whatever runs there now. → Run
   only types when its own run is not running; Term never types into a kept
   tab.
@@ -304,3 +303,24 @@ An outside reviewer verifies each item without help from the implementer.
   a pin covers the rest. — kgheacock
 
 ## Notes
+
+### 2026-10-27: every app under one `apps` key
+
+The first version drew a top key per app, because the pad had no
+grandchildren, and three app keys filled the pad. Keith asked for nested
+layers (task 0086, PR #110, merged 2026-10-27), and the apps moved under one
+key:
+
+- The top key is `apps` (caption `Apps`, a slot like any plugin's, `--slot
+  apps=N`). Its colour is the worst of its apps: ERROR, then RUNNING.
+- Each app is a child `app.NAME` with `parent: "apps"`. Its actions are
+  grandchildren `code`, `claude`, `run`, `pull`, `term` with
+  `path: ["apps", "app.NAME"]`; a press sends `childPressed` with
+  `parent: "app.NAME"` and the action as `child`.
+- `INBOX_APPS_COUNT` defaults to 5 (one page) and goes up to 20.
+- While the apps layer or an app's layer is open, no app moves or goes, and
+  a new one goes at the end; while closed, the apps follow the choice in
+  order. On a connect the renderer removes the `apps` key once, with what an
+  earlier daemon left under it, and draws it again.
+- The table in "The keys" and DoD-3 read with these ids. Proof:
+  `cd inbox && node --test --test-name-pattern='TestAppsKeys|TestDaemonApps' test/apps.test.js`.

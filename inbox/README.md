@@ -306,7 +306,10 @@ The keys:
   is open, so keys do not move under a finger. It stays with count 0 until you
   leave the layer. A new channel takes a free position if one is left, and
   otherwise waits. When the layer closes, the daemon removes channels at zero,
-  adds the waiting ones, and orders the keys by newest unseen message.
+  adds the waiting ones, and orders the keys by newest unseen message. A
+  layer under the key's own, from a child with children of its own (task
+  0086), counts as open too: the daemon reads the open layer's `path` from
+  `layerChanged`.
 - A press on a channel key marks that channel's unseen messages seen. It
   marks the messages the key showed, so one that lands during the press stays
   unseen. The count on the key, and the total on `inbox`, drop within 1 s. The

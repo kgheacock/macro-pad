@@ -298,10 +298,10 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 }
 
 // neededFrames returns every frame the layer tree can show, the top layer
-// first, then the first page of the child layer of each key that has
-// children, then the second pages, and so on, without repeats. The preload
-// stops when the table is full, so the later pages are the ones that miss
-// (task 0078).
+// first, then the first page of every layer, breadth first down the tree
+// (task 0086), then the second pages, and so on, without repeats. The
+// preload stops when the table is full, so the later pages and the deeper
+// layers are the ones that miss (task 0078).
 func neededFrames(d Doc) []frameKey {
 	seen := make(map[frameKey]bool)
 	var out []frameKey
@@ -315,18 +315,31 @@ func neededFrames(d Doc) []frameKey {
 		}
 	}
 	top := d.clone()
-	top.Active = nil
+	top.Active, top.Page, top.ParentPages = nil, 0, nil
 	add(top)
+	// layers holds the path of every node with children, breadth first.
+	var layers [][]string
+	for _, k := range top.Keys {
+		if k != nil && len(k.Children) > 0 {
+			layers = append(layers, []string{k.ID})
+		}
+	}
+	for i := 0; i < len(layers); i++ {
+		for _, ch := range top.nodeAt(layers[i]).Children {
+			if len(ch.Children) > 0 {
+				layers = append(layers, append(append([]string{}, layers[i]...), ch.ID))
+			}
+		}
+	}
 	for page := 0; ; page++ {
 		found := false
-		for _, k := range top.Keys {
-			if k == nil || len(k.Children) == 0 || page >= PageCount(len(k.Children)) {
+		for _, path := range layers {
+			if page >= PageCount(len(top.nodeAt(path).Children)) {
 				continue
 			}
 			found = true
-			layer := d.clone()
-			id := k.ID
-			layer.Active = &id
+			layer := top.clone()
+			layer.Active = path
 			layer.Page = page
 			add(layer)
 		}

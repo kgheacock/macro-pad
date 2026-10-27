@@ -1,7 +1,7 @@
 ---
 id: "0085"
 title: "The apps inbox plugin: a key per active app, with five actions under it"
-status: "backlog"
+status: "ongoing"
 created: "2026-10-27"
 updated: "2026-10-27"
 owner: "kgheacock"

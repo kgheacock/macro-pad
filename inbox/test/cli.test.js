@@ -680,13 +680,14 @@ test('TestOneDaemonEveryPlugin', async (t) => {
   const server = await serve(t);
   const d = daemon(t, sc, ['--port', String(server.port)]);
   await stderrHas(d.child, 'ai daemon started');
-  // One process, one connection per plugin, and a top key for each.
+  // One process, one connection per plugin, and a top key for each; apps
+  // has none without INBOX_APPS_ROOT.
   await waitFor(
     () => keysOf(server, 'inbox').length && keysOf(server, 'ai-inbox').length && keysOf(server, 'github-inbox').length,
     3000,
     'every top key',
   );
-  assert.equal(server.connections, 3);
+  assert.equal(server.connections, 4);
 
   // A message of either plugin reaches the pad within 1 s.
   let sent = Date.now();
@@ -705,7 +706,7 @@ test('TestOneDaemonEveryPlugin', async (t) => {
   const { status, stderr } = await d.exited;
   assert.equal(status, 0);
   assert.ok(stderr.includes(`inbox: basic daemon started for ${sc.db} (pid ${d.child.pid})\n`), stderr);
-  for (const plugin of ['basic', 'ai', 'github']) assert.equal(existsSync(`${sc.db}.${plugin}.daemon.pid`), false, plugin);
+  for (const plugin of ['basic', 'ai', 'github', 'apps']) assert.equal(existsSync(`${sc.db}.${plugin}.daemon.pid`), false, plugin);
   // The github loop finds no gh in a test, and says so once.
   assert.equal(stderr.split('\n').filter((line) => line.startsWith('inbox: [github] cannot read GitHub')).length, 1, stderr);
 });
@@ -744,11 +745,11 @@ test('TestMergedDaemonRefused', async (t) => {
 test('TestDaemonSlots', async (t) => {
   const sc = scratch(t);
   const usage = [
-    [['--slot', '1'], 'inbox: --slot 1 names no plugin, and the daemon runs basic, ai, github; use --slot NAME=N, such as --slot basic=1\n'],
+    [['--slot', '1'], 'inbox: --slot 1 names no plugin, and the daemon runs basic, ai, github, apps; use --slot NAME=N, such as --slot basic=1\n'],
     [['--slot', 'basic=1', '--slot', 'ai=1'], 'inbox: --slot 1 is given to both basic and ai; give each its own slot\n'],
     [['--slot', 'basic=1', '--slot', 'basic=2'], 'inbox: give --slot once for basic\n'],
     [['--plugin', 'ai', '--slot', 'basic=1'], 'inbox: --slot basic=1: the daemon does not run plugin "basic"; it runs ai\n'],
-    [['--slot', 'nope=1'], 'inbox: --slot nope=1: the daemon does not run plugin "nope"; it runs basic, ai, github\n'],
+    [['--slot', 'nope=1'], 'inbox: --slot nope=1: the daemon does not run plugin "nope"; it runs basic, ai, github, apps\n'],
   ];
   for (const [flags, message] of usage) {
     const r = run(['daemon', '--port', '1', ...flags], { sc });
@@ -778,7 +779,7 @@ test('TestPluginListOnlyForDaemon', () => {
   assert.ok(r.stderr.includes('give --plugin once; got basic and ai'), r.stderr);
   const bad = run(['daemon', '--plugin', 'basic,nope'], { sc });
   assert.equal(bad.status, 2);
-  assert.equal(bad.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github\n');
+  assert.equal(bad.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github, apps\n');
 });
 
 const SESSION = '0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';
@@ -969,7 +970,7 @@ test('TestPluginFlag', (t) => {
 
   let r = run(['--plugin', 'nope', 'list'], { sc });
   assert.equal(r.status, 2);
-  assert.equal(r.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github\n');
+  assert.equal(r.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github, apps\n');
   r = run(['list', '--plugin'], { sc });
   assert.equal(r.status, 2);
   assert.ok(r.stderr.includes('--plugin needs a NAME'), r.stderr);
@@ -980,10 +981,11 @@ test('TestPluginFlag', (t) => {
   r = run(['plugins'], { sc });
   assert.equal(r.status, 0);
   const lines = r.stdout.trimEnd().split('\n');
-  assert.equal(lines.length, 3);
+  assert.equal(lines.length, 4);
   assert.ok(lines[0].startsWith('basic ') && lines[0].endsWith('(default)'), lines[0]);
   assert.ok(lines[1].startsWith('ai ') && !lines[1].endsWith('(default)'), lines[1]);
   assert.ok(lines[2].startsWith('github ') && !lines[2].endsWith('(default)'), lines[2]);
+  assert.ok(lines[3].startsWith('apps ') && !lines[3].endsWith('(default)'), lines[3]);
 });
 
 test('TestAiStatus', (t) => {

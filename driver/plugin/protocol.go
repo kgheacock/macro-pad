@@ -152,14 +152,14 @@ type SignalPayload struct {
 // id on the slot drops the message. A message with only ID and Slot
 // reserves the slot. See task 0057.
 type SetLayerKeyPayload struct {
-	ID      string `json:"id"`
+	ID      string   `json:"id"`
 	Parent  string   `json:"parent,omitempty"`
 	Path    []string `json:"path,omitempty"`
 	Slot    *int     `json:"slot,omitempty"`
-	Icon    byte   `json:"icon"`
-	Status  string `json:"status"`
-	Count   int    `json:"count"`
-	IconRef string `json:"iconRef"`
+	Icon    byte     `json:"icon"`
+	Status  string   `json:"status"`
+	Count   int      `json:"count"`
+	IconRef string   `json:"iconRef"`
 	// IconText is words drawn as the icon instead of IconRef (task 0069), or
 	// the caption over IconEmoji.
 	IconText string `json:"iconText,omitempty"`

@@ -7,7 +7,7 @@ updated: "2026-10-27"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/110"
 branch: "claude/project-thread-z0nk55"
 related: ["0057", "0066", "0067", "0075", "0078", "0085"]
 tags: ["layers", "driver", "protocol", "inbox"]

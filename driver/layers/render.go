@@ -90,7 +90,8 @@ func renderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, err
 // (task 0069), or the emoji in emoji, joined by line breaks, with text as their
 // caption (task 0073). A text icon is a plain white tile, so the key color
 // cannot show; the pip is blended against ColorNone, as the board draws it on a
-// frame stored for a text icon.
+// frame stored for a text icon. An emoji icon is a white tile too, with the key
+// color only in its strip (task 0082), so its pip is blended the same way.
 func renderIcon(assetsDir, ref, text, emoji string, count int, keyColor uint16) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
 	if emoji != "" {
@@ -108,6 +109,7 @@ func renderIcon(assetsDir, ref, text, emoji string, count int, keyColor uint16) 
 			return nil, err
 		}
 		text = ""
+		keyColor = ColorNone
 	}
 	if text != "" {
 		if ref != "" {

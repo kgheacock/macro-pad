@@ -110,47 +110,62 @@ const fedOf = (root, list) => ({
   apps: list.map(([name, hoursAgo, runLabel = null]) => ({ name, dirName: name, dir: path.join(root, name), activity: NOON - hoursAgo * HOUR, run: runLabel })),
 });
 
+// The app children of the apps key, and the actions of one app.
+const appsOf = (keys) => keys.filter((k) => k.parent === 'apps').map((k) => k.id);
+const actionsOf = (keys, id) => keys.filter((k) => k.path?.[1] === id);
+
 test('TestAppsKeys', (t) => {
   const { sc, root } = fakeRoot(t);
   const store = storeFor(t, sc);
-  const renderer = createAppsRenderer({ env: { INBOX_APPS_COUNT: '2' } });
+  const renderer = createAppsRenderer({ slot: 4, env: { INBOX_APPS_COUNT: '2' } });
   // Nothing before the first scan.
-  assert.deepEqual(renderer.plan({ unseen: [], active: null, fed: null }), []);
+  assert.deepEqual(renderer.plan({ unseen: [], active: null, path: [], fed: null }), []);
 
   let fed = fedOf(root, [['web', 1, 'pnpm dev'], ['api', 2, null], ['old', 30]]);
   renderer.reset(['leftover.pin']);
-  let messages = renderer.plan({ unseen: rowsOf(store), active: null, fed });
-  // Every app key that should not show goes first: an earlier daemon's too.
-  assert.deepEqual(removed(messages).sort(), ['app.leftover', 'app.old']);
+  let messages = renderer.plan({ unseen: rowsOf(store), active: null, path: [], fed });
+  // The first plan after a connect clears what an earlier daemon left.
+  assert.deepEqual(messages[0], { kind: 'removeLayerKey', removeLayerKey: { id: 'apps' } });
   const keys = sets(messages);
-  const tops = keys.filter((k) => !k.parent).map((k) => k.id);
-  assert.deepEqual(tops, ['app.web', 'app.api']);
+  assert.deepEqual(keys[0], { id: 'apps', status: '', count: 0, iconText: 'Apps', slot: 4 });
+  assert.deepEqual(appsOf(keys), ['app.web', 'app.api']);
   const web = emojiFor('repo:web').iconRef;
-  assert.deepEqual(keys.find((k) => k.id === 'app.web'), { id: 'app.web', status: '', count: 0, iconText: 'web', iconEmoji: [web] });
-  const children = keys.filter((k) => k.parent === 'app.web');
-  assert.deepEqual(children.map((k) => k.id), ['app.web.code', 'app.web.claude', 'app.web.run', 'app.web.pull', 'app.web.term']);
+  assert.deepEqual(keys.find((k) => k.id === 'app.web'), { id: 'app.web', parent: 'apps', status: '', count: 0, iconText: 'web', iconEmoji: [web] });
+  const children = actionsOf(keys, 'app.web');
+  assert.deepEqual(children.map((k) => k.id), ['code', 'claude', 'run', 'pull', 'term']);
+  assert.deepEqual(children[0].path, ['apps', 'app.web']);
   assert.deepEqual(children.map((k) => k.iconText), ['Code', 'Claude', 'pnpm dev', 'Pull', 'Term']);
   assert.ok(children.every((k) => k.iconEmoji[0] === web));
-  assert.equal(keys.find((k) => k.id === 'app.api.run').iconText, 'no run');
+  assert.equal(actionsOf(keys, 'app.api').find((k) => k.id === 'run').iconText, 'no run');
   assert.ok(renderer.owns('app.web') && !renderer.owns('app.old') && !renderer.owns('inbox'));
 
   // A run and a pull colour the keys; nothing else is sent again.
   store.insert('web.run', 'pnpm run dev', root, { status: 'running' });
   store.insert('api.pull', 'conflict; rebase aborted', root, { status: 'failed' });
-  messages = renderer.plan({ unseen: rowsOf(store), active: null, fed });
-  const changed = Object.fromEntries(sets(messages).map((k) => [k.id, k.status]));
-  assert.deepEqual(changed, { 'app.web': 'RUNNING', 'app.web.run': 'RUNNING', 'app.api': 'ERROR', 'app.api.pull': 'ERROR' });
+  messages = renderer.plan({ unseen: rowsOf(store), active: null, path: [], fed });
+  const changed = sets(messages).map((k) => [k.path?.[1] ?? k.id, k.id, k.status]);
+  assert.deepEqual(changed, [
+    ['apps', 'apps', 'ERROR'],
+    ['app.web', 'app.web', 'RUNNING'],
+    ['app.web', 'run', 'RUNNING'],
+    ['app.api', 'app.api', 'ERROR'],
+    ['app.api', 'pull', 'ERROR'],
+  ]);
 
-  // web's layer is open while new comes in: web stays, api goes.
+  // web's layer is open, under apps, while new comes in: nothing goes, and
+  // new goes at the end.
   fed = fedOf(root, [['new', 0.5], ['web', 1, 'pnpm dev'], ['api', 2]]);
-  messages = renderer.plan({ unseen: rowsOf(store), active: 'app.web', fed });
-  assert.deepEqual(removed(messages), ['app.api']);
-  assert.deepEqual(sets(messages).filter((k) => !k.parent).map((k) => k.id), ['app.new']);
-  // Then web leaves when the layer closes, and new stays where it is.
-  fed = fedOf(root, [['new', 0.5], ['next', 0.7], ['web', 1]]);
-  messages = renderer.plan({ unseen: rowsOf(store), active: null, fed });
-  assert.deepEqual(removed(messages), ['app.web']);
-  assert.deepEqual(sets(messages).filter((k) => !k.parent).map((k) => k.id), ['app.next']);
+  messages = renderer.plan({ unseen: rowsOf(store), active: 'app.web', path: ['apps', 'app.web'], fed });
+  assert.deepEqual(removed(messages), []);
+  assert.deepEqual(appsOf(sets(messages)), ['app.new']);
+  // Closed: the apps follow the choice, in order.
+  messages = renderer.plan({ unseen: rowsOf(store), active: null, path: [], fed });
+  assert.deepEqual(removed(messages), ['app.api', 'app.web', 'app.new']);
+  assert.deepEqual(appsOf(sets(messages)), ['app.new', 'app.web']);
+  assert.deepEqual(messages.find((m) => m.removeLayerKey).removeLayerKey, { id: 'app.api', parent: 'apps' });
+  // The apps are already in order: nothing moves.
+  messages = renderer.plan({ unseen: rowsOf(store), active: null, path: [], fed });
+  assert.deepEqual(messages, []);
 });
 
 // A stand-in for execFile: records each call and answers from `answers`
@@ -181,7 +196,7 @@ test('TestAppsPress', async (t) => {
   const deps = { execFile, platform: 'darwin', node: '/n/node', bin: '/i/inbox.js' };
   const focusOk = async (here) => focused.push(here);
   const go = (child, focus = focusOk) =>
-    press({ parent: 'app.web', child: `app.web.${child}`, store, file: '/d/inbox.db', env, fed, focus, now: NOON, deps });
+    press({ parent: 'app.web', child, store, file: '/d/inbox.db', env, fed, focus, now: NOON, deps });
 
   await go('code');
   assert.deepEqual([calls[0].file, calls[0].args], ['open', ['-b', 'com.microsoft.VSCode', web]]);
@@ -230,7 +245,7 @@ test('TestAppsPress', async (t) => {
   const logs = [];
   const bare = fakeApp(root, 'bare', NOON);
   calls.length = 0;
-  await press({ parent: 'app.bare', child: 'app.bare.run', store, env, fed: scan({ env, store, now: NOON }), log: (l) => logs.push(l), deps });
+  await press({ parent: 'app.bare', child: 'run', store, env, fed: scan({ env, store, now: NOON }), log: (l) => logs.push(l), deps });
   assert.equal(calls.length, 0);
   assert.match(logs[0], /^no run command for bare/);
   assert.ok(existsSync(bare));
@@ -267,7 +282,7 @@ test('TestAppsPull', async (t) => {
   const gitEnv = { ...process.env, ...env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
   const fed = scan({ env: gitEnv, store });
   const changes = [];
-  const go = () => press({ parent: 'app.web', child: 'app.web.pull', store, env: gitEnv, fed, changed: () => changes.push(rowsOf(store).find((r) => r.channel === 'web.pull').status) });
+  const go = () => press({ parent: 'app.web', child: 'pull', store, env: gitEnv, fed, changed: () => changes.push(rowsOf(store).find((r) => r.channel === 'web.pull').status) });
   const last = () => store.list({ channel: 'web.pull', includeSeen: true }).at(-1);
 
   await go();
@@ -355,13 +370,14 @@ test('TestDaemonApps', async (t) => {
   const logs = [];
   const daemon = startDaemon({ file: sc.db, port: server.port, pollMs: 20, plugin, slot: 2, env: { INBOX_APPS_COUNT: '3' }, log: (l) => logs.push(l) });
   t.after(() => daemon.stop());
-  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'app.web.term'), 1000, 'the app key');
-  assert.ok(logs.includes('--slot is ignored for apps: its keys take the free slots'));
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'term'), 1000, 'the app key');
+  assert.equal(server.received.find((m) => m.setLayerKey?.id === 'apps').setLayerKey.slot, 2);
   // A press on another plugin's key is not ours.
-  server.send({ kind: 'childPressed', childPressed: { keyIndex: 0, parent: 'inbox', child: 'x' } });
-  server.send({ kind: 'childPressed', childPressed: { keyIndex: 0, parent: 'app.web', child: 'app.web.code' } });
+  server.send({ kind: 'childPressed', childPressed: { keyIndex: 0, parent: 'inbox', child: 'x', path: ['inbox'] } });
+  server.send({ kind: 'childPressed', childPressed: { keyIndex: 0, parent: 'app.web', child: 'code', path: ['apps', 'app.web'] } });
   await waitFor(() => presses.length === 1, 1000, 'the press');
-  assert.deepEqual(presses, [['app.web', 'app.web.code', 1]]);
+  assert.deepEqual(presses, [['app.web', 'code', 1]]);
+  assert.deepEqual(logs.filter((l) => !l.startsWith('connected')), []);
 });
 
 test('TestAppsInstall', (t) => {
@@ -382,7 +398,7 @@ test('TestAppsInstall', (t) => {
   r = install('--dry-run', '--apps-root', path.join(root, 'nope'));
   assert.equal(r.status, 1);
   assert.equal(r.stderr, `install.sh: --apps-root ${path.join(root, 'nope')} is not a folder\n`);
-  for (const bad of [['--apps-count', '9'], ['--apps-run', 'web'], ['--apps-run', "web=it's"]]) {
+  for (const bad of [['--apps-count', '21'], ['--apps-run', 'web'], ['--apps-run', "web=it's"]]) {
     assert.equal(install('--dry-run', ...bad).status, 2, bad.join(' '));
   }
 

@@ -27,7 +27,7 @@ the per-plugin services that older versions made.
   --apps-root DIR   the folder of the apps plugin's repositories, such as
                     ~/source/github.com/acme (default: \$INBOX_APPS_ROOT if
                     set; without it the apps plugin shows no keys)
-  --apps-count N    how many app keys, 1 to 5 (default: 3)
+  --apps-count N    how many apps the apps key shows, 1 to 20 (default: 5)
   --apps-run NAME=CMD  how the app NAME runs, instead of the command its
                     Makefile or package.json gives; once per app
   --no-completions  do not install the zsh completions
@@ -140,8 +140,8 @@ case $APPS_RUN in
     exit 2 ;;
 esac
 case $APPS_COUNT in
-  '' | [1-5]) ;;
-  *) printf '%s: --apps-count %s is out of range; use 1 to 5\n' "$NAME" "$APPS_COUNT" >&2; exit 2 ;;
+  '' | [1-9] | 1[0-9] | 20) ;;
+  *) printf '%s: --apps-count %s is out of range; use 1 to 20\n' "$NAME" "$APPS_COUNT" >&2; exit 2 ;;
 esac
 if [ -n "$APPS_ROOT" ]; then
   case $APPS_ROOT in

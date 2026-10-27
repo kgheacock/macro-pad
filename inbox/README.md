@@ -7,7 +7,7 @@ reads. No process must run for a message to be saved.
 A plugin decides what the messages mean and how they show on the pad. The
 default, `basic`, counts unseen messages; `ai` shows the state of AI agents;
 `github` shows your open pull requests, coloured by their checks; `apps`
-gives each app you work on today a key with five actions. Pick one with `--plugin NAME` on any command (see "Plugins").
+opens the apps you work on today, each with five actions. Pick one with `--plugin NAME` on any command (see "Plugins").
 
 It is a Node package with no npm dependencies. It uses Node's built-in
 `node:sqlite`, so it needs **Node 22.13 or newer**. No `npm install` is
@@ -257,7 +257,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. `install.sh --github-query Q` sets it in the wrapper. | `is:pr is:open author:@me archived:false` |
 | `INBOX_GITHUB_WATCHED` | `0` leaves the PRs you watch out of the `github` plugin. | unset (watched PRs show) |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
-| `INBOX_APPS_COUNT` | How many app keys, 1 to 5. `install.sh --apps-count N`. | `3` |
+| `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
 | `INBOX_APPS_RUN` | Run commands that win over detection, `NAME=CMD;NAME=CMD`. `install.sh --apps-run NAME=CMD`. | unset |
 | `INBOX_GIT` | The `git` the `apps` plugin's Pull key runs. `install.sh` sets it in the wrapper. | `git` on the `PATH` |
 
@@ -611,7 +611,8 @@ INBOX_GITHUB_QUERY='is:pr is:open review-requested:@me' inbox daemon --plugin gi
 
 ### The apps plugin
 
-A top key for each app you work on today (task 0085). An app is a folder of
+One key, `apps`, opens a key for each app you work on today, and each app
+opens five actions (task 0085, on the nested layers of task 0086). An app is a folder of
 `$INBOX_APPS_ROOT` that holds a `.git` folder, such as
 `~/source/github.com/acme/web`. Set the root once:
 
@@ -623,12 +624,13 @@ Every 30 s the daemon reads, for each app, the times of `.git/logs/HEAD` (a
 checkout or commit) and `.git/index` (staging), and the newest Claude session
 of today in its folder (the `ai` plugin's channels). An app whose newest time
 is today is active. The keys show the pinned apps first, oldest pin first,
-then the active apps, newest first, at most `$INBOX_APPS_COUNT` (default 3).
-A key keeps its slot while it shows; a new app takes the slot of one that
-left. Each key shows the app's name over its repository's emoji, the same
-emoji as its Claude sessions and its PRs.
+then the active apps, newest first, at most `$INBOX_APPS_COUNT` (default 5,
+one page). While the apps layer is open, no app moves or goes, and a new
+one goes at the end. Each app shows its name over its repository's emoji,
+the same emoji as its Claude sessions and its PRs. The `apps` key is blue
+while an app runs or pulls, and red after a crash or a failed pull.
 
-A press on an app key opens five children:
+A press on an app opens five children:
 
 | Key | A press |
 |---|---|
@@ -662,7 +664,6 @@ inbox --plugin apps list --all-channels
 | `NAME.run` | `running`, `stopped`, `crashed` |
 | `NAME.pull` | `pulling`, `pulled`, `failed` |
 
-The pad has six keys, and each other plugin takes one: with `basic`, `ai` and
-`github`, three app keys fill it. Pick with `--apps-count` and `--plugin`.
-`--slot apps=N` is ignored. Without `$INBOX_APPS_ROOT` the plugin shows no
+The `apps` key takes one slot, like every plugin; `--slot apps=N` places it.
+Without `$INBOX_APPS_ROOT` the plugin shows no
 key and logs `cannot read apps: no INBOX_APPS_ROOT` once.

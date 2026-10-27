@@ -6,7 +6,8 @@ reads. No process must run for a message to be saved.
 
 A plugin decides what the messages mean and how they show on the pad. The
 default, `basic`, counts unseen messages; `ai` shows the state of AI agents;
-`github` shows your open pull requests, coloured by their checks. Pick one with `--plugin NAME` on any command (see "Plugins").
+`github` shows your open pull requests, coloured by their checks; `apps`
+opens the apps you work on today, each with five actions. Pick one with `--plugin NAME` on any command (see "Plugins").
 
 It is a Node package with no npm dependencies. It uses Node's built-in
 `node:sqlite`, so it needs **Node 22.13 or newer**. No `npm install` is
@@ -32,6 +33,8 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox here [CHANNEL [HERE]] [--clear CHANNEL]` | Show or set where a press goes. See "Here". |
 | `inbox plugins` | Print each plugin and what it shows. See "Plugins". |
 | `inbox emoji [CHANNEL \| --folder DIR] [--session ID] [--format F]` | Print the emoji a key shows for a folder, a session, or both. See "Emoji". |
+| `inbox --plugin apps pin [NAME]`, `unpin [NAME]` | Always show an app's key, or stop. See "The apps plugin". |
+| `inbox --plugin apps run NAME [-- CMD...]` | Run an app here and report its state to its Run key. See "The apps plugin". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
 `send`, `pipe`, `list`, `count`, `seen` and `emoji` also take `--channel C` in place of
@@ -253,6 +256,10 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_GH` | The `gh` program the `github` plugin runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
 | `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. `install.sh --github-query Q` sets it in the wrapper. | `is:pr is:open author:@me archived:false` |
 | `INBOX_GITHUB_WATCHED` | `0` leaves the PRs you watch out of the `github` plugin. | unset (watched PRs show) |
+| `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
+| `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
+| `INBOX_APPS_RUN` | Run commands that win over detection, `NAME=CMD;NAME=CMD`. `install.sh --apps-run NAME=CMD`. | unset |
+| `INBOX_GIT` | The `git` the `apps` plugin's Pull key runs. `install.sh` sets it in the wrapper. | `git` on the `PATH` |
 
 ## Exit codes
 
@@ -374,7 +381,9 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--no-completions] [--dry-run]
+inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q]
+                         [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
+                         [--no-completions] [--dry-run]
 inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
 
@@ -599,3 +608,62 @@ adds the PRs you are assigned to, mentioned in, or commented on. Running
 inbox --plugin github list --all-channels
 INBOX_GITHUB_QUERY='is:pr is:open review-requested:@me' inbox daemon --plugin github
 ```
+
+### The apps plugin
+
+One key, `apps`, opens a key for each app you work on today, and each app
+opens five actions (task 0085, on the nested layers of task 0086). An app is a folder of
+`$INBOX_APPS_ROOT` that holds a `.git` folder, such as
+`~/source/github.com/acme/web`. Set the root once:
+
+```
+inbox/scripts/install.sh --apps-root ~/source/github.com/acme
+```
+
+Every 30 s the daemon reads, for each app, the times of `.git/logs/HEAD` (a
+checkout or commit) and `.git/index` (staging), and the newest Claude session
+of today in its folder (the `ai` plugin's channels). An app whose newest time
+is today is active. The keys show the pinned apps first, oldest pin first,
+then the active apps, newest first, at most `$INBOX_APPS_COUNT` (default 5,
+one page). While the apps layer is open, no app moves or goes, and a new
+one goes at the end. Each app shows its name over its repository's emoji,
+the same emoji as its Claude sessions and its PRs. The `apps` key is blue
+while an app runs or pulls, and red after a crash or a failed pull.
+
+A press on an app opens five children:
+
+| Key | A press |
+|---|---|
+| Code | `open -b com.microsoft.VSCode DIR` |
+| Claude | brings the app's newest Claude session of today to the front; else the tab this key opened; else a new iTerm tab runs `claude` in DIR |
+| Run | runs the app in its own iTerm tab, opened once and reused; while it runs, a press brings the tab to the front. Blue while it runs, red after a crash. |
+| Pull | `git pull --rebase` in DIR. Blue while it pulls, green after, red when it fails. A conflict aborts the rebase, so the repository is as it was. |
+| Term | the iTerm tab this key opened at DIR, else a new one |
+
+The Run key's caption is the command it runs, the first that fits:
+
+1. the app's entry in `$INBOX_APPS_RUN` (`install.sh --apps-run 'web=make serve PORT=8080'`);
+2. a Makefile target `dev`, `run`, `start` or `serve`: `make dev`;
+3. a `package.json` script `dev`, else `start`, with the package manager of the
+   lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, else npm): `pnpm dev`;
+4. else `no run`, and a press does nothing but log a line.
+
+The Run tab types `cd DIR && inbox --plugin apps run NAME -- CMD`, which you
+can type yourself too. It runs CMD with the terminal, writes `running`, and
+writes `stopped` when CMD exits 0 or you stop it (Ctrl-C), or `crashed`.
+
+```
+inbox --plugin apps pin web          # always show web; or pin with no NAME inside it
+inbox --plugin apps unpin web
+inbox --plugin apps list --all-channels
+```
+
+| Channel | Statuses |
+|---|---|
+| `NAME.pin` | `pinned`, `unpinned` |
+| `NAME.run` | `running`, `stopped`, `crashed` |
+| `NAME.pull` | `pulling`, `pulled`, `failed` |
+
+The `apps` key takes one slot, like every plugin; `--slot apps=N` places it.
+Without `$INBOX_APPS_ROOT` the plugin shows no
+key and logs `cannot read apps: no INBOX_APPS_ROOT` once.

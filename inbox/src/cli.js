@@ -1,13 +1,17 @@
 // Subcommands, help text, and error messages. main() takes an io object so
 // a test can run the CLI in process; bin/inbox.js passes the real streams.
 
+import { spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { detectRun, parseRunOverrides } from './apps.js';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
 import { componentInput, componentOf, emojiFor, sessionInput, splitSessionChannel } from './emoji.js';
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
+import { appName, appsRoot, listApps } from './plugins/apps.js';
 import { DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
 import { defaultDbPath, openStore } from './store.js';
 
@@ -47,6 +51,9 @@ Commands:
   daemon     watch the inbox and show it on the macro pad
   plugins    list the plugins
   emoji      print the emoji of a folder or a Claude Code session
+  pin        always show an app's key (--plugin apps)
+  unpin      stop pinning an app (--plugin apps)
+  run        run an app and report its state (--plugin apps)
   help       show help for a command
 
 @PLUGINS@
@@ -228,6 +235,37 @@ Examples:
   inbox emoji --folder ~/source/macro-pad --session "$CLAUDE_CODE_SESSION_ID"
   inbox emoji macro-pad.driver --format name`,
 
+  pin: `Usage: inbox --plugin apps pin [NAME]
+
+Always show the key of the app NAME, a folder of $INBOX_APPS_ROOT that holds
+a .git folder, as if you worked on it today (task 0085). Pinned apps show
+first, oldest pin first. Without NAME, the app of the working directory.
+${DB_OPTION}
+
+Example:
+  inbox --plugin apps pin web`,
+
+  unpin: `Usage: inbox --plugin apps unpin [NAME]
+
+Stop pinning the app NAME (default: the app of the working directory). Its
+key stays while you work on it today.
+${DB_OPTION}`,
+
+  run: `Usage: inbox --plugin apps run NAME [-- COMMAND [ARGUMENTS]]
+
+Run COMMAND in the working directory, with this terminal as its input and
+output, and report its state to the Run key of the app NAME (task 0085):
+running, then stopped when it exits 0 or you stop it (Ctrl-C), or crashed.
+Without COMMAND, the command the Run key would pick: the app's
+$INBOX_APPS_RUN entry, a Makefile target dev, run, start or serve, or a
+package.json script dev or start. Exits with COMMAND's exit code. The Run
+key types this command into the app's iTerm tab.
+${DB_OPTION}
+
+Examples:
+  inbox --plugin apps run web
+  inbox --plugin apps run web -- make serve PORT=8080`,
+
   plugins: `Usage: inbox plugins
 
 Print each plugin and what it shows. Pick one with --plugin NAME on any
@@ -292,7 +330,7 @@ function helpText(command, plugin) {
   return text;
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins', 'emoji'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins', 'emoji', 'pin', 'unpin', 'run'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen', 'emoji'];
@@ -311,6 +349,9 @@ const OPTIONS = {
   seen: { 'all-channels': { type: 'boolean' } },
   here: { clear: { type: 'boolean' } },
   plugins: {},
+  pin: {},
+  unpin: {},
+  run: {},
   emoji: { folder: { type: 'string' }, session: { type: 'string' }, format: { type: 'string' } },
   daemon: {
     port: { type: 'string' },
@@ -896,6 +937,118 @@ async function runDaemon(io, { values, positionals }) {
   return 0;
 }
 
+// pin, unpin and run belong to the apps plugin (task 0085).
+function needApps(io, command) {
+  if (io.plugin.name !== 'apps') {
+    throw new UsageError(`${command} is a command of the apps plugin; use: inbox --plugin apps ${command}`, { help: false });
+  }
+}
+
+const realpath = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+// The app NAME names, or the app of the working directory:
+// { name, dirName, dir } or null.
+function appFor(io, command, positionals) {
+  if (positionals.length > 1) throw new UsageError(`${command} takes one app NAME`);
+  const root = appsRoot(io.env);
+  if (root === null) {
+    throw new UsageError(`${command} needs INBOX_APPS_ROOT, the folder of your apps; run install.sh --apps-root DIR`, { help: false });
+  }
+  let wanted = positionals[0];
+  if (wanted === undefined) {
+    const rel = path.relative(realpath(root), realpath(io.cwd()));
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new UsageError(`no app: ${tildify(io.cwd())} is not in ${tildify(root)}. Give the app NAME`);
+    }
+    wanted = rel.split(path.sep)[0];
+  }
+  let apps = [];
+  try {
+    apps = listApps(root);
+  } catch (e) {
+    throw new UsageError(`cannot read ${tildify(root)}: ${e.message}`, { help: false });
+  }
+  return { wanted, app: apps.find((a) => a.dirName === wanted || a.name === wanted) ?? null, root };
+}
+
+function runPin(io, { values, positionals }) {
+  needApps(io, 'pin');
+  const { wanted, app, root } = appFor(io, 'pin', positionals);
+  if (app === null) throw new UsageError(`no app "${wanted}": ${tildify(root)} has no such folder with a .git folder`, { help: false });
+  withStore(io, values, (store) => store.insert(`${app.name}.pin`, 'pinned', app.dir, { status: 'pinned' }));
+  out(io, `pinned ${app.name}`);
+  return 0;
+}
+
+function runUnpin(io, { values, positionals }) {
+  needApps(io, 'unpin');
+  const { wanted, app } = appFor(io, 'unpin', positionals);
+  // A folder that is gone can still be unpinned by its name.
+  const name = app?.name ?? appName(wanted);
+  if (name === null) throw new UsageError(`bad app name "${wanted}"`, { help: false });
+  withStore(io, values, (store) => store.insert(`${name}.pin`, 'unpinned', app?.dir ?? io.cwd(), { status: 'unpinned' }));
+  out(io, `unpinned ${name}`);
+  return 0;
+}
+
+const SIGNAL_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+
+// Runs the command with this terminal, and writes running, then stopped or
+// crashed, to NAME.run.
+async function runRun(io, { values, positionals }) {
+  needApps(io, 'run');
+  const [name, ...words] = positionals;
+  if (name === undefined) {
+    throw new UsageError('run needs the app NAME, as in: inbox --plugin apps run web -- npm run dev');
+  }
+  if (appName(name) !== name) throw new UsageError(`bad app name "${name}": use letters, digits, - and _`);
+  let argv = words;
+  if (argv.length === 0) {
+    const run = detectRun(io.cwd(), parseRunOverrides(io.env.INBOX_APPS_RUN).get(name));
+    if (run === null) {
+      throw new UsageError(`no run command in ${tildify(io.cwd())}: give one after --, as in: inbox --plugin apps run ${name} -- npm start`);
+    }
+    argv = run.argv;
+  }
+  const channel = `${name}.run`;
+  const cwd = io.cwd();
+  const here = detectHere(io.env);
+  const write = (status, body) => withStore(io, values, (store) => store.insert(channel, body, cwd, { status, here }));
+  write('running', argv.join(' '));
+
+  let stopping = null;
+  const child = spawn(argv[0], argv.slice(1), { cwd, env: io.env, stdio: 'inherit' });
+  // Ctrl-C reaches the command too; SIGTERM and SIGHUP are passed on.
+  const onSignal = (signal) => {
+    stopping = signal;
+    if (signal !== 'SIGINT') child.kill(signal);
+  };
+  const signals = Object.keys(SIGNAL_CODES);
+  for (const signal of signals) io.process.on(signal, onSignal);
+  const { code, signal, error } = await new Promise((resolve) => {
+    child.on('error', (e) => resolve({ error: e }));
+    child.on('exit', (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
+  });
+  for (const s of signals) io.process.off(s, onSignal);
+
+  if (error) {
+    const why = error.code === 'ENOENT' ? `no such command: ${argv[0]}` : error.message;
+    write('crashed', why);
+    io.stderr.write(`inbox: ${why}\n`);
+    return 127;
+  }
+  const stopped = code === 0 || stopping !== null || Object.hasOwn(SIGNAL_CODES, signal ?? '') || code === 130;
+  if (stopped) write('stopped', stopping || signal ? `stopped by ${stopping ?? signal}` : 'exited 0');
+  else write('crashed', signal ? `killed by ${signal}` : `exited with ${code}`);
+  return code ?? SIGNAL_CODES[signal] ?? 1;
+}
+
 const RUNNERS = {
   send: runSend,
   pipe: runPipe,
@@ -908,6 +1061,9 @@ const RUNNERS = {
   daemon: runDaemon,
   plugins: runPlugins,
   emoji: runEmoji,
+  pin: runPin,
+  unpin: runUnpin,
+  run: runRun,
 };
 
 function wantsHelp(argv) {

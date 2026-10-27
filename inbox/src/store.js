@@ -174,6 +174,13 @@ export class Store {
     return this.#plugin;
   }
 
+  // A Store of another plugin on the same handle, so the apps plugin can
+  // read the ai plugin's sessions (task 0085). Do not close it: closing
+  // closes this one too.
+  forPlugin(plugin) {
+    return new Store(this.#db, this.#file, this.#limit, plugin);
+  }
+
   #guard(fn) {
     try {
       return fn();

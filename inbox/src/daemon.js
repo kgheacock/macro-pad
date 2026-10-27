@@ -100,7 +100,14 @@ export function acquirePidFile(
 // A plugin may have a feed, which writes the plugin's own messages (task
 // 0076): { source, everyMs, fetch({ env }) -> Promise<answer>,
 // sync(store, answer) -> how many messages it wrote }. The daemon runs it at
-// start and every everyMs, one run at a time, and draws what it wrote.
+// start and every everyMs, one run at a time, and draws what it wrote. fetch
+// also gets the store, and the renderer gets the newest answer as `fed`.
+//
+// A plugin may draw its own keys (task 0085): createRenderer({ slot, env })
+// returns a renderer like render.js's, with owns(parent), which says whether
+// a key is one of its own. Its press({ parent, child, store, file, env, fed,
+// focus, changed, log }) -> Promise acts on a press on a child of such a key;
+// the daemon draws again when it settles, and when it calls changed().
 export function startDaemon({
   file,
   env = process.env,
@@ -118,7 +125,9 @@ export function startDaemon({
   WebSocketImpl = globalThis.WebSocket,
 }) {
   const db = store ?? openStore(file, env, { plugin: plugin.name });
-  const renderer = createRenderer({ slot, rules: plugin.rules });
+  const renderer = plugin.createRenderer
+    ? plugin.createRenderer({ slot, env })
+    : createRenderer({ slot, rules: plugin.rules });
   const topId = renderer.topId;
   const url = `ws://127.0.0.1:${port}/`;
 
@@ -138,6 +147,8 @@ export function startDaemon({
   }
   let lastRead = Date.now();
   let readFailed = false;
+  // The newest answer of the plugin's feed, or null.
+  let fed = null;
 
   let socket = null;
   let ready = false;
@@ -162,7 +173,7 @@ export function startDaemon({
   // keeps the newest state, and the next connect sends all of it.
   const push = () => {
     if (!ready || !socket) return;
-    for (const message of renderer.plan({ unseen, active, path })) {
+    for (const message of renderer.plan({ unseen, active, path, fed })) {
       try {
         socket.send(JSON.stringify(message));
       } catch (e) {
@@ -208,12 +219,14 @@ export function startDaemon({
     if (stopped || feeding) return;
     feeding = true;
     try {
-      const answer = await feed.fetch({ env });
+      const answer = await feed.fetch({ env, store: db });
       if (stopped) return;
       const wrote = feed.sync(db, answer);
       if (feedFailure !== null) log(`${feed.source} read again`);
       feedFailure = null;
+      fed = answer;
       if (wrote > 0) reread();
+      else push();
     } catch (e) {
       if (stopped) return;
       const text = `cannot read ${feed.source}: ${e.message}`;
@@ -235,11 +248,28 @@ export function startDaemon({
     }
   };
 
+  // A plugin's own press: a failure is logged, and the keys drawn again.
+  const pressed = async (parent, child) => {
+    const changed = () => {
+      if (!stopped) reread();
+    };
+    try {
+      await plugin.press({ parent, child, store: db, file, env, fed, focus, changed, log });
+    } catch (e) {
+      log(`cannot do ${child}: ${e.message}`);
+    }
+    changed();
+  };
+
   // A press on a channel key of the top key's layer marks the messages that
   // key showed as seen, then goes to their "here". macropadd names the child
   // a press landed on, on whatever page (task 0078), so the daemon needs no
   // key map. A press on a child of another client's key is not ours.
   const onChildPressed = (parent, channel) => {
+    if (plugin.press) {
+      if (renderer.owns(parent)) pressed(parent, channel);
+      return;
+    }
     if (parent !== topId) return;
     const child = renderer.target(channel);
     if (child === null || child.shownId === 0) return;

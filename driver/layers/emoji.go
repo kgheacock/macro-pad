@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -19,10 +21,12 @@ import (
 	"github.com/kgheacock/macro-pad/driver/transport"
 )
 
-// An emoji icon (task 0073) is one or two pictures from assets/emoji/ side by
-// side on the white round, with an optional caption of one line above them.
-// The inbox sends a folder's emoji and a session's emoji, with the folder name
-// as the caption.
+// An emoji icon (task 0073) is one or two pictures from assets/emoji/ with an
+// optional caption of one line. Task 0082 draws it on an opaque white tile: the
+// caption across the top, the first emoji as a big hero, the second as a
+// smaller sticker over the hero's bottom left, and the key color as a strip
+// across the bottom. The inbox sends a repository's emoji and a session's
+// emoji, with the folder name as the caption.
 const (
 	// MaxIconEmoji is how many emoji one key shows.
 	MaxIconEmoji = 2
@@ -31,25 +35,40 @@ const (
 	// IconEmojiDir is the folder under assets/ that every iconEmoji ref is in.
 	IconEmojiDir = "emoji/"
 
-	// Two emoji are emojiPairPx wide, centred at x emojiPairX0 and
-	// emojiPairX1; one emoji is emojiOnePx wide, centred at x 64.
-	emojiPairPx = 48
-	emojiPairX0 = 38
-	emojiPairX1 = 90
-	emojiOnePx  = 64
-	// The emoji are centred at y emojiYCaption under a caption, and at
-	// emojiYAlone without one.
-	emojiYCaption = 74
-	emojiYAlone   = 64
+	// The strip of the key color covers y emojiStripY to the bottom.
+	emojiStripY = 114
 
-	// The caption is centred at y captionY, at most captionMaxW pixels wide:
-	// the round is narrow at the top.
-	captionY    = 30
-	captionMaxW = 84
+	// The caption is centred at y captionY, at most captionMaxW pixels wide.
+	captionY    = 14
+	captionMaxW = 120
+
+	// stickerOutline is the width of the white outline around the sticker.
+	stickerOutline = 3
+
+	// emojiArtAlpha is the alpha above which a pixel is part of a picture's
+	// art, when the picture is cropped to it.
+	emojiArtAlpha = 0x08
 )
 
+// emojiSpot is where one picture goes: the longer side of its art is size
+// pixels, centred at (x, y).
+type emojiSpot struct{ x, y, size int }
+
+// emojiLayout is where the pictures go, for a caption or none, and one emoji
+// or two. With two, the first spot is the hero and the second the sticker.
+var emojiLayout = map[bool][][]emojiSpot{
+	true: {
+		{{56, 66, 80}},
+		{{62, 64, 80}, {24, 90, 40}},
+	},
+	false: {
+		{{60, 56, 100}},
+		{{70, 50, 96}, {28, 88, 48}},
+	},
+}
+
 // captionSizes are the sizes a caption may take, largest first, in pixels.
-var captionSizes = []int{20, 18, 16, 14, 12}
+var captionSizes = []int{22, 20, 18, 16, 14}
 
 // ValidateIconEmoji accepts no refs, or up to MaxIconEmoji refs that are each a
 // valid iconRef under IconEmojiDir.
@@ -94,33 +113,97 @@ func splitEmoji(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// drawIconEmoji draws the round over keyColor, the emoji at refs, and caption
-// above them. refs and caption are already valid.
+// drawIconEmoji fills img with the tile, the strip in keyColor, the emoji at
+// refs, and caption above them. refs and caption are already valid.
 func drawIconEmoji(img *image.NRGBA, assetsDir string, refs []string, caption string, keyColor uint16) error {
-	drawIconRound(img, keyColor)
-	y := emojiYAlone
-	if caption != "" {
-		y = emojiYCaption
-	}
-	size, xs := emojiOnePx, []int{64}
-	if len(refs) == 2 {
-		size, xs = emojiPairPx, []int{emojiPairX0, emojiPairX1}
-	}
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+	strip := image.Rect(0, emojiStripY, transport.CustomGlyphWidth, transport.CustomGlyphHeight)
+	draw.Draw(img, strip, image.NewUniform(rgb565ToNRGBA(keyColor)), image.Point{}, draw.Src)
+	spots := emojiLayout[caption != ""][len(refs)-1]
 	for i, ref := range refs {
 		icon, err := loadIcon(assetsDir, ref)
 		if err != nil {
 			return err
 		}
-		// Scale into a premultiplied image, so the edges do not darken.
-		small := image.NewRGBA(image.Rect(0, 0, size, size))
-		xdraw.CatmullRom.Scale(small, small.Bounds(), icon, icon.Bounds(), xdraw.Src, nil)
-		at := image.Pt(xs[i]-size/2, y-size/2)
-		draw.Draw(img, small.Bounds().Add(at), small, image.Point{}, draw.Over)
+		art, at := scaleArt(icon, spots[i])
+		if i > 0 {
+			drawOutline(img, art, at, stickerOutline)
+		}
+		draw.Draw(img, art.Bounds().Add(at), art, image.Point{}, draw.Over)
 	}
 	if caption != "" {
 		return drawCaption(img, caption)
 	}
 	return nil
+}
+
+// artBounds is the box of the pixels of icon with alpha above emojiArtAlpha,
+// or the whole icon when it has none.
+func artBounds(icon image.Image) image.Rectangle {
+	var box image.Rectangle
+	b := icon.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, a := icon.At(x, y).RGBA(); a>>8 > emojiArtAlpha {
+				box = box.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	if box.Empty() {
+		return b
+	}
+	return box
+}
+
+// scaleArt crops icon to its art and scales it so that the longer side is
+// spot.size. It returns the scaled art and where its top left goes.
+func scaleArt(icon image.Image, spot emojiSpot) (*image.RGBA, image.Point) {
+	box := artBounds(icon)
+	w, h := spot.size, spot.size
+	if box.Dx() > box.Dy() {
+		h = max(1, spot.size*box.Dy()/box.Dx())
+	} else {
+		w = max(1, spot.size*box.Dx()/box.Dy())
+	}
+	// Scale into a premultiplied image, so the edges do not darken.
+	art := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.CatmullRom.Scale(art, art.Bounds(), icon, box, xdraw.Src, nil)
+	return art, image.Pt(spot.x-w/2, spot.y-h/2)
+}
+
+// drawOutline paints white on img where art, placed at at, grown by r pixels,
+// covers it. The edge of the outline is blended with what is under it.
+func drawOutline(img *image.NRGBA, art *image.RGBA, at image.Point, r int) {
+	ab := art.Bounds()
+	area := ab.Add(at).Inset(-r).Intersect(img.Bounds())
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			cover := 0.0
+			for dy := -r; dy <= r && cover < 1; dy++ {
+				for dx := -r; dx <= r; dx++ {
+					d := math.Hypot(float64(dx), float64(dy))
+					if d > float64(r)+0.5 {
+						continue
+					}
+					p := image.Pt(x+dx, y+dy).Sub(at)
+					if !p.In(ab) {
+						continue
+					}
+					a := float64(art.RGBAAt(p.X, p.Y).A) / 0xFF
+					if d > float64(r)-0.5 {
+						a *= float64(r) + 0.5 - d
+					}
+					cover = math.Max(cover, a)
+				}
+			}
+			if cover == 0 {
+				continue
+			}
+			under := img.NRGBAAt(x, y)
+			mix := func(v uint8) uint8 { return uint8(math.Round(0xFF*cover + float64(v)*(1-cover))) }
+			img.SetNRGBA(x, y, color.NRGBA{R: mix(under.R), G: mix(under.G), B: mix(under.B), A: 0xFF})
+		}
+	}
 }
 
 // loadIcon reads the 128x128 PNG at ref under assetsDir. An emoji ref draws

@@ -64,9 +64,9 @@ type Node struct {
 	// IconText is words drawn as the icon instead of a PNG (task 0069). It
 	// excludes IconRef.
 	IconText string `json:"iconText,omitempty"`
-	// IconEmoji is one or two pictures under assets/emoji/, side by side on
-	// the round, with IconText as a caption of one line (task 0073). It
-	// excludes IconRef.
+	// IconEmoji is one or two pictures under assets/emoji/, a hero and a
+	// sticker over a strip of the key color (task 0082), with IconText as a
+	// caption of one line (task 0073). It excludes IconRef.
 	IconEmoji []string `json:"iconEmoji,omitempty"`
 	Children  []Node   `json:"children,omitempty"`
 }

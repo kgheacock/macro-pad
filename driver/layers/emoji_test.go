@@ -69,20 +69,18 @@ func checkGoldenNear(t *testing.T, name string, img *image.NRGBA) {
 	}
 }
 
-// TestIconEmoji is task 0073's DoD-4 and DoD-12: an emoji is an iconRef like
-// any other icon, and iconEmoji draws two emoji side by side under a caption.
+// TestIconEmoji is task 0073's DoD-4 and task 0082's DoD-1, DoD-2, and DoD-6:
+// an emoji iconRef keeps the round, and iconEmoji draws the hero, the sticker,
+// the caption, and the status strip.
 func TestIconEmoji(t *testing.T) {
 	checkGoldenNear(t, "icon-emoji.png", onGray(emojiTile(t, emojiFox, "", nil, 0, ColorRunning)))
 
 	caption := emojiTile(t, "", "macro-pad", []string{emojiFox, emojiRocket}, 0, ColorRunning)
 	checkGoldenNear(t, "icon-emoji-caption.png", onGray(caption))
 	checkGoldenNear(t, "icon-emoji-caption-pip.png", onGray(emojiTile(t, "", "macro-pad", []string{emojiFox, emojiRocket}, 2, ColorRunning)))
+	checkGoldenNear(t, "icon-emoji-alone.png", onGray(emojiTile(t, "", "", []string{emojiFox, emojiRocket}, 0, ColorDone)))
 
-	// The corner shows the key color, the caption is dark, and each emoji sits
-	// on its own side.
-	if got := caption.NRGBAAt(0, 0); got.A != 0 {
-		t.Errorf("the corner is %v, want transparent", got)
-	}
+	// The caption is dark, across the top.
 	dark := func(x0, y0, x1, y1 int) int {
 		n := 0
 		for y := y0; y < y1; y++ {
@@ -94,25 +92,11 @@ func TestIconEmoji(t *testing.T) {
 		}
 		return n
 	}
-	if n := dark(22, 20, 106, 40); n < 40 {
+	if n := dark(4, 2, 124, 26); n < 80 {
 		t.Errorf("only %d dark pixels in the caption band", n)
 	}
-	painted := func(x0, x1 int) int {
-		n := 0
-		for y := 50; y < 98; y++ {
-			for x := x0; x < x1; x++ {
-				if c := caption.NRGBAAt(x, y); c.A == 0xFF && (c.R < 0xF0 || c.G < 0xF0 || c.B < 0xF0) {
-					n++
-				}
-			}
-		}
-		return n
-	}
-	if l, r := painted(14, 62), painted(66, 114); l < 300 || r < 300 {
-		t.Errorf("painted pixels left %d, right %d: want an emoji on each side", l, r)
-	}
 
-	// One emoji and no caption: a larger emoji in the middle.
+	// One emoji and no caption: a large emoji in the middle.
 	one := emojiTile(t, "", "", []string{emojiFox}, 0, ColorDone)
 	if c := one.NRGBAAt(64, 64); c.A != 0xFF || (c.R > 0xF0 && c.G > 0xF0 && c.B > 0xF0) {
 		t.Errorf("the centre of one emoji is %v, want the fox", c)
@@ -169,8 +153,9 @@ func TestIconEmojiInvalid(t *testing.T) {
 	}
 }
 
-// TestIconEmojiFrames is DoD-14: the round shows the key color, so one icon on
-// two colors is two frames, and a count stores no frame.
+// TestIconEmojiFrames is task 0073's DoD-14 and task 0082's DoD-4: the strip
+// shows the key color, so one icon on two colors is two frames, each stored
+// over ColorNone, and a count stores no frame.
 func TestIconEmojiFrames(t *testing.T) {
 	out := newFakeFrameOut()
 	c := openFrames(t, out, time.Millisecond)
@@ -189,9 +174,12 @@ func TestIconEmojiFrames(t *testing.T) {
 	}
 	out.mu.Lock()
 	stored := 0
-	for _, f := range out.slots {
+	for slot, f := range out.slots {
 		if f.png != nil {
 			stored++
+			if f.color != ColorNone {
+				t.Errorf("slot %d is stored over %#04x, want ColorNone", slot, f.color)
+			}
 		}
 	}
 	out.mu.Unlock()
@@ -231,5 +219,54 @@ func TestIconEmojiPersist(t *testing.T) {
 	c2 := open(t, dir, newFakeOut())
 	if k := c2.Snapshot().Keys[0]; !reflect.DeepEqual(k.IconEmoji, pair) || k.IconText != "macro-pad" {
 		t.Errorf("restored %+v", k)
+	}
+}
+
+// TestIconEmojiLayout is task 0082's DoD-3: the tile is opaque, the strip is
+// the status color, and the hero is far bigger than task 0073's 34 px of art.
+func TestIconEmojiLayout(t *testing.T) {
+	for _, status := range []uint16{ColorRunning, ColorDone, ColorError, ColorWarn, ColorNone} {
+		img := emojiTile(t, "", "macro-pad", []string{emojiFox, emojiRocket}, 0, status)
+		want := rgb565ToNRGBA(status)
+		for y := 0; y < transport.CustomGlyphHeight; y++ {
+			for x := 0; x < transport.CustomGlyphWidth; x++ {
+				c := img.NRGBAAt(x, y)
+				if c.A != 0xFF {
+					t.Fatalf("%#04x: (%d, %d) is %v, want opaque", status, x, y, c)
+				}
+				if y >= emojiStripY && c != want {
+					t.Fatalf("%#04x: the strip at (%d, %d) is %v, want %v", status, x, y, c, want)
+				}
+			}
+		}
+	}
+
+	// The hero alone, so the sticker does not widen the box.
+	hero := emojiTile(t, "", "macro-pad", []string{emojiFox}, 0, ColorNone)
+	box := image.Rectangle{}
+	for y := 26; y < emojiStripY; y++ {
+		for x := 0; x < transport.CustomGlyphWidth; x++ {
+			if c := hero.NRGBAAt(x, y); c.R < 0xF0 || c.G < 0xF0 || c.B < 0xF0 {
+				box = box.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	if max(box.Dx(), box.Dy()) < 76 {
+		t.Errorf("the hero spans %v, want at least 76 px", box)
+	}
+
+	// The sticker has a white outline where it covers the hero: the fox's
+	// orange is gone just outside the rocket.
+	pair := emojiTile(t, "", "macro-pad", []string{emojiFox, emojiRocket}, 0, ColorNone)
+	white := 0
+	for y := 60; y < 112; y++ {
+		for x := 0; x < 50; x++ {
+			if c := pair.NRGBAAt(x, y); c.R == 0xFF && c.G == 0xFF && c.B == 0xFF && hero.NRGBAAt(x, y) != c {
+				white++
+			}
+		}
+	}
+	if white < 40 {
+		t.Errorf("only %d pixels of outline cover the hero", white)
 	}
 }

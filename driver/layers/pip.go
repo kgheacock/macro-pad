@@ -139,9 +139,14 @@ func pipSpriteRect(r rune, small bool) image.Rectangle {
 
 // discSprite draws the disc for a key color: red inside, a white ring, and an
 // edge blended against the key color. A pixel with too little disc in it is
-// transparent, so the corners keep what lies under them.
+// transparent, so the corners keep what lies under them. The disc for
+// ColorNone is blended against white instead: it is the disc of a text icon
+// and of an emoji icon, whose pip sits on a white tile (task 0082).
 func discSprite(key uint16) *image.NRGBA {
 	keyColor := rgb565ToNRGBA(key)
+	if key == ColorNone {
+		keyColor = pipWhite
+	}
 	img := image.NewNRGBA(image.Rect(0, 0, pipDisc, pipDisc))
 	r := float64(pipDisc) / 2
 	for y := 0; y < pipDisc; y++ {

@@ -7,7 +7,7 @@ updated: "2026-10-27"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/105"
 branch: "claude/project-thread-4y55wb"
 related: ["0062", "0069", "0073", "0074", "0081"]
 tags: ["driver", "emoji", "render"]

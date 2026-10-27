@@ -24,6 +24,13 @@ _inbox_channels() {
   _describe -t channels 'channel' channels
 }
 
+# The apps of $INBOX_APPS_ROOT: its folders that hold a .git folder.
+_inbox_apps() {
+  local -a apps
+  [[ -n $INBOX_APPS_ROOT ]] && apps=(${INBOX_APPS_ROOT}/*/.git(N/:h:t))
+  _describe -t apps 'app' apps
+}
+
 _inbox_plugins() {
   local -a plugins
   plugins=(${(f)"$(command $_inbox_line[1] plugins 2>/dev/null | awk '{print $1}')"})
@@ -48,6 +55,9 @@ _inbox() {
     'daemon:watch the inbox and show it on the macro pad'
     'plugins:list the plugins'
     'emoji:print the emoji of a folder or a Claude Code session'
+    'pin:always show an app key (--plugin apps)'
+    'unpin:stop pinning an app (--plugin apps)'
+    'run:run an app and report its state (--plugin apps)'
     'help:show help for a command'
   )
   local here='--here=[where a press goes: iterm2:UUID, app:BUNDLE_ID, or url:URL]:here:'
@@ -107,6 +117,8 @@ _inbox() {
             '--session=[a Claude Code session id]:session:' \
             '--format=[what to print]:format:(char name ref json)' \
             '(--channel --folder)1::channel:_inbox_channels' && ret=0 ;;
+        pin | unpin | run)
+          _arguments "$db" "$plugin" '1::app:_inbox_apps' && ret=0 ;;
         help)
           _describe -t commands 'inbox command' commands && ret=0 ;;
       esac

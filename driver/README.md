@@ -222,12 +222,15 @@ the poller used is not read any more; delete it.
   emoji, draws as `?`. The text stays above the count pip. Two keys with the
   same text share one frame on the board, whatever their colors.
 - `iconEmoji` is one or two pictures under `assets/emoji/` (task 0073), and it
-  excludes `iconRef`. They sit side by side on the white round, 48 px each
-  (64 px for one), so the key color shows around it. With `iconEmoji`,
-  `iconText` is a caption of one line and at most 16 runes, in black Go Bold at
-  the largest of 20, 18, 16, 14, or 12 px that fits 84 px, above the emoji.
-  A third ref, a ref outside `emoji/`, or a longer caption drops the message.
-  The count pip covers the lower right of a second emoji.
+  excludes `iconRef`. They sit on an opaque white tile with the key color as a
+  14 px strip across the bottom (task 0082). Each picture is cropped to its
+  art; the first is the hero, 80 px, and the second a 40 px sticker with a
+  white outline over the hero's lower left (96 px and 48 px with no caption,
+  and one emoji alone is 80 px, or 100 px). With `iconEmoji`, `iconText` is a
+  caption of one line and at most 16 runes, across the top in black Go Bold
+  at the largest of 22, 20, 18, 16, or 14 px that fits 120 px. A third ref, a
+  ref outside `emoji/`, or a longer caption drops the message. The count pip
+  covers the lower right of the hero.
 - An emoji ref, in `iconEmoji` or as an `iconRef` such as `emoji/1f98a.png`,
   draws from Apple Color Emoji on a Mac (task 0074). `macropadd` reads the
   font's largest PNG strike at run time and fits it to the round; nothing is

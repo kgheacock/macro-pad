@@ -36,7 +36,8 @@ const noSlot = transport.SlotUnchanged
 // on a white round, or the words in text on a white tile (task 0069). The count
 // pip is not part of it: the board stamps the pip on a copy of the frame (task
 // 0062). An emoji icon (task 0073) is emoji, the refs joined by line breaks,
-// under text as a caption, on a white round.
+// under text as a caption, on a white tile with a strip of the color (task
+// 0082).
 type frameKey struct {
 	ref   string
 	text  string
@@ -51,7 +52,7 @@ func frameKeyOf(w view) frameKey {
 		return frameKey{}
 	}
 	if w.iconEmoji != "" {
-		// The round lets the key color show, so the color is part of the frame.
+		// The strip shows the key color, so the color is part of the frame.
 		return frameKey{text: w.iconText, emoji: w.iconEmoji, color: w.color}
 	}
 	if w.iconText != "" {
@@ -60,6 +61,17 @@ func frameKeyOf(w view) frameKey {
 		return frameKey{text: w.iconText}
 	}
 	return frameKey{ref: w.iconRef, color: w.color}
+}
+
+// storeColor is the color the board stores the frame over, which also picks
+// the disc of its pip. An emoji icon is an opaque tile with its color in the
+// strip, and its pip sits on white, so it is stored over ColorNone, as a text
+// icon is (task 0082).
+func (k frameKey) storeColor() uint16 {
+	if k.emoji != "" {
+		return ColorNone
+	}
+	return k.color
 }
 
 // hasGlyph reports whether the frame has a picture over its color.
@@ -181,8 +193,12 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 			png = nil
 		}
 	}
+	color := k.storeColor()
+	if png == nil {
+		color = k.color
+	}
 	start := time.Now()
-	if err := c.frameOut.StoreFrame(slot, k.color, png); err != nil {
+	if err := c.frameOut.StoreFrame(slot, color, png); err != nil {
 		c.frames.release(slot)
 		c.logf("layers: store frame %q in slot %d: %v", k.label(), slot, err)
 		return 0, false

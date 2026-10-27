@@ -195,9 +195,9 @@ func TestEmojiFont(t *testing.T) {
 			t.Errorf("ttc %v: iconRef fox centre is %v, want the font's", ttc, img.NRGBAAt(64, 64))
 		}
 		pair := emojiTile(t, "", "macro-pad", []string{emojiFox, emojiRocket}, 0, ColorRunning)
-		for _, x := range []int{emojiPairX0, emojiPairX1} {
-			if pair.NRGBAAt(x, emojiYCaption) != magenta {
-				t.Errorf("ttc %v: iconEmoji at x %d is %v, want the font's (the rocket is a dupe)", ttc, x, pair.NRGBAAt(x, emojiYCaption))
+		for _, spot := range emojiLayout[true][1] {
+			if pair.NRGBAAt(spot.x, spot.y) != magenta {
+				t.Errorf("ttc %v: iconEmoji at (%d, %d) is %v, want the font's (the rocket is a dupe)", ttc, spot.x, spot.y, pair.NRGBAAt(spot.x, spot.y))
 			}
 		}
 		if img := emojiTile(t, "", "", []string{"emoji/1f43b.png"}, 0, ColorRunning); !bytes.Equal(img.Pix, fluentBear.Pix) {

@@ -36,7 +36,7 @@ const (
 	IconEmojiDir = "emoji/"
 
 	// The strip of the key color covers y emojiStripY to the bottom.
-	emojiStripY = 114
+	emojiStripY = 106
 
 	// The caption is centred at y captionY, at most captionMaxW pixels wide.
 	captionY    = 14
@@ -59,11 +59,11 @@ type emojiSpot struct{ x, y, size int }
 var emojiLayout = map[bool][][]emojiSpot{
 	true: {
 		{{56, 66, 80}},
-		{{62, 64, 80}, {24, 90, 40}},
+		{{62, 64, 80}, {24, 82, 40}},
 	},
 	false: {
 		{{60, 56, 100}},
-		{{70, 50, 96}, {28, 88, 48}},
+		{{70, 50, 96}, {28, 78, 48}},
 	},
 }
 

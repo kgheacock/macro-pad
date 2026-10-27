@@ -196,7 +196,7 @@ test('TestEventsReachHook', async (t) => {
   await waitFor(() => seen.length === 1, 1000, 'the event');
   assert.deepEqual(seen[0], [
     { kind: 'event', keyIndex: 2, type: 'press', timestamp: 7 },
-    { active: 'inbox' },
+    { active: 'inbox', path: ['inbox'] },
   ]);
 });
 

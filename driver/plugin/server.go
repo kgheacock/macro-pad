@@ -96,14 +96,16 @@ type Injector interface {
 type LayerController interface {
 	// SetKey applies one setLayerKey message.
 	SetKey(layers.Update) error
-	// RemoveKey applies one removeLayerKey message.
-	RemoveKey(id, parent string) error
-	// Press handles a debounced press-down on a key. A press on a child
-	// returns the ids of its parent and of the child.
-	Press(keyIndex byte) (parent, child string)
-	// Layer is the id of the open key, or nil for the top layer, and the
-	// page of it the pad shows, of pages.
-	Layer() (active *string, page, pages int)
+	// RemoveNode applies one removeLayerKey message: path is the ids from a
+	// top-level key down to the parent of the node, empty for a top-level
+	// key.
+	RemoveNode(id string, path []string) error
+	// PressNode handles a debounced press-down on a key. A press on a child
+	// with no children returns the path to its parent and the child's id.
+	PressNode(keyIndex byte) (path []string, child string)
+	// LayerPath is the path of the open layer, empty for the top layer, and
+	// the page of it the pad shows, of pages (task 0086).
+	LayerPath() (path []string, page, pages int)
 }
 
 // client is one connected plugin.
@@ -386,8 +388,8 @@ func withPip(frame []byte, key uint16, count int) ([]byte, error) {
 }
 
 // LayerChanged tells every client which layer is active, and its page.
-func (s *Server) LayerChanged(active *string, page, pages int) {
-	s.broadcast(layerChangedMessage(active, page, pages))
+func (s *Server) LayerChanged(path []string, page, pages int) {
+	s.broadcast(layerChangedMessage(path, page, pages))
 }
 
 // Run opens a WebSocket server bound to 127.0.0.1:port and serves it
@@ -448,7 +450,7 @@ func (s *Server) addClient(conn wsConn) *client {
 	s.snapshotTo(c)
 	if l := s.layerController(); l != nil {
 		select {
-		case c.send <- layerChangedMessage(l.Layer()):
+		case c.send <- layerChangedMessage(l.LayerPath()):
 		default:
 		}
 	}
@@ -505,7 +507,7 @@ func (s *Server) readPump(c *client) {
 			}
 			p := msg.SetLayerKey
 			err := l.SetKey(layers.Update{
-				ID: p.ID, Parent: p.Parent, Slot: p.Slot,
+				ID: p.ID, Parent: p.Parent, Path: p.Path, Slot: p.Slot,
 				Icon: p.Icon, Status: p.Status, Count: p.Count, IconRef: p.IconRef, IconText: p.IconText, IconEmoji: p.IconEmoji,
 			})
 			if err != nil {
@@ -518,7 +520,15 @@ func (s *Server) readPump(c *client) {
 				continue
 			}
 			p := msg.RemoveLayerKey
-			if err := l.RemoveKey(p.ID, p.Parent); err != nil {
+			path := p.Path
+			if p.Parent != "" {
+				if len(path) > 0 {
+					s.logf("removeLayerKey id=%q dropped: a parent and a path", p.ID)
+					continue
+				}
+				path = []string{p.Parent}
+			}
+			if err := l.RemoveNode(p.ID, path); err != nil {
 				s.logf("removeLayerKey id=%q dropped: %v", p.ID, err)
 			}
 		case KindInjectEvent:
@@ -660,8 +670,8 @@ func (s *Server) queueLayerPress(keyIndex byte) {
 func (s *Server) layerPressLoop() {
 	for keyIndex := range s.layerPresses {
 		if l := s.layerController(); l != nil {
-			if parent, child := l.Press(keyIndex); child != "" {
-				s.broadcast(childPressedMessage(keyIndex, parent, child))
+			if path, child := l.PressNode(keyIndex); child != "" {
+				s.broadcast(childPressedMessage(keyIndex, path, child))
 			}
 		}
 	}

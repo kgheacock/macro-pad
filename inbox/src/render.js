@@ -123,7 +123,7 @@ export function createRenderer({ slot, rules, emojiSet }) {
       return { channel, shownId: shownIds.get(channel) ?? 0, here: shownHere.get(channel) ?? null };
     },
 
-    plan({ unseen: all, active }) {
+    plan({ unseen: all, active, path }) {
       const unseen = rules.shows ? all.filter(rules.shows) : all;
       const out = [];
       const key = { id: rules.id, ...rules.top(unseen) };
@@ -137,7 +137,10 @@ export function createRenderer({ slot, rules, emojiSet }) {
         .slice(0, MAX_CHILDREN)
         .map((row) => row.channel);
 
-      if (active === rules.id) {
+      // The key's branch is open when the open layer is the key, or a layer
+      // under it (task 0086). A caller with no path names only the open key.
+      const open = path ? path[0] === rules.id : active === rules.id;
+      if (open) {
         // Open: no key moves or goes. A channel at zero stays with count 0.
         for (const channel of shown) setChild(out, channel, rows.get(channel));
         for (const channel of wanted) {

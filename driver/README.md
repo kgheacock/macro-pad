@@ -139,9 +139,10 @@ update still reaches the files at once and `Close` does not wait.
 ## Layers
 
 `macropadd` keeps one JSON object that says what the six keys show. A key can
-hold up to 20 children. A press on a key with children opens its
-child layer, and a press on key 3 returns. A child layer with more than five
-children has pages, with arrows (task 0078). The daemon draws the active
+hold up to 20 children, and a child can hold children of its own, four levels
+deep in all (task 0086). A press on a key with children opens its
+child layer, and a press on key 3 goes back one level. A child layer with more
+than five children has pages, with arrows (task 0078). The daemon draws the active
 layer, saves the object, and shows the same layer after a restart. See task
 0057.
 
@@ -193,11 +194,18 @@ the poller used is not read any more; delete it.
 
 - `keys` has at most six entries. The index is the key position, and `null`
   is an empty key.
-- `children` has at most five entries. A child has the same fields as a key
-  and no children of its own.
-- `id` names a key or child, and is unique among its siblings.
-- `active` is `null` for the top layer. Otherwise it is the `id` of the key
-  whose children the pad shows.
+- `children` has at most 20 entries. A child has the same fields as a key,
+  and children of its own (task 0086). A key is level 1, and a node on level 4
+  has no children. The whole tree holds at most 200 nodes.
+- `id` names a key or child, and is unique among its siblings. A node is
+  named by its path: the `id` of a key, then the `id` of each child down to
+  it.
+- `active` is `null` for the top layer. Otherwise it is the path of the node
+  whose children the pad shows, such as `["apps", "app.pad"]`. A file saved
+  before task 0086 holds a string, which reads as a path of one id.
+- `page` is the page of the open layer, from 0. `parentPages` holds the page
+  each layer above it showed when the next one opened, one entry fewer than
+  `active`; it is left out at depth 1.
 - `status` is `RUNNING`, `DONE`, `ERROR`, `WARN`, or empty. It gives the key
   color. No status blinks.
 - `iconRef` is a PNG under the assets directory, 128×128. A path that is
@@ -251,8 +259,9 @@ the poller used is not read any more; delete it.
 | `WARN` | yellow | `0xFFE0` |
 | empty | black | `0x0000` |
 
-A file with seven keys, six children, a grandchild, an unknown status, a
-duplicate `id`, or an `active` that names a key with no children is rejected.
+A file with seven keys, 21 children, a node on level 5, more than 200 nodes,
+an unknown status, a duplicate `id` among siblings, or an `active` that does
+not end on a node with children is rejected.
 
 ### Key layout
 
@@ -273,21 +282,25 @@ four on page 1 and two on page 2; 20 children are five pages.
 | Press | Result |
 |---|---|
 | press, top layer, key with children | opens that key's child layer, on page 1 |
-| press, child layer, key 3 on page 1 | returns to the top layer |
+| press, child layer, a child with children | opens that child's layer, on page 1 (task 0086) |
+| press, child layer, key 3 on page 1 | goes back one level, to the page it showed: the top layer from a key's layer |
 | press, child layer, key 3 on a later page | shows the page before |
 | press, child layer, key 5 with the right arrow | shows the next page |
-| press, child layer, a child | sends `childPressed`; the layer stays |
+| press, child layer, a child with no children | sends `childPressed`; the layer stays |
 | any other press | nothing: no key state is sent and `active` stays |
 
-`layers.json` saves the page as `page`, from 0, beside `active`, so a restart
-shows the same page. A removal that empties the shown page shows the new last
+`layers.json` saves the page as `page`, from 0, beside `active` and
+`parentPages`, so a restart shows the same layer and page, and key 3 still
+returns to the pages above it. A removal of the open node, of a node above
+it, or of the last child of a layer on its path, goes up to the deepest layer
+left on the path, on the page it showed. A removal that empties the shown page shows the new last
 page. A child added while the layer is open goes at the end, so it moves no
 key a person sees, except one: when the last page is full (5, 9, 13, or 17
 children), its key 5 turns into a right arrow, and that child moves to a new
 page.
 
-The preload stores the top layer, then page 1 of every key, then the later
-pages, until the frame table is full. A later page that did not fit sends its
+The preload stores the top layer, then page 1 of every layer, breadth first
+down the tree, then the later pages, until the frame table is full. A later page that did not fit sends its
 images on its first visit.
 
 A press is the debounced press-down event. The firmware has already
@@ -463,7 +476,10 @@ Every message on the connection is JSON, shaped by
 
 - **`setLayerKey`** — client to server. Upserts one key or child in the
   layer tree with its full values (see "Layers," above). `parent` names the
-  key a child belongs to, and is empty for a key. `slot` (0 to 5) puts a key
+  key a child belongs to, and is empty for a key. `path` names the parent of a
+  deeper child: the ids from a key down to it (task 0086). `parent: "x"` is
+  the same as `path: ["x"]`, and a message with both is dropped. An update to
+  a node keeps its children. `slot` (0 to 5) puts a key
   in that slot: if another `id` holds the slot, the daemon logs it and drops
   the message. Without `slot`, a known key stays where it is and a new key
   takes the first free slot. A message with only `id` and `slot` reserves the
@@ -475,6 +491,7 @@ Every message on the connection is JSON, shaped by
   {"kind": "setLayerKey", "setLayerKey": {"id": "github", "status": "ERROR", "count": 1, "iconRef": "github.png"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR", "iconText": "github\nbuild"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}}
   ```
 
 - **`removeLayerKey`** — client to server. Removes one key or child from the
@@ -488,6 +505,7 @@ Every message on the connection is JSON, shaped by
   ```json
   {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}}
   {"kind": "removeLayerKey", "removeLayerKey": {"id": "github"}}
+  {"kind": "removeLayerKey", "removeLayerKey": {"id": "code", "path": ["apps", "app.pad"]}}
   ```
 
 - **`layerChanged`** — server to client. Names the active layer: the `id` of
@@ -497,18 +515,22 @@ Every message on the connection is JSON, shaped by
   connects.
 
   ```json
-  {"kind": "layerChanged", "layerChanged": {"active": null, "page": 0, "pages": 0}}
-  {"kind": "layerChanged", "layerChanged": {"active": "inbox", "page": 1, "pages": 2}}
+  {"kind": "layerChanged", "layerChanged": {"active": null, "path": [], "page": 0, "pages": 0}}
+  {"kind": "layerChanged", "layerChanged": {"active": "inbox", "path": ["inbox"], "page": 1, "pages": 2}}
+  {"kind": "layerChanged", "layerChanged": {"active": "app.pad", "path": ["apps", "app.pad"], "page": 0, "pages": 1}}
   ```
 
 - **`childPressed`** — server to client. Names the child a press landed on,
   and its parent, on the page the press saw (task 0078). It follows the
   press's `event`, and comes after the presses queued before it, so a quick
   press after an arrow names a child of the new page. A press on an arrow, the
-  up key, or a blank key sends none.
+  up key, a blank key, or a child with children (which opens its layer) sends
+  none. `path` is the ids from a key down to the child's parent, and `parent`
+  is its last id (task 0086).
 
   ```json
-  {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver"}}
+  {"kind": "childPressed", "childPressed": {"keyIndex": 1, "parent": "inbox", "child": "macro-pad.driver", "path": ["inbox"]}}
+  {"kind": "childPressed", "childPressed": {"keyIndex": 0, "parent": "app.pad", "child": "code", "path": ["apps", "app.pad"]}}
   ```
 
 - **`subscribeAudio`** / **`unsubscribeAudio`** — client to server, no

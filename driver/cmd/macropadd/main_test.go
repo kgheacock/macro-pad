@@ -94,7 +94,7 @@ func TestLayersFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(saved), `"active": "github"`) {
+	if !strings.Contains(string(saved), "\"active\": [\n    \"github\"\n  ]") {
 		t.Errorf("saved file does not hold the active layer:\n%s", saved)
 	}
 }

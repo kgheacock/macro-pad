@@ -38,3 +38,21 @@ All dimensions and tolerances are constants at the top of that script.
 - PLA or PETG, 0.2 mm layers, 4 walls, 15% infill. A brim on the body helps keep its large floor flat.
 - No supports. Edges on the bed have 0.8 mm 45° chamfers, the corner bosses end in 45° cones, and the USB slot is an arch.
 - The corner screws pull along the layer direction. Do not over-tighten them.
+
+## Body for the one-piece 110 × 100 mm panel
+
+`screenkey_panel_3x2.step` is a single 3 mm panel that replaces both the faceplate and the
+mounting plate. The module PCBs screw to its back face. `panel_body.stl` is the body for it.
+Regenerate it with `python hardware/enclosure/build_panel_body.py`.
+
+- The tub is 110 × 100 × 78.6 mm. It keeps the same wall, floor and 63.5 mm of space below the modules
+  as `body.stl`.
+- The USB-C opening is a 22 mm round hole for the [Adafruit 4218](https://www.adafruit.com/product/4218)
+  panel-mount extension. It sits in the 100 mm end wall, centred 30 mm above the floor. Its ~30 mm flange
+  and nut clear the floor and the corner blocks.
+- Its 4 corners are solid full-height blocks from the floor up, so they print without supports.
+  Each block has an insert hole under one of the panel's countersunk holes at (±50, ±45) mm from the centre.
+- The holes are sized for JLC3DP's threaded insert service, **Type 5: M3\*4\*5**. That's a 3.6 mm hole,
+  7 mm deep, with at least 3 mm of wall. When ordering, upload `panel_body_inserts.png` as the insert drawing.
+- Use 4× **M3 × 8** flat-head screws. With the 3 mm panel, a longer screw hits the bottom of the 7 mm hole.
+- The script checks that every module PCB clears the walls and the corner blocks.

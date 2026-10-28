@@ -3,7 +3,7 @@ id: "0085"
 title: "The apps inbox plugin: a key per active app, with five actions under it"
 status: "ongoing"
 created: "2026-10-27"
-updated: "2026-10-27"
+updated: "2026-10-28"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -150,7 +150,7 @@ list above, in order.
 
 | Key | id | Shows |
 |---|---|---|
-| apps | `apps` (top key) | caption `Apps`; ERROR if an app shows ERROR, else RUNNING if one runs or pulls |
+| apps | `apps` (top key) | the VS Code logo, `assets/vscode.png`; ERROR if an app shows ERROR, else RUNNING if one runs or pulls |
 | app | `app.NAME`, parent `apps` | caption `NAME` (cut to 16 runes) over the repository's emoji; RUNNING while it runs or pulls, ERROR after a crash or a failed pull |
 | Code | `code`, path `apps`, `app.NAME` | caption `Code` over the same emoji |
 | Claude | `claude` | caption `Claude` |
@@ -324,3 +324,20 @@ key:
   earlier daemon left under it, and draws it again.
 - The table in "The keys" and DoD-3 read with these ids. Proof:
   `cd inbox && node --test --test-name-pattern='TestAppsKeys|TestDaemonApps' test/apps.test.js`.
+
+### 2026-10-28: icons
+
+Keith asked for the VS Code logo on the top key, and on each action its own
+emoji with the app's emoji as the sticker at the bottom left.
+
+- `apps` shows `iconRef: "vscode.png"`: the VS Code logo, drawn at 88 px in a
+  128 px tile so it sits inside the white round. The source is devicon's
+  `vscode-original.svg` (MIT), the same logo as the Wikimedia file Keith
+  linked; the cloud sandbox cannot reach Wikimedia.
+- An action's `iconEmoji` is `[action emoji, app emoji]` over its caption:
+  Code 💻 (1f4bb), Claude 🤖 (1f916), Run ▶️ (25b6), Pull 📥 (1f4e5),
+  Term ⌨️ (2328).
+- Those five are in a new `assets/emoji/extra.txt`, which
+  `tools/emoji/build_emoji_assets.mjs` draws like `set.txt` but which no
+  folder or session hashes to, so no app's emoji moves.
+- Proof: `cd inbox && node --test --test-name-pattern=TestAppsKeys test/apps.test.js`.

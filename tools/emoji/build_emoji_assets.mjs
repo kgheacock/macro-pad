@@ -1,5 +1,7 @@
 // Draws assets/emoji/<codepoints>.png for each line of assets/emoji/set.txt
-// (task 0073), from Microsoft Fluent Emoji (flat), pinned in package.json.
+// (task 0073), and of assets/emoji/extra.txt, emoji a key names directly and
+// no folder or session hashes to (the apps plugin's actions, task 0085), from
+// Microsoft Fluent Emoji (flat), pinned in package.json.
 //
 //   cd tools/emoji && npm ci && npm run build
 //
@@ -90,7 +92,7 @@ export function draw(codepoints) {
 }
 
 function main() {
-  const set = readSet(path.join(out, 'set.txt'));
+  const set = [...readSet(path.join(out, 'set.txt')), ...readSet(path.join(out, 'extra.txt'))];
   const seen = new Set();
   for (const { codepoints, name } of set) {
     if (seen.has(codepoints)) throw new Error(`${codepoints} (${name}) is listed twice`);

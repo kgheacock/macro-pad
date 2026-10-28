@@ -37,11 +37,12 @@ const noSlot = transport.SlotUnchanged
 // pip is not part of it: the board stamps the pip on a copy of the frame (task
 // 0062). An emoji icon (task 0073) is emoji, the refs joined by line breaks,
 // under text as a caption, on a white tile with a strip of the color (task
-// 0082).
+// 0082), or on the white round when round is set, as on a top-level key.
 type frameKey struct {
 	ref   string
 	text  string
 	emoji string
+	round bool
 	color uint16
 }
 
@@ -52,8 +53,9 @@ func frameKeyOf(w view) frameKey {
 		return frameKey{}
 	}
 	if w.iconEmoji != "" {
-		// The strip shows the key color, so the color is part of the frame.
-		return frameKey{text: w.iconText, emoji: w.iconEmoji, color: w.color}
+		// The strip, or the round, shows the key color, so the color is part
+		// of the frame.
+		return frameKey{text: w.iconText, emoji: w.iconEmoji, round: w.round, color: w.color}
 	}
 	if w.iconText != "" {
 		// The tile of a text icon is opaque, so the key color cannot change the
@@ -66,9 +68,9 @@ func frameKeyOf(w view) frameKey {
 // storeColor is the color the board stores the frame over, which also picks
 // the disc of its pip. An emoji icon is an opaque tile with its color in the
 // strip, and its pip sits on white, so it is stored over ColorNone, as a text
-// icon is (task 0082).
+// icon is (task 0082). On the round, its pip sits on the key color.
 func (k frameKey) storeColor() uint16 {
-	if k.emoji != "" {
+	if k.emoji != "" && !k.round {
 		return ColorNone
 	}
 	return k.color
@@ -185,7 +187,7 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	var png []byte
 	if k.hasGlyph() {
 		var err error
-		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.emoji, 0, k.color)
+		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.emoji, k.round, 0, k.color)
 		if err != nil {
 			// A glyph that cannot be drawn leaves the color alone, rather than
 			// nothing.

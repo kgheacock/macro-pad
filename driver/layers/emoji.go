@@ -25,8 +25,11 @@ import (
 // optional caption of one line. Task 0082 draws it on an opaque white tile: the
 // caption across the top, the first emoji as a big hero, the second as a
 // smaller sticker over the hero's bottom left, and the key color as a strip
-// across the bottom. The inbox sends a repository's emoji and a session's
-// emoji, with the folder name as the caption.
+// across the bottom. A top-level key keeps task 0073's layout, the pictures
+// side by side on the white round with the caption above them, which reads
+// better beside the logos of the other top keys. The inbox sends a
+// repository's emoji and a session's emoji, with the folder name as the
+// caption.
 const (
 	// MaxIconEmoji is how many emoji one key shows.
 	MaxIconEmoji = 2
@@ -41,6 +44,20 @@ const (
 	// The caption is centred at y captionY, at most captionMaxW pixels wide.
 	captionY    = 14
 	captionMaxW = 120
+
+	// On the round (task 0073), two emoji are roundPairPx wide, centred at x
+	// roundPairX0 and roundPairX1; one emoji is roundOnePx wide, centred at x
+	// 64. They are centred at y roundYCaption under a caption, and at
+	// roundYAlone without one. The caption is centred at y roundCaptionY, at
+	// most roundCaptionMaxW pixels wide: the round is narrow at the top.
+	roundPairPx      = 48
+	roundPairX0      = 38
+	roundPairX1      = 90
+	roundOnePx       = 64
+	roundYCaption    = 74
+	roundYAlone      = 64
+	roundCaptionY    = 30
+	roundCaptionMaxW = 84
 
 	// stickerOutline is the width of the white outline around the sticker.
 	stickerOutline = 3
@@ -67,8 +84,12 @@ var emojiLayout = map[bool][][]emojiSpot{
 	},
 }
 
-// captionSizes are the sizes a caption may take, largest first, in pixels.
-var captionSizes = []int{22, 20, 18, 16, 14}
+// captionSizes and roundCaptionSizes are the sizes a caption may take, largest
+// first, in pixels, on the tile and on the round.
+var (
+	captionSizes      = []int{22, 20, 18, 16, 14}
+	roundCaptionSizes = []int{20, 18, 16, 14, 12}
+)
 
 // ValidateIconEmoji accepts no refs, or up to MaxIconEmoji refs that are each a
 // valid iconRef under IconEmojiDir.
@@ -132,7 +153,37 @@ func drawIconEmoji(img *image.NRGBA, assetsDir string, refs []string, caption st
 		draw.Draw(img, art.Bounds().Add(at), art, image.Point{}, draw.Over)
 	}
 	if caption != "" {
-		return drawCaption(img, caption)
+		return drawCaption(img, caption, captionY, captionMaxW, captionSizes)
+	}
+	return nil
+}
+
+// drawIconEmojiRound draws a top-level key's emoji icon as task 0073 did: the
+// round over keyColor, the emoji at refs side by side, and caption above them.
+// refs and caption are already valid.
+func drawIconEmojiRound(img *image.NRGBA, assetsDir string, refs []string, caption string, keyColor uint16) error {
+	drawIconRound(img, keyColor)
+	y := roundYAlone
+	if caption != "" {
+		y = roundYCaption
+	}
+	size, xs := roundOnePx, []int{64}
+	if len(refs) == 2 {
+		size, xs = roundPairPx, []int{roundPairX0, roundPairX1}
+	}
+	for i, ref := range refs {
+		icon, err := loadIcon(assetsDir, ref)
+		if err != nil {
+			return err
+		}
+		// Scale into a premultiplied image, so the edges do not darken.
+		small := image.NewRGBA(image.Rect(0, 0, size, size))
+		xdraw.CatmullRom.Scale(small, small.Bounds(), icon, icon.Bounds(), xdraw.Src, nil)
+		at := image.Pt(xs[i]-size/2, y-size/2)
+		draw.Draw(img, small.Bounds().Add(at), small, image.Point{}, draw.Over)
+	}
+	if caption != "" {
+		return drawCaption(img, caption, roundCaptionY, roundCaptionMaxW, roundCaptionSizes)
 	}
 	return nil
 }
@@ -235,16 +286,16 @@ func loadIcon(assetsDir, ref string) (image.Image, error) {
 	return icon, nil
 }
 
-// drawCaption draws one line of black text, centred at y captionY, in the
-// largest of captionSizes that fits captionMaxW, cut with "…" at the smallest.
-func drawCaption(img *image.NRGBA, text string) error {
+// drawCaption draws one line of black text, centred at y, in the largest of
+// sizes that fits maxW, cut with "…" at the smallest.
+func drawCaption(img *image.NRGBA, text string, y, maxW int, sizes []int) error {
 	f, err := opentype.Parse(gobold.TTF)
 	if err != nil {
 		return err
 	}
 	text = replaceMissing(f, strings.TrimSpace(text))
 	var face font.Face
-	for i, px := range captionSizes {
+	for i, px := range sizes {
 		if face != nil {
 			face.Close()
 		}
@@ -252,14 +303,14 @@ func drawCaption(img *image.NRGBA, text string) error {
 		if err != nil {
 			return err
 		}
-		if textWidth(face, text) <= captionMaxW || i == len(captionSizes)-1 {
+		if textWidth(face, text) <= maxW || i == len(sizes)-1 {
 			break
 		}
 	}
 	defer face.Close()
-	text = fitWidth(face, text, captionMaxW)
+	text = fitWidth(face, text, maxW)
 	m := face.Metrics()
-	top := captionY - lineHeight(face)/2
+	top := y - lineHeight(face)/2
 	d := font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(textName),

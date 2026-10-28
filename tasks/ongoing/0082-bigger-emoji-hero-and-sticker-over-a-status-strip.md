@@ -104,6 +104,12 @@ All in `driver/layers/emoji.go` (`drawIconEmoji`) and `render.go`.
   frame is stored over `ColorNone` and its pip drawn against `ColorNone`, as a
   text icon's is (task 0069). `frameKey` keeps the status color, since the
   strip is part of the picture: one icon on two statuses is still two frames.
+- **Top-level keys keep the round.** Only a key in a child layer (level 2 or
+  deeper) draws the tile above. A top-level `iconEmoji` key draws task 0073's
+  layout as before: the emoji side by side on the white round (48 px each, or
+  64 px for one), the caption above them in the narrow top of the round, the
+  key color around it, and its frame stored over the key color. `view` and
+  `frameKey` carry a `round` flag, set by `desired` for the top layer.
 - **Pip disc.** The `ColorNone` disc is blended against white, not black, so
   its edge does not speckle on the white tile. It is the disc of text and
   emoji icons; on a round icon with no status the change is one pixel of edge
@@ -134,6 +140,11 @@ and `icon-emoji-caption-pip.png`, a new golden `testdata/icon-emoji-alone.png`,
   of a pip on a key with no status. Proof: `icon-emoji.png` and `icon-text.png`
   are untouched; `icon-round.png`, `pip-sheet.png`, and `pips.png` change only
   in the `ColorNone` disc's edge.
+- [ ] **DoD-8**: a top-level `iconEmoji` key draws exactly as before task 0082,
+  and keeps the round once it has children, while its children draw the tile.
+  Proof: `go test ./layers -run 'TestIconEmoji'`, `TestIconEmojiTopLevel`
+  against `icon-emoji-round-caption.png` and `icon-emoji-round-caption-pip.png`,
+  which are task 0073's goldens unchanged.
 - [ ] **DoD-7**: on the board, Keith can read the caption and tell the hero and
   sticker apart on 5 inbox keys. Proof: Keith's note in this spec.
 
@@ -146,3 +157,6 @@ and `icon-emoji-caption-pip.png`, a new golden `testdata/icon-emoji-alone.png`,
   (`0082-round2.png`) had 5; Keith picked 1 Overlap.
 - 2026-10-27: after PR #105, Keith asked for a taller strip: 14 px became
   22 px, and the sticker moved up 8 px (10 px with no caption) so it and its outline clear it.
+- 2026-10-28: Keith found the child keys good but the top keys looked better
+  with the round and logo, and asked that top-level keys keep the old style
+  and child keys (and deeper) use the new layout. Added the round flag (DoD-8).

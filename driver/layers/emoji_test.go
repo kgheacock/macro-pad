@@ -21,10 +21,18 @@ const (
 	emojiRocket = "emoji/1f680.png"
 )
 
-// emojiTile renders an emoji icon and decodes it.
+// emojiTile renders an emoji icon as a key in a child layer draws it, and
+// decodes it.
 func emojiTile(t *testing.T, ref, caption string, emoji []string, count int, key uint16) *image.NRGBA {
 	t.Helper()
-	data, err := renderIcon(assetsDir, ref, caption, joinEmoji(emoji), count, key)
+	return emojiIcon(t, ref, caption, emoji, false, count, key)
+}
+
+// emojiIcon renders an emoji icon, on the round when round is set, and
+// decodes it.
+func emojiIcon(t *testing.T, ref, caption string, emoji []string, round bool, count int, key uint16) *image.NRGBA {
+	t.Helper()
+	data, err := renderIcon(assetsDir, ref, caption, joinEmoji(emoji), round, count, key)
 	if err != nil {
 		t.Fatalf("%q %q %q: %v", ref, caption, emoji, err)
 	}
@@ -102,17 +110,56 @@ func TestIconEmoji(t *testing.T) {
 		t.Errorf("the centre of one emoji is %v, want the fox", c)
 	}
 
-	// A key shows it.
+	// A key in a child layer shows the tile.
 	out := newFakeOut()
 	c := open(t, "", out)
-	if err := c.SetKey(Update{ID: "s", Status: StatusRunning, IconText: "macro-pad", IconEmoji: []string{emojiFox, emojiRocket}}); err != nil {
+	pair := []string{emojiFox, emojiRocket}
+	for _, u := range []Update{
+		{ID: "p", Status: StatusRunning, IconText: "macro-pad", IconEmoji: pair},
+		{ID: "s", Parent: "p", Status: StatusRunning, IconText: "macro-pad", IconEmoji: pair},
+	} {
+		if err := c.SetKey(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Press(0)
+	sameImage(t, "the child", out.glyph(t, byte(childKeys[0])), caption)
+}
+
+// TestIconEmojiTopLevel is task 0082's DoD-8: a top-level key keeps task
+// 0073's round, with its emoji side by side under the caption, and the key
+// color around it.
+func TestIconEmojiTopLevel(t *testing.T) {
+	pair := []string{emojiFox, emojiRocket}
+	round := emojiIcon(t, "", "macro-pad", pair, true, 0, ColorRunning)
+	checkGoldenNear(t, "icon-emoji-round-caption.png", onGray(round))
+	checkGoldenNear(t, "icon-emoji-round-caption-pip.png", onGray(emojiIcon(t, "", "macro-pad", pair, true, 2, ColorRunning)))
+	if got := round.NRGBAAt(0, 0); got.A != 0 {
+		t.Errorf("the corner is %v, want transparent, so the key color shows", got)
+	}
+
+	out := newFakeOut()
+	c := open(t, "", out)
+	if err := c.SetKey(Update{ID: "p", Status: StatusRunning, IconText: "macro-pad", IconEmoji: pair}); err != nil {
 		t.Fatal(err)
 	}
-	got := out.glyph(t, 0)
+	sameImage(t, "the top-level key", out.glyph(t, 0), round)
+
+	// The same key keeps the round once it has children, and its child gets
+	// the tile.
+	if err := c.SetKey(Update{ID: "s", Parent: "p", Status: StatusRunning, IconText: "macro-pad", IconEmoji: pair}); err != nil {
+		t.Fatal(err)
+	}
+	sameImage(t, "the parent", out.glyph(t, 0), round)
+}
+
+// sameImage fails unless got has the pixels of want.
+func sameImage(t *testing.T, name string, got image.Image, want *image.NRGBA) {
+	t.Helper()
 	for y := 0; y < transport.CustomGlyphHeight; y++ {
 		for x := 0; x < transport.CustomGlyphWidth; x++ {
-			if g := color.NRGBAModel.Convert(got.At(x, y)); g != color.NRGBA(caption.NRGBAAt(x, y)) {
-				t.Fatalf("key 0 differs from the tile at (%d, %d): %v, want %v", x, y, g, caption.NRGBAAt(x, y))
+			if g := color.NRGBAModel.Convert(got.At(x, y)); g != color.NRGBA(want.NRGBAAt(x, y)) {
+				t.Fatalf("%s differs at (%d, %d): %v, want %v", name, x, y, g, want.NRGBAAt(x, y))
 			}
 		}
 	}
@@ -161,21 +208,24 @@ func TestIconEmojiFrames(t *testing.T) {
 	c := openFrames(t, out, time.Millisecond)
 	pair := []string{emojiFox, emojiRocket}
 	for _, u := range []Update{
-		{ID: "a", Status: StatusRunning, IconText: "same", IconEmoji: pair},
-		{ID: "b", Status: StatusDone, IconText: "same", IconEmoji: pair},
-		{ID: "c", Status: StatusDone, IconText: "same", IconEmoji: pair},
+		{ID: "p", Status: StatusRunning},
+		{ID: "a", Parent: "p", Status: StatusRunning, IconText: "same", IconEmoji: pair},
+		{ID: "b", Parent: "p", Status: StatusDone, IconText: "same", IconEmoji: pair},
+		{ID: "c", Parent: "p", Status: StatusDone, IconText: "same", IconEmoji: pair},
 	} {
 		if err := c.SetKey(u); err != nil {
 			t.Fatal(err)
 		}
 	}
+	c.Press(0)
 	if !c.WaitPreload(10 * time.Second) {
 		t.Fatal("the preload did not finish")
 	}
 	out.mu.Lock()
 	stored := 0
 	for slot, f := range out.slots {
-		if f.png != nil {
+		// The up key's shift icon is the only other frame with a picture.
+		if f.png != nil && f.color != ColorUp {
 			stored++
 			if f.color != ColorNone {
 				t.Errorf("slot %d is stored over %#04x, want ColorNone", slot, f.color)
@@ -187,7 +237,7 @@ func TestIconEmojiFrames(t *testing.T) {
 		t.Fatalf("the board holds %d frames, want 2 (one for each color)", stored)
 	}
 	out.takeCalls()
-	if err := c.SetKey(Update{ID: "a", Status: StatusRunning, IconText: "same", IconEmoji: pair, Count: 7}); err != nil {
+	if err := c.SetKey(Update{ID: "a", Parent: "p", Status: StatusRunning, IconText: "same", IconEmoji: pair, Count: 7}); err != nil {
 		t.Fatal(err)
 	}
 	calls, _ := out.takeCalls()

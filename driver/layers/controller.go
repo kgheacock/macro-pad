@@ -108,7 +108,11 @@ type view struct {
 	// iconEmoji is the emoji refs joined by line breaks, so view stays
 	// comparable (task 0073).
 	iconEmoji string
-	count     int
+	// round draws iconEmoji on the white round of task 0073, as a top-level
+	// key does; a key in a child layer draws it as a hero, a sticker, and a
+	// strip (task 0082).
+	round bool
+	count int
 }
 
 // Controller owns the object, draws it, and saves it.
@@ -523,6 +527,7 @@ func desired(d Doc) [KeyCount]view {
 		for i, k := range d.Keys {
 			if k != nil && k.hasContent() {
 				out[i] = nodeView(k)
+				out[i].round = out[i].iconEmoji != ""
 			}
 		}
 		return out
@@ -624,7 +629,7 @@ func (c *Controller) prepare(key byte, w view) keyDraw {
 		return d
 	}
 	if w.iconRef != "" || w.iconText != "" || w.iconEmoji != "" || w.count > 0 {
-		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconEmoji, w.count, w.color)
+		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconEmoji, w.round, w.count, w.color)
 		if err != nil {
 			c.logf("layers: key %d: draw %q: %v", key, w.iconRef+w.iconText+w.iconEmoji, err)
 		} else {

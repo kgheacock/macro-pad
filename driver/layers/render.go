@@ -83,7 +83,7 @@ func RenderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, err
 // the color the edges of the round and the pip are blended against, so that no
 // edge pixel is half transparent (task 0062).
 func renderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, error) {
-	return renderIcon(assetsDir, ref, "", "", count, keyColor)
+	return renderIcon(assetsDir, ref, "", "", false, count, keyColor)
 }
 
 // renderIcon is renderGlyph for an icon that is a PNG at ref, the words in text
@@ -91,8 +91,10 @@ func renderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, err
 // caption (task 0073). A text icon is a plain white tile, so the key color
 // cannot show; the pip is blended against ColorNone, as the board draws it on a
 // frame stored for a text icon. An emoji icon is a white tile too, with the key
-// color only in its strip (task 0082), so its pip is blended the same way.
-func renderIcon(assetsDir, ref, text, emoji string, count int, keyColor uint16) ([]byte, error) {
+// color only in its strip (task 0082), so its pip is blended the same way. With
+// round, an emoji icon is drawn on the round of task 0073 instead, as a
+// top-level key is, and the key color shows around it.
+func renderIcon(assetsDir, ref, text, emoji string, round bool, count int, keyColor uint16) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
 	if emoji != "" {
 		refs := splitEmoji(emoji)
@@ -105,11 +107,17 @@ func renderIcon(assetsDir, ref, text, emoji string, count int, keyColor uint16) 
 		if err := validateIconCaption(text); err != nil {
 			return nil, err
 		}
-		if err := drawIconEmoji(canvas, assetsDir, refs, text, keyColor); err != nil {
-			return nil, err
+		if round {
+			if err := drawIconEmojiRound(canvas, assetsDir, refs, text, keyColor); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := drawIconEmoji(canvas, assetsDir, refs, text, keyColor); err != nil {
+				return nil, err
+			}
+			keyColor = ColorNone
 		}
 		text = ""
-		keyColor = ColorNone
 	}
 	if text != "" {
 		if ref != "" {

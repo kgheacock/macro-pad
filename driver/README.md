@@ -249,7 +249,7 @@ the poller used is not read any more; delete it.
   `--emoji-font` names another sbix font, or `--emoji-font ''` turns it off.
 - Where the font is missing or has no picture for a ref, the ref draws
   `assets/emoji/<codepoints>.png`: Microsoft Fluent Emoji (flat, MIT), one per
-  line of `assets/emoji/set.txt`, drawn by `tools/emoji/` to fit the round.
+  line of `assets/emoji/set.txt` and `extra.txt`, drawn by `tools/emoji/` to fit the round.
 - `count` is drawn as a pip, a red disc with a white ring and a white number,
   in the bottom-right corner of the image (see "Count pip," above). A count of
   0 has no pip, and a count above 99 shows `99+`.

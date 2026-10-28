@@ -1,0 +1,10 @@
+# Emoji a key names directly, drawn like set.txt but never hashed: no folder or
+# session gets one of these. tools/emoji/build_emoji_assets.mjs draws them.
+# Same rules as set.txt; a line may not repeat one of set.txt.
+#
+# The actions of an app (inbox apps plugin, task 0085)
+1f4bb laptop
+1f916 robot
+25b6 play
+1f4e5 inbox-tray
+2328 keyboard

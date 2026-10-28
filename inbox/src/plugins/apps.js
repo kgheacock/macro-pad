@@ -30,13 +30,17 @@ export const FEED_EVERY_MS = 30 * 1000;
 export const ACTIVE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 // The children of an app key, in order: [action, caption].
+// [action, caption, emoji]. Each action shows its own emoji, from
+// assets/emoji/extra.txt, with the app's emoji as the sticker.
 export const ACTIONS = [
-  ['code', 'Code'],
-  ['claude', 'Claude'],
-  ['run', 'Run'],
-  ['pull', 'Pull'],
-  ['term', 'Term'],
+  ['code', 'Code', 'emoji/1f4bb.png'],
+  ['claude', 'Claude', 'emoji/1f916.png'],
+  ['run', 'Run', 'emoji/25b6.png'],
+  ['pull', 'Pull', 'emoji/1f4e5.png'],
+  ['term', 'Term', 'emoji/2328.png'],
 ];
+// The picture of the apps key, under macropadd's assets directory.
+export const TOP_ICON = 'vscode.png';
 
 const RUN_PAD = { running: 'RUNNING', crashed: 'ERROR' };
 const PULL_PAD = { pulling: 'RUNNING', pulled: 'DONE', failed: 'ERROR' };
@@ -230,8 +234,8 @@ export function createAppsRenderer({ slot, env = process.env, emojiSet } = {}) {
     const emoji = [emojiOf(name)];
     const status = statusOf(name, rows);
     set(out, id, { id, parent: TOP_ID, status: status.app, count: 0, iconText: clip(name, MAX_CAPTION), iconEmoji: emoji });
-    for (const [action, caption] of ACTIONS) {
-      const child = { id: action, path: [TOP_ID, id], status: '', count: 0, iconText: caption, iconEmoji: emoji };
+    for (const [action, caption, actionEmoji] of ACTIONS) {
+      const child = { id: action, path: [TOP_ID, id], status: '', count: 0, iconText: caption, iconEmoji: [actionEmoji, ...emoji] };
       if (action === 'run') {
         child.status = status.run;
         if (app?.run !== undefined) child.iconText = clip(app.run ?? 'no run', MAX_CAPTION);
@@ -267,7 +271,7 @@ export function createAppsRenderer({ slot, env = process.env, emojiSet } = {}) {
       const byName = new Map(fed.apps.map((app) => [app.name, app]));
       const wanted = chooseApps(fed, rows, appsCount(env));
 
-      const top = { id: TOP_ID, status: worst(wanted.map((name) => statusOf(name, byChannel).app)), count: 0, iconText: 'Apps' };
+      const top = { id: TOP_ID, status: worst(wanted.map((name) => statusOf(name, byChannel).app)), count: 0, iconRef: TOP_ICON };
       if (slot !== undefined) top.slot = slot;
       set(out, TOP_ID, top);
 

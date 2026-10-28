@@ -238,7 +238,10 @@ the poller used is not read any more; delete it.
   caption of one line and at most 16 runes, across the top in black Go Bold
   at the largest of 22, 20, 18, 16, or 14 px that fits 120 px. A third ref, a
   ref outside `emoji/`, or a longer caption drops the message. The count pip
-  covers the lower right of the hero.
+  covers the lower right of the hero. That is how a key in a child layer draws
+  it; a top-level key keeps task 0073's look: the emoji side by side on the
+  white round, 48 px each (64 px for one), the caption above them at up to
+  20 px and 84 px wide, and the key color around the round.
 - An emoji ref, in `iconEmoji` or as an `iconRef` such as `emoji/1f98a.png`,
   draws from Apple Color Emoji on a Mac (task 0074). `macropadd` reads the
   font's largest PNG strike at run time and fits it to the round; nothing is

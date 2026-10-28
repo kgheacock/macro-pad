@@ -627,18 +627,21 @@ is today is active. The keys show the pinned apps first, oldest pin first,
 then the active apps, newest first, at most `$INBOX_APPS_COUNT` (default 5,
 one page). While the apps layer is open, no app moves or goes, and a new
 one goes at the end. Each app shows its name over its repository's emoji,
-the same emoji as its Claude sessions and its PRs. The `apps` key is blue
+the same emoji as its Claude sessions and its PRs. The `apps` key shows the
+VS Code logo (`assets/vscode.png`), and is blue
 while an app runs or pulls, and red after a crash or a failed pull.
 
-A press on an app opens five children:
+A press on an app opens five children. Each shows its own emoji (from
+`assets/emoji/extra.txt`, which no folder or session hashes to), with the
+app's emoji as the sticker at its bottom left:
 
-| Key | A press |
-|---|---|
-| Code | `open -b com.microsoft.VSCode DIR` |
-| Claude | brings the app's newest Claude session of today to the front; else the tab this key opened; else a new iTerm tab runs `claude` in DIR |
-| Run | runs the app in its own iTerm tab, opened once and reused; while it runs, a press brings the tab to the front. Blue while it runs, red after a crash. |
-| Pull | `git pull --rebase` in DIR. Blue while it pulls, green after, red when it fails. A conflict aborts the rebase, so the repository is as it was. |
-| Term | the iTerm tab this key opened at DIR, else a new one |
+| Key | Emoji | A press |
+|---|---|---|
+| Code | 💻 | `open -b com.microsoft.VSCode DIR` |
+| Claude | 🤖 | brings the app's newest Claude session of today to the front; else the tab this key opened; else a new iTerm tab runs `claude` in DIR |
+| Run | ▶️ | runs the app in its own iTerm tab, opened once and reused; while it runs, a press brings the tab to the front. Blue while it runs, red after a crash. |
+| Pull | 📥 | `git pull --rebase` in DIR. Blue while it pulls, green after, red when it fails. A conflict aborts the rebase, so the repository is as it was. |
+| Term | ⌨️ | the iTerm tab this key opened at DIR, else a new one |
 
 The Run key's caption is the command it runs, the first that fits:
 

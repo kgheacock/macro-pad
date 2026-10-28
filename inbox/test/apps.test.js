@@ -127,7 +127,7 @@ test('TestAppsKeys', (t) => {
   // The first plan after a connect clears what an earlier daemon left.
   assert.deepEqual(messages[0], { kind: 'removeLayerKey', removeLayerKey: { id: 'apps' } });
   const keys = sets(messages);
-  assert.deepEqual(keys[0], { id: 'apps', status: '', count: 0, iconText: 'Apps', slot: 4 });
+  assert.deepEqual(keys[0], { id: 'apps', status: '', count: 0, iconRef: 'vscode.png', slot: 4 });
   assert.deepEqual(appsOf(keys), ['app.web', 'app.api']);
   const web = emojiFor('repo:web').iconRef;
   assert.deepEqual(keys.find((k) => k.id === 'app.web'), { id: 'app.web', parent: 'apps', status: '', count: 0, iconText: 'web', iconEmoji: [web] });
@@ -135,7 +135,16 @@ test('TestAppsKeys', (t) => {
   assert.deepEqual(children.map((k) => k.id), ['code', 'claude', 'run', 'pull', 'term']);
   assert.deepEqual(children[0].path, ['apps', 'app.web']);
   assert.deepEqual(children.map((k) => k.iconText), ['Code', 'Claude', 'pnpm dev', 'Pull', 'Term']);
-  assert.ok(children.every((k) => k.iconEmoji[0] === web));
+  // The action's emoji, with the app's as the sticker.
+  assert.deepEqual(children.map((k) => k.iconEmoji), [
+    ['emoji/1f4bb.png', web],
+    ['emoji/1f916.png', web],
+    ['emoji/25b6.png', web],
+    ['emoji/1f4e5.png', web],
+    ['emoji/2328.png', web],
+  ]);
+  for (const [ref] of children.map((k) => k.iconEmoji)) assert.ok(existsSync(path.join(import.meta.dirname, '..', '..', 'assets', ref)), ref);
+  assert.ok(existsSync(path.join(import.meta.dirname, '..', '..', 'assets', 'vscode.png')));
   assert.equal(actionsOf(keys, 'app.api').find((k) => k.id === 'run').iconText, 'no run');
   assert.ok(renderer.owns('app.web') && !renderer.owns('app.old') && !renderer.owns('inbox'));
 

@@ -1,14 +1,14 @@
 ---
 id: "0089"
 title: "A repos feed lists every repository of one owner through gh, with open issue and PR counts"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0089-repo-list-feed-from-gh"
 related: ["0075", "0076", "0081", "0085", "0087", "0088", "0090", "0092"]
 tags: ["inbox", "repos", "github", "gh", "feed", "store"]
 ---

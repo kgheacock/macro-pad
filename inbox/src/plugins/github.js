@@ -7,6 +7,7 @@
 
 import { execFile as nodeExecFile } from 'node:child_process';
 import { validateChannel } from '../channel.js';
+import { GH_TIMEOUT_MS, runGh } from '../gh.js';
 import { componentInput, emojiFor } from '../emoji.js';
 import { MAX_CAPTION, clip } from '../render.js';
 
@@ -38,7 +39,6 @@ const WATCH_REASONS = ['subscribed', 'manual'];
 // The newest notification threads read for watched PRs.
 const NOTIFICATION_PAGE = 50;
 export const FEED_EVERY_MS = 60 * 1000;
-export const GH_TIMEOUT_MS = 30 * 1000;
 // The cwd of a message the feed writes: it was sent from no folder.
 const NO_FOLDER = '';
 // One answer holds at most this many PRs.
@@ -179,28 +179,6 @@ export function parseWatched(text) {
     .filter((node) => node?.state === 'OPEN')
     .map(pullOf)
     .filter((pr) => pr !== null);
-}
-
-// Runs gh with args. Resolves its standard output; rejects with an Error
-// that says why. With partial, a GraphQL answer that holds data is resolved
-// even when gh exits 1 for the errors beside it.
-function runGh(gh, args, { env, execFile, timeoutMs, partial = false }) {
-  return new Promise((resolve, reject) => {
-    execFile(gh, args, { env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, shell: false }, (error, stdout, stderr) => {
-      if (!error || (partial && error.code === 1 && /"data"\s*:\s*\{/.test(String(stdout)))) {
-        resolve(String(stdout));
-        return;
-      }
-      if (error.code === 'ENOENT') {
-        reject(new Error(`no ${gh}; install the GitHub CLI or set INBOX_GH`));
-      } else if (error.killed || error.signal === 'SIGTERM') {
-        reject(new Error(`${gh} did not answer within ${timeoutMs / 1000} s`));
-      } else {
-        const detail = String(stderr ?? '').trim().split('\n')[0] || error.message;
-        reject(new Error(`${gh} failed: ${detail}`));
-      }
-    });
-  });
 }
 
 // Asks GitHub for the open PRs: those of the search, then, unless

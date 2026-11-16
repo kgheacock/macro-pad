@@ -292,3 +292,63 @@ test('TestChannelFallback', (t) => {
   assert.equal(hereOf().a, null);
   store.close();
 });
+
+test('TestReposMigration', (t) => {
+  // Task 0089: a schema 5 file gains the repos table and keeps its messages.
+  const { db } = scratch(t);
+  openStore(db).close();
+  const raw = new DatabaseSync(db);
+  raw.exec('DROP TABLE repos; PRAGMA user_version = 5');
+  raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
+  raw.close();
+  const store = openStore(db);
+  t.after(() => store.close());
+  assert.deepEqual(store.list().map((m) => m.body), ['old']);
+  assert.deepEqual(store.listRepos('kgheacock'), []);
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  assert.equal(SCHEMA_VERSION, 6);
+  check.close();
+});
+
+const repo = (name, issues = 0, prs = 0, extra = {}) => ({
+  name,
+  key: name.replace(/\./g, '-').toLowerCase(),
+  url: `https://github.com/kgheacock/${name}`,
+  fork: false,
+  archived: false,
+  pushedAt: '2026-11-16T00:00:00Z',
+  issues,
+  prs,
+  ...extra,
+});
+
+test('TestReplaceRepos', (t) => {
+  const { db } = scratch(t);
+  const store = openStore(db);
+  t.after(() => store.close());
+  const a = repo('a', 1, 2);
+  const b = repo('b.dev', 0, 0, { fork: true });
+  assert.equal(store.replaceRepos('kgheacock', [b, a]), 2);
+  assert.deepEqual(store.listRepos('kgheacock'), [a, b]);
+  // The same answer changes nothing; a new count changes one row.
+  assert.equal(store.replaceRepos('kgheacock', [a, b]), 0);
+  assert.equal(store.replaceRepos('kgheacock', [repo('a', 4, 2), b]), 1);
+  assert.equal(store.listRepos('kgheacock')[0].issues, 4);
+
+  // A cut sync deletes nothing, but still adds and updates.
+  const c = repo('c');
+  assert.equal(store.replaceRepos('kgheacock', [c], { complete: false }), 1);
+  assert.deepEqual(store.listRepos('kgheacock').map((r) => r.name), ['a', 'b.dev', 'c']);
+
+  // Another owner's rows stay when this owner syncs.
+  store.replaceRepos('acme', [repo('x')]);
+  // A sync with a repository gone deletes its row.
+  assert.equal(store.replaceRepos('kgheacock', [repo('a', 4, 2), c]), 1);
+  assert.deepEqual(store.listRepos('kgheacock').map((r) => r.name), ['a', 'c']);
+  assert.deepEqual(store.listRepos('acme').map((r) => r.name), ['x']);
+
+  // Every plugin reads the same table.
+  const other = store.forPlugin('github');
+  assert.deepEqual(other.listRepos('kgheacock').map((r) => r.name), ['a', 'c']);
+});

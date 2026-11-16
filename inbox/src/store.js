@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -48,6 +48,21 @@ const MIGRATIONS = [
      session TEXT    NOT NULL,
      at      INTEGER NOT NULL,
      PRIMARY KEY (repo, branch)
+   );`,
+  // Task 0089: the repositories of one owner, with their open issue and PR
+  // counts, shared by every plugin.
+  `CREATE TABLE repos (
+     owner       TEXT    NOT NULL,
+     name        TEXT    NOT NULL,
+     key         TEXT    NOT NULL,
+     url         TEXT    NOT NULL,
+     is_fork     INTEGER NOT NULL,
+     is_archived INTEGER NOT NULL,
+     pushed_at   TEXT,
+     issues      INTEGER NOT NULL,
+     prs         INTEGER NOT NULL,
+     synced_at   INTEGER NOT NULL,
+     PRIMARY KEY (owner, name)
    );`,
 ];
 
@@ -335,6 +350,66 @@ export class Store {
       () => this.#db
           .prepare('SELECT session FROM branch_sessions WHERE repo = ? AND branch = ?')
           .get(repo, branch)?.session ?? null,
+    );
+  }
+
+  // The repositories of `owner` by name, as parseRepos gives them (task 0089).
+  listRepos(owner) {
+    return this.#guard(() =>
+      this.#db
+        .prepare(
+          `SELECT name, key, url, is_fork, is_archived, pushed_at, issues, prs
+             FROM repos WHERE owner = ? ORDER BY name`,
+        )
+        .all(owner)
+        .map((row) => ({
+          name: row.name,
+          key: row.key,
+          url: row.url,
+          fork: row.is_fork === 1,
+          archived: row.is_archived === 1,
+          pushedAt: row.pushed_at,
+          issues: row.issues,
+          prs: row.prs,
+        })),
+    );
+  }
+
+  // Makes the repositories of `owner` those of `repos`, in one transaction:
+  // it adds and updates rows, and deletes the rows that `repos` lacks only
+  // when `complete` is true (a cut answer says nothing about the rest).
+  // Returns how many rows it added, changed, or deleted.
+  replaceRepos(owner, repos, { complete = true, now = Date.now() } = {}) {
+    return this.#guard(() =>
+      this.#inTransaction(() => {
+        const have = new Map(this.listRepos(owner).map((row) => [row.name, row]));
+        const put = this.#db.prepare(
+          `INSERT INTO repos (owner, name, key, url, is_fork, is_archived, pushed_at, issues, prs, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (owner, name) DO UPDATE SET key = excluded.key, url = excluded.url,
+             is_fork = excluded.is_fork, is_archived = excluded.is_archived, pushed_at = excluded.pushed_at,
+             issues = excluded.issues, prs = excluded.prs, synced_at = excluded.synced_at`,
+        );
+        const same = (a, b) => Object.keys(a).every((field) => a[field] === b[field]);
+        let changed = 0;
+        const seen = new Set();
+        for (const repo of repos) {
+          seen.add(repo.name);
+          const old = have.get(repo.name);
+          if (old && same(old, repo)) continue;
+          put.run(owner, repo.name, repo.key, repo.url, repo.fork ? 1 : 0, repo.archived ? 1 : 0, repo.pushedAt, repo.issues, repo.prs, now);
+          changed++;
+        }
+        if (complete) {
+          const drop = this.#db.prepare('DELETE FROM repos WHERE owner = ? AND name = ?');
+          for (const name of have.keys()) {
+            if (seen.has(name)) continue;
+            drop.run(owner, name);
+            changed++;
+          }
+        }
+        return changed;
+      }),
     );
   }
 

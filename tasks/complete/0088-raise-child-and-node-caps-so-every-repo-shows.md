@@ -1,13 +1,13 @@
 ---
 id: "0088"
 title: "Raise the child and node caps so every repo shows, and open an empty layer on press"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/114"
 branch: "0088-raise-child-and-node-caps-so-every-repo-shows"
 related: ["0057", "0061", "0062", "0063", "0078", "0086", "0087", "0095"]
 tags: ["driver", "layers", "plugin", "wire-protocol", "paging"]
@@ -105,7 +105,7 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [x] **DoD-9** — The inbox constant equals `MaxChildren` in `doc.go`, and `INBOX_APPS_COUNT` still stops at 20. **Proof:** `cd inbox && node --test test/limits.test.js`
 - [x] **DoD-10** — One `SetKey` on a full 512-node tree takes under 5 ms. **Proof:** `cd driver && go test ./layers -run TestSetKeyOnAFullTree`
 - [x] **DoD-11** — `driver/README.md` states 128, 512, and `opens`. **Proof:** `grep -n 'at most 128' driver/README.md`
-- [ ] **DoD-12** — The PR links to this spec. **Proof:** PR body
+- [x] **DoD-12** — The PR links to this spec. **Proof:** PR body
 
 ## Risks
 

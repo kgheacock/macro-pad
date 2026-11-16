@@ -8,6 +8,7 @@ NAME=install.sh
 usage() {
   cat <<USAGE
 Usage: install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q]
+                  [--repos-owner OWNER]
                   [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
                   [--no-completions] [--dry-run]
 
@@ -24,6 +25,9 @@ the per-plugin services that older versions made.
   --github-query Q  the GitHub search of the github plugin, such as
                     'is:pr is:open involves:@me archived:false' (default:
                     \$INBOX_GITHUB_QUERY if set, else the plugin's own)
+  --repos-owner OWNER  the GitHub user or organisation whose repositories the
+                    repos feed lists (default: \$INBOX_REPOS_OWNER if set,
+                    else kgheacock)
   --apps-root DIR   the folder of the apps plugin's repositories, such as
                     ~/source/github.com/acme (default: \$INBOX_APPS_ROOT if
                     set; without it the apps plugin shows no keys)
@@ -67,6 +71,7 @@ DRY=0
 COMPLETIONS=1
 PLUGINS_GIVEN=
 GITHUB_QUERY=${INBOX_GITHUB_QUERY:-}
+REPOS_OWNER=${INBOX_REPOS_OWNER:-}
 APPS_ROOT=${INBOX_APPS_ROOT:-}
 APPS_COUNT=${INBOX_APPS_COUNT:-}
 APPS_RUN=${INBOX_APPS_RUN:-}
@@ -76,7 +81,7 @@ while [ $# -gt 0 ]; do
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY=1 ;;
     --no-completions) COMPLETIONS=0 ;;
-    --assets-dir | --port | --slot | --plugin | --github-query | --apps-root | --apps-count | --apps-run)
+    --assets-dir | --port | --slot | --plugin | --github-query | --repos-owner | --apps-root | --apps-count | --apps-run)
       [ $# -ge 2 ] || { printf '%s: option "%s" needs a value; run '"'"'%s -h'"'"' for help\n' "$NAME" "$1" "$NAME" >&2; exit 2; }
       case $1 in
         --assets-dir) printf '%s: --assets-dir is unused: the daemon sends icon text, not picture files; ignoring it\n' "$NAME" >&2 ;;
@@ -84,6 +89,7 @@ while [ $# -gt 0 ]; do
         --slot) SLOTS="$SLOTS${SLOTS:+ }$2" ;;
         --plugin) PLUGINS_GIVEN="$PLUGINS_GIVEN${PLUGINS_GIVEN:+ }$2" ;;
         --github-query) GITHUB_QUERY=$2 ;;
+        --repos-owner) REPOS_OWNER=$2 ;;
         --apps-root) APPS_ROOT=$2 ;;
         --apps-count) APPS_COUNT=$2 ;;
         --apps-run)
@@ -126,6 +132,15 @@ case $GITHUB_QUERY in
   *[\'\\\}$(printf '\n')]*)
     printf '%s: --github-query may not hold a quote, a backslash, } or a new line\n' "$NAME" >&2
     exit 2 ;;
+esac
+
+# The owner is a GitHub name; it goes in the wrapper between single quotes.
+case $REPOS_OWNER in
+  '') ;;
+  [A-Za-z0-9]*) case $REPOS_OWNER in
+      *[!A-Za-z0-9-]*) printf '%s: --repos-owner "%s" is not a GitHub user or organisation name\n' "$NAME" "$REPOS_OWNER" >&2; exit 2 ;;
+    esac ;;
+  *) printf '%s: --repos-owner "%s" is not a GitHub user or organisation name\n' "$NAME" "$REPOS_OWNER" >&2; exit 2 ;;
 esac
 
 # The apps settings go in the wrapper between single quotes too.
@@ -250,8 +265,8 @@ for slot in $SLOTS; do DAEMON_ARGS="$DAEMON_ARGS --slot $slot"; done
 
 write_wrapper() {
   if [ "$DRY" = 1 ]; then
-    printf 'would write: %s (runs %s%s%s%s%s%s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}" "${GIT:+, INBOX_GIT=$GIT}" \
-      "${GITHUB_QUERY:+, INBOX_GITHUB_QUERY=$GITHUB_QUERY}" "${APPS_ROOT:+, INBOX_APPS_ROOT=$APPS_ROOT}" "${APPS_COUNT:+, INBOX_APPS_COUNT=$APPS_COUNT}" "${APPS_RUN:+, INBOX_APPS_RUN=$APPS_RUN}"
+    printf 'would write: %s (runs %s%s%s%s%s%s%s%s)\n' "$WRAPPER" "$NODE" "${GH:+, INBOX_GH=$GH}" "${GIT:+, INBOX_GIT=$GIT}" \
+      "${GITHUB_QUERY:+, INBOX_GITHUB_QUERY=$GITHUB_QUERY}" "${REPOS_OWNER:+, INBOX_REPOS_OWNER=$REPOS_OWNER}" "${APPS_ROOT:+, INBOX_APPS_ROOT=$APPS_ROOT}" "${APPS_COUNT:+, INBOX_APPS_COUNT=$APPS_COUNT}" "${APPS_RUN:+, INBOX_APPS_RUN=$APPS_RUN}"
     return
   fi
   mkdir -p "$PREFIX/bin" || fail "step failed: mkdir -p $PREFIX/bin"
@@ -259,6 +274,7 @@ write_wrapper() {
     printf '#!/bin/sh\n'
     [ -z "$GH" ] || printf "INBOX_GH=\${INBOX_GH:-'%s'}\nexport INBOX_GH\n" "$GH"
     [ -z "$GITHUB_QUERY" ] || printf "INBOX_GITHUB_QUERY=\${INBOX_GITHUB_QUERY:-'%s'}\nexport INBOX_GITHUB_QUERY\n" "$GITHUB_QUERY"
+    [ -z "$REPOS_OWNER" ] || printf "INBOX_REPOS_OWNER=\${INBOX_REPOS_OWNER:-'%s'}\nexport INBOX_REPOS_OWNER\n" "$REPOS_OWNER"
     [ -z "$GIT" ] || printf "INBOX_GIT=\${INBOX_GIT:-'%s'}\nexport INBOX_GIT\n" "$GIT"
     [ -z "$APPS_ROOT" ] || printf "INBOX_APPS_ROOT=\${INBOX_APPS_ROOT:-'%s'}\nexport INBOX_APPS_ROOT\n" "$APPS_ROOT"
     [ -z "$APPS_COUNT" ] || printf "INBOX_APPS_COUNT=\${INBOX_APPS_COUNT:-'%s'}\nexport INBOX_APPS_COUNT\n" "$APPS_COUNT"
@@ -440,6 +456,7 @@ printf 'plugins:  %s\n' "$SHOWN"
 printf 'store:    %s\n' "$DB"
 printf 'gh:       %s\n' "${GH:-not found; the github plugin shows no PRs}"
 [ -z "$GITHUB_QUERY" ] || printf 'github:   %s\n' "$GITHUB_QUERY"
+[ -z "$REPOS_OWNER" ] || printf 'repos:    %s\n' "$REPOS_OWNER"
 printf 'apps:     %s\n' "${APPS_ROOT:-no --apps-root; the apps plugin shows no keys}"
 printf 'daemon:   %s\n' "$STATE"
 [ -z "$COMP_LINE" ] || printf 'zsh:      %s\n' "$COMP_LINE"

@@ -6,6 +6,8 @@ import { acquirePidFile, pidPath, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
 import ai from '../src/plugins/ai.js';
 import github from '../src/plugins/github.js';
+import { createRenderer } from '../src/render.js';
+import { feed as reposFeed, fetchRepos } from '../src/repolist.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
 import { emojiFor } from '../src/emoji.js';
@@ -506,4 +508,71 @@ test('TestDaemonFeedFails', async (t) => {
   const failures = logs.filter((line) => line.startsWith('cannot read GitHub'));
   assert.deepEqual(failures, ['cannot read GitHub: no gh; install the GitHub CLI or set INBOX_GH']);
   await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'kgheacock.macro-pad.97'), 1000, 'the PR');
+});
+
+// The github plugin with the repos feed (task 0089) and a gh that answers
+// from `results`, one per run. `fed` records what the renderer is given.
+function reposPlugin(results) {
+  const seen = [];
+  let runs = 0;
+  const execFile = (file, args, options, callback) => {
+    const next = results[Math.min(runs, results.length - 1)];
+    runs++;
+    setImmediate(() => callback(next.error ?? null, next.stdout ?? '', next.stderr ?? ''));
+  };
+  const plugin = {
+    ...github,
+    feed: { ...reposFeed, fetch: ({ env }) => fetchRepos({ env, execFile }) },
+    createRenderer: ({ slot }) => {
+      const renderer = createRenderer({ slot, rules: github.rules });
+      return { ...renderer, plan: (args) => (seen.push(args.fed), renderer.plan(args)) };
+    },
+  };
+  return { plugin, seen, runs: () => runs };
+}
+
+const ghRow = (name, issues, prs) => ({
+  name,
+  url: `https://github.com/kgheacock/${name}`,
+  isFork: false,
+  isArchived: false,
+  pushedAt: null,
+  issues: { totalCount: issues },
+  pullRequests: { totalCount: prs },
+});
+const exit1 = (stderr) => ({ error: Object.assign(new Error('exit 1'), { code: 1 }), stderr });
+
+test('TestReposFeedOffline', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  const kept = { name: 'macro-pad', key: 'macro-pad', url: 'u', fork: false, archived: false, pushedAt: null, issues: 1, prs: 2 };
+  writer.replaceRepos('kgheacock', [kept]);
+  const fed = reposPlugin([exit1('HTTP 502'), exit1('HTTP 502'), exit1('HTTP 502')]);
+  const { logs } = launch(t, sc, server, { plugin: fed.plugin, feedMs: 20 });
+  await waitFor(() => fed.runs() >= 3, 2000, 'three runs');
+  // One line for three equal failures, and the rows stay.
+  assert.deepEqual(logs.filter((line) => line.startsWith('cannot read')), ['cannot read GitHub repositories: gh failed: HTTP 502']);
+  assert.deepEqual(writer.listRepos('kgheacock'), [kept]);
+});
+
+test('TestReposColdStart', async (t) => {
+  const sc = scratch(t);
+  const server = await serve(t);
+  const writer = openStore(sc.db);
+  t.after(() => writer.close());
+  const kept = { name: 'macro-pad', key: 'macro-pad', url: 'u', fork: false, archived: false, pushedAt: null, issues: 1, prs: 2 };
+  writer.replaceRepos('kgheacock', [kept]);
+  // gh fails at start, then answers.
+  const fed = reposPlugin([exit1('no network'), { stdout: JSON.stringify([ghRow('macro-pad', 0, 5)]) }]);
+  launch(t, sc, server, { plugin: fed.plugin, feedMs: 150 });
+  await waitFor(() => fed.seen.some((answer) => answer?.offline), 2000, 'the cold answer');
+  const cold = fed.seen.find((answer) => answer?.offline);
+  assert.deepEqual(cold.repos, [kept]);
+  assert.equal(cold.owner, 'kgheacock');
+  assert.match(cold.offline, /gh failed: no network/);
+  // The next good read replaces it.
+  await waitFor(() => fed.seen.some((answer) => answer && answer.offline === null), 2000, 'the live answer');
+  assert.deepEqual(writer.listRepos('kgheacock').map((r) => [r.name, r.issues, r.prs]), [['macro-pad', 0, 5]]);
 });

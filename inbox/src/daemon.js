@@ -102,6 +102,9 @@ export function acquirePidFile(
 // sync(store, answer) -> how many messages it wrote }. The daemon runs it at
 // start and every everyMs, one run at a time, and draws what it wrote. fetch
 // also gets the store, and the renderer gets the newest answer as `fed`.
+// A feed may have cold({ env, store, error }) -> answer: when the first
+// fetch fails, the daemon draws that answer once (task 0089), so a restart
+// without a network still shows the rows of the store.
 //
 // A plugin may draw its own keys (task 0085): createRenderer({ slot, env })
 // returns a renderer like render.js's, with owns(parent), which says whether
@@ -215,6 +218,7 @@ export function startDaemon({
   const { feed } = plugin;
   let feeding = false;
   let feedFailure = null;
+  let coldTried = false;
   const runFeed = async () => {
     if (stopped || feeding) return;
     feeding = true;
@@ -232,6 +236,16 @@ export function startDaemon({
       const text = `cannot read ${feed.source}: ${e.message}`;
       if (text !== feedFailure) log(text);
       feedFailure = text;
+      // The first read failed: draw what the store holds (task 0089).
+      if (fed === null && feed.cold && !coldTried) {
+        coldTried = true;
+        try {
+          fed = feed.cold({ env, store: db, error: e });
+          push();
+        } catch (c) {
+          log(`cannot draw ${feed.source} from the store: ${c.message}`);
+        }
+      }
     } finally {
       feeding = false;
     }

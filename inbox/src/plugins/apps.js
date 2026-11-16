@@ -14,6 +14,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { dateRef, repoKey } from '../activity.js';
 import { detectRun, newTab, openCode, parseRunOverrides, pull, runLine, shellWord, typeInTab } from '../apps.js';
 import { inferChannel, sourceRoot } from '../channel.js';
 import { componentInput, componentOf, emojiFor, splitSessionChannel } from '../emoji.js';
@@ -334,6 +335,12 @@ export async function press({ parent, child, store, file, env = process.env, fed
 
   if (action === 'code') {
     await openCode(dir, deps);
+    // VS Code opened: that is an event of the repository (task 0090).
+    try {
+      store.noteActivity(repoKey(app.dirName), 'code', dateRef(now), now);
+    } catch (e) {
+      log(`cannot note the activity of ${name}: ${e.message}`);
+    }
   } else if (action === 'claude') {
     // The newest session today, else the tab this key opened, else a new one.
     const session = sessionsToday(store, fed.apps, fed.root, { env, now }).get(name);

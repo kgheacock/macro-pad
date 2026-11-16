@@ -35,6 +35,7 @@ node bin/inbox.js -h        # or link it: npm link   (gives the `inbox` command)
 | `inbox emoji [CHANNEL \| --folder DIR] [--session ID] [--format F]` | Print the emoji a key shows for a folder, a session, or both. See "Emoji". |
 | `inbox --plugin apps pin [NAME]`, `unpin [NAME]` | Always show an app's key, or stop. See "The apps plugin". |
 | `inbox --plugin apps run NAME [-- CMD...]` | Run an app here and report its state to its Run key. See "The apps plugin". |
+| `inbox activity note --repo NAME --kind KIND [--ref REF]` | Note one event of yours in a repository, for the order of the repository keys. See "Activity". |
 | `inbox help [COMMAND]` | Same as `-h`. |
 
 `send`, `pipe`, `list`, `count`, `seen` and `emoji` also take `--channel C` in place of
@@ -221,10 +222,10 @@ CREATE TABLE channel_here (  -- added in schema 3, keyed by plugin in schema 4
 );
 ```
 
-`PRAGMA user_version` is the schema version (now 6; version 2 added `status`,
+`PRAGMA user_version` is the schema version (now 7; version 2 added `status`,
 version 3 added `here` and `channel_here`, version 4 added `plugin`, version 5
 added `messages.session` and `branch_sessions`, version 6 added `repos`, see
-"Repositories"). An older
+"Repositories", version 7 added `activity`, see "Activity"). An older
 file is migrated in one transaction; its rows belong to `basic`. A newer file
 is refused and left unchanged.
 
@@ -639,6 +640,56 @@ adds and updates rows but deletes none.
   succeeds.
 - **A start without a network** draws the stored rows: the daemon calls the
   feed's `cold` hook once when the first read fails.
+
+### Activity
+
+The activity ledger (task 0090) records your own events per repository, and a
+score of them sorts the repository keys, newest work first. The `repos`
+plugin (task 0087) draws the keys; this part gives them their order. The
+store keeps one row per event in `activity(repo, kind, ref, at)` (schema 7),
+with `(repo, kind, ref)` as the key, so a second read of one event changes
+nothing but may move `at` forward. `repo` is the repository key (the name in
+lower case, a dot becoming `-`). Every plugin shares the table.
+
+| Kind | Weight | Where it comes from | `ref` |
+|---|---|---|---|
+| `pr_review` | 3 | a `PullRequestReviewEvent` of your GitHub events | the event id |
+| `pr_open` | 3 | a `PullRequestEvent` that opened a PR | the event id |
+| `push` | 3 | a `PushEvent` | the event id |
+| `claude` | 2 | the Claude Code hook, on each prompt | the 8 first characters of the session id (one row per session) |
+| `code` | 2 | a press on `Code` under an app of the apps plugin | the date |
+| `git` | 1 | the time of `.git/logs/HEAD` of each folder under `INBOX_APPS_ROOT` | the date |
+
+A row scores `weight * 0.5 ** (age / 3 days)`: its weight halves every 3 days.
+The score of a repository is the sum of its rows. The keys sort by score,
+then by the time of the newest event, then by name; a repository with no event
+shows after the active ones, by name. A row older than 30 days is deleted each
+time the repos feed runs. The weights, the half-life, and the retention are
+constants in `src/activity.js` (`WEIGHTS`, `HALF_LIFE_MS`, `KEEP_MS`); the
+ledger keeps the kind, so a change needs no migration.
+
+- **Your events on GitHub.** The repos feed runs `gh api user --jq .login`,
+  then `gh api "users/LOGIN/events?per_page=100"`: GitHub shows the private
+  events of a user only to that user, so it asks for the signed-in login, not
+  for `INBOX_REPOS_OWNER`. The first run, with no such event in the ledger,
+  reads 3 pages; later runs read one. Events of repositories outside
+  `INBOX_REPOS_OWNER` are left out, and an owner that is an organisation has no
+  such events. The API shows an event up to a few minutes late, and keeps 300
+  events or 90 days. A failure is logged once as `inbox: cannot read GitHub
+  events: WHY`; the list and the ledger stay as they were.
+- **Local git use.** The feed reads the time of `.git/logs/HEAD` of each repository
+  folder under `INBOX_APPS_ROOT` (a commit, a checkout, or a pull writes there).
+  It does not read `.git/index`, which `git status` rewrites. `git push`
+  writes no line to that file, so a push reaches the ledger through GitHub.
+- **Claude and Code.** The Claude Code hook (see `claude-code/README.md`) and
+  the `Code` key call `inbox activity note --repo NAME --kind KIND --ref REF`.
+  An unknown kind exits 2.
+
+`orderRepos(repos, scores)` and `nextShown({ shown, wanted, open, max })` in
+`src/activity.js` give the order. While the repos layer, or a layer under it,
+is open, `nextShown` keeps the keys where they are and puts a new name at the
+end, so no key moves under your finger; when it is closed, the keys follow the
+order. The order moves within one feed run (60 s) of a write.
 
 ### The apps plugin
 

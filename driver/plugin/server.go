@@ -508,7 +508,7 @@ func (s *Server) readPump(c *client) {
 			p := msg.SetLayerKey
 			err := l.SetKey(layers.Update{
 				ID: p.ID, Parent: p.Parent, Path: p.Path, Slot: p.Slot,
-				Icon: p.Icon, Status: p.Status, Count: p.Count, IconRef: p.IconRef, IconText: p.IconText, IconEmoji: p.IconEmoji,
+				Icon: p.Icon, Status: p.Status, Count: p.Count, IconRef: p.IconRef, IconText: p.IconText, IconEmoji: p.IconEmoji, Opens: p.Opens,
 			})
 			if err != nil {
 				s.logf("setLayerKey id=%q dropped: %v", p.ID, err)

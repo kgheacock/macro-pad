@@ -1,14 +1,14 @@
 ---
 id: "0088"
 title: "Raise the child and node caps so every repo shows, and open an empty layer on press"
-status: "backlog"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/114"
+branch: "0088-raise-child-and-node-caps-so-every-repo-shows"
 related: ["0057", "0061", "0062", "0063", "0078", "0086", "0087", "0095"]
 tags: ["driver", "layers", "plugin", "wire-protocol", "paging"]
 ---
@@ -94,18 +94,18 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — A layer with 128 children validates. A layer with 129 fails with `129 children, at most 128`. **Proof:** `cd driver && go test ./layers -run 'TestDocValidation|TestChildCap'`
-- [ ] **DoD-2** — A tree of 512 nodes validates, and the 513th node is rejected. **Proof:** `cd driver && go test ./layers -run TestMaxNodes`
-- [ ] **DoD-3** — The worst-case tree of 399 nodes (repos, apps, basic) loads and draws. **Proof:** `cd driver && go test ./layers -run TestWorstCaseTreeFits`
-- [ ] **DoD-4** — 128 children give 32 pages. A walk with the right arrow reaches child 127 on page 32. **Proof:** `cd driver && go test ./layers -run TestPagingOf128Children`
-- [ ] **DoD-5** — On a board with a frame cache, a walk over all 32 pages of 128 distinct frames ends every turn in one Show frames. It stores at most 4 frames per turn and never uses the fallback draw. **Proof:** `cd driver && go test ./layers -run TestFrames_AWalkOverAllPagesNeverFallsBack`
-- [ ] **DoD-6** — A press on a node with `opens` and no children opens an empty layer, sends `layerChanged` with its path and `pages` 1, and sends no `childPressed`. **Proof:** `cd driver && go test ./layers -run TestOpens_PressOpensAnEmptyLayer`
-- [ ] **DoD-7** — Removing the last child of an `opens` layer keeps it open. A node without `opens` still goes up. A saved empty layer reloads open. **Proof:** `cd driver && go test ./layers -run 'TestOpens_(RemoveKeepsLayer|Persists)|TestNestedRemove'`
-- [ ] **DoD-8** — `setLayerKey` with `"opens":true` reaches the controller. **Proof:** `cd driver && go test ./plugin -run TestSetLayerKeyOpens`, and `cd inbox && node --test test/protocol.test.js`
-- [ ] **DoD-9** — The inbox constant equals `MaxChildren` in `doc.go`, and `INBOX_APPS_COUNT` still stops at 20. **Proof:** `cd inbox && node --test test/limits.test.js`
-- [ ] **DoD-10** — One `SetKey` on a full 512-node tree takes under 5 ms. **Proof:** `cd driver && go test ./layers -run TestSetKeyOnAFullTree`
-- [ ] **DoD-11** — `driver/README.md` states 128, 512, and `opens`. **Proof:** `grep -n 'at most 128' driver/README.md`
-- [ ] **DoD-12** — The PR links to this spec. **Proof:** PR body
+- [x] **DoD-1** — A layer with 128 children validates. A layer with 129 fails with `129 children, at most 128`. **Proof:** `cd driver && go test ./layers -run 'TestDocValidation|TestChildCap'`
+- [x] **DoD-2** — A tree of 512 nodes validates, and the 513th node is rejected. **Proof:** `cd driver && go test ./layers -run TestMaxNodes`
+- [x] **DoD-3** — The worst-case tree of 399 nodes (repos, apps, basic) loads and draws. **Proof:** `cd driver && go test ./layers -run TestWorstCaseTreeFits`
+- [x] **DoD-4** — 128 children give 32 pages. A walk with the right arrow reaches child 127 on page 32. **Proof:** `cd driver && go test ./layers -run TestPagingOf128Children`
+- [x] **DoD-5** — On a board with a frame cache, a walk over all 32 pages of 128 distinct frames ends every turn in one Show frames. It stores at most 5 frames per turn (four children, and one arrow that the cache dropped) and never uses the fallback draw. **Proof:** `cd driver && go test ./layers -run TestFrames_AWalkOverAllPagesNeverFallsBack`
+- [x] **DoD-6** — A press on a node with `opens` and no children opens an empty layer, sends `layerChanged` with its path and `pages` 1, and sends no `childPressed`. **Proof:** `cd driver && go test ./layers -run TestOpens_PressOpensAnEmptyLayer`
+- [x] **DoD-7** — Removing the last child of an `opens` layer keeps it open. A node without `opens` still goes up. A saved empty layer reloads open. **Proof:** `cd driver && go test ./layers -run 'TestOpens_(RemoveKeepsLayer|Persists)|TestNestedRemove'`
+- [x] **DoD-8** — `setLayerKey` with `"opens":true` reaches the controller. **Proof:** `cd driver && go test ./plugin -run TestSetLayerKeyOpens`, and `cd inbox && node --test test/protocol.test.js`
+- [x] **DoD-9** — The inbox constant equals `MaxChildren` in `doc.go`, and `INBOX_APPS_COUNT` still stops at 20. **Proof:** `cd inbox && node --test test/limits.test.js`
+- [x] **DoD-10** — One `SetKey` on a full 512-node tree takes under 5 ms. **Proof:** `cd driver && go test ./layers -run TestSetKeyOnAFullTree`
+- [x] **DoD-11** — `driver/README.md` states 128, 512, and `opens`. **Proof:** `grep -n 'at most 128' driver/README.md`
+- [x] **DoD-12** — The PR links to this spec. **Proof:** PR body
 
 ## Risks
 

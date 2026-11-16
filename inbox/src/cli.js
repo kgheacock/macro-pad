@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { KINDS, WEIGHTS, dateRef, repoKey, validRef } from './activity.js';
 import { detectRun, parseRunOverrides } from './apps.js';
 import { inferChannel, sourceRoot, tildify, validateChannel } from './channel.js';
 import { DEFAULT_POLL_MS, DEFAULT_PORT, acquirePidFile, startDaemon } from './daemon.js';
@@ -54,6 +55,7 @@ Commands:
   pin        always show an app's key (--plugin apps)
   unpin      stop pinning an app (--plugin apps)
   run        run an app and report its state (--plugin apps)
+  activity   note an event of yours in a repository, for the order of the repos keys
   help       show help for a command
 
 @PLUGINS@
@@ -266,6 +268,21 @@ Examples:
   inbox --plugin apps run web
   inbox --plugin apps run web -- make serve PORT=8080`,
 
+  activity: `Usage: inbox activity note --repo NAME --kind KIND [--ref REF]
+
+Note one event of yours in the repository NAME, in the activity ledger
+(task 0090). The repository keys of the repos plugin sort by a score of these
+events, newest work first. The ledger is shared by every plugin.
+
+  --repo NAME  the repository name, such as macro-pad
+  --kind KIND  one of: ${KINDS.map((k) => `${k} (${WEIGHTS[k]})`).join(', ')}
+  --ref REF    names the event; the same repository, kind and ref twice is one
+               event, with the newer time (default: today's date)
+${DB_OPTION}
+
+Example:
+  inbox activity note --repo macro-pad --kind claude --ref 3f2a91c0`,
+
   plugins: `Usage: inbox plugins
 
 Print each plugin and what it shows. Pick one with --plugin NAME on any
@@ -330,7 +347,7 @@ function helpText(command, plugin) {
   return text;
 }
 
-const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins', 'emoji', 'pin', 'unpin', 'run'];
+const COMMANDS = ['send', 'pipe', 'list', 'count', 'channels', 'channel', 'seen', 'here', 'daemon', 'plugins', 'emoji', 'pin', 'unpin', 'run', 'activity'];
 
 const SHARED_OPTIONS = { db: { type: 'string' } };
 const CHANNEL_OPTION_COMMANDS = ['send', 'pipe', 'list', 'count', 'seen', 'emoji'];
@@ -352,6 +369,7 @@ const OPTIONS = {
   pin: {},
   unpin: {},
   run: {},
+  activity: { repo: { type: 'string' }, kind: { type: 'string' }, ref: { type: 'string' } },
   emoji: { folder: { type: 'string' }, session: { type: 'string' }, format: { type: 'string' } },
   daemon: {
     port: { type: 'string' },
@@ -997,6 +1015,22 @@ function runUnpin(io, { values, positionals }) {
   return 0;
 }
 
+// inbox activity note --repo NAME --kind KIND [--ref REF] (task 0090).
+function runActivity(io, { values, positionals }) {
+  if (positionals[0] !== 'note' || positionals.length !== 1) {
+    throw new UsageError('activity needs the word note, as in: inbox activity note --repo macro-pad --kind claude --ref 3f2a91c0');
+  }
+  if (values.repo === undefined) throw new UsageError('activity note needs --repo NAME');
+  if (values.kind === undefined) throw new UsageError(`activity note needs --kind: ${KINDS.join(', ')}`);
+  if (!KINDS.includes(values.kind)) throw new UsageError(`bad kind "${values.kind}": use ${KINDS.join(', ')}`);
+  if (!validRef(values.repo)) throw new UsageError(`bad repository name "${values.repo}": use letters, digits, ., - and _`);
+  const now = Date.now();
+  const ref = values.ref ?? dateRef(now);
+  if (!validRef(ref)) throw new UsageError(`bad ref "${ref}": use letters, digits, ., :, - and _, at most 64`);
+  withStore(io, values, (store) => store.noteActivity(repoKey(values.repo), values.kind, ref, now));
+  return 0;
+}
+
 const SIGNAL_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
 
 // Runs the command with this terminal, and writes running, then stopped or
@@ -1064,6 +1098,7 @@ const RUNNERS = {
   pin: runPin,
   unpin: runUnpin,
   run: runRun,
+  activity: runActivity,
 };
 
 function wantsHelp(argv) {

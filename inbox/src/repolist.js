@@ -3,7 +3,9 @@
 // runs it every minute and the store keeps the answer in `repos`.
 
 import { execFile as nodeExecFile } from 'node:child_process';
+import { KEEP_MS, FIRST_RUN_PAGES, fetchEvents, gitEvents, repoKey, scoreRepos } from './activity.js';
 import { GH_TIMEOUT_MS, runGh } from './gh.js';
+import { appsRoot } from './plugins/apps.js';
 
 export const DEFAULT_OWNER = 'kgheacock';
 export const REPOS_EVERY_MS = 60 * 1000;
@@ -25,9 +27,8 @@ export function reposOwner(env = process.env) {
   return owner;
 }
 
-// The key of a repository name, as a channel segment: lower case, a dot
-// becoming -, as the github plugin writes the repository of a PR's head.
-export const repoKey = (name) => String(name).replace(/\./g, '-').toLowerCase();
+// The key of a repository name, as a channel segment (defined in activity.js).
+export { repoKey };
 
 const count = (value, what, name) => {
   const n = value?.totalCount;
@@ -82,17 +83,60 @@ export function syncRepos(store, { owner, repos, cut }) {
   return store.replaceRepos(owner, repos, { complete: !cut });
 }
 
+// The kinds that only the events of gh give.
+const GH_KINDS = ['push', 'pr_open', 'pr_review'];
+let lastEventsError = null;
+
+// Asks for the repositories (fetchRepos) and for the activity of the
+// signed-in user (task 0090): the events of gh, and the .git/logs/HEAD times
+// under INBOX_APPS_ROOT. A failure of the events is logged once and leaves
+// answer.events empty; it never fails the list. The first run, with no gh
+// event in the ledger, reads 3 pages of events; later runs read one.
+export async function fetchFeed({ env = process.env, store, execFile, log = () => {}, now = Date.now() } = {}) {
+  const answer = await fetchRepos({ env, execFile });
+  answer.events = [];
+  answer.git = [];
+  const first = !store || !store.activityRows(0).some((row) => GH_KINDS.includes(row.kind));
+  try {
+    answer.events = await fetchEvents({ env, owner: answer.owner, pages: first ? FIRST_RUN_PAGES : 1, execFile });
+    lastEventsError = null;
+  } catch (e) {
+    if (e.message !== lastEventsError) log(`cannot read GitHub events: ${e.message}`);
+    lastEventsError = e.message;
+  }
+  const root = appsRoot(env);
+  if (root !== null) answer.git = gitEvents(root, { since: now - KEEP_MS });
+  return answer;
+}
+
+// Writes the repositories and the activity: it notes the events, deletes the
+// rows older than KEEP_MS, and sets answer.scores (repoKey -> { score, last })
+// for the renderer. Returns how many repos rows changed.
+export function syncFeed(store, answer, now = Date.now()) {
+  const changed = syncRepos(store, answer);
+  store.noteActivities([...(answer.events ?? []), ...(answer.git ?? [])]);
+  store.pruneActivity(now - KEEP_MS);
+  answer.scores = scoreRepos(store.activityRows(now - KEEP_MS), now);
+  return changed;
+}
+
 // What the daemon draws when the first read fails: the rows the store holds,
-// and why they may be old (task 0089).
-export function coldRepos({ env = process.env, store, error }) {
+// and why they may be old (task 0089), ordered by the ledger it holds.
+export function coldRepos({ env = process.env, store, error, now = Date.now() }) {
   const owner = reposOwner(env);
-  return { owner, repos: store.listRepos(owner), cut: false, offline: error?.message ?? 'offline' };
+  return {
+    owner,
+    repos: store.listRepos(owner),
+    cut: false,
+    offline: error?.message ?? 'offline',
+    scores: scoreRepos(store.activityRows(now - KEEP_MS), now),
+  };
 }
 
 export const feed = {
   source: 'GitHub repositories',
   everyMs: REPOS_EVERY_MS,
-  fetch: ({ env }) => fetchRepos({ env }),
-  sync: (store, answer) => syncRepos(store, answer),
+  fetch: (options) => fetchFeed(options),
+  sync: (store, answer) => syncFeed(store, answer),
   cold: (options) => coldRepos(options),
 };

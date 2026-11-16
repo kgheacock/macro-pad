@@ -111,27 +111,27 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — A schema 6 file opens, gains `activity`, and keeps `repos` and
+- [x] **DoD-1** — A schema 6 file opens, gains `activity`, and keeps `repos` and
   `messages`. **Proof:** `cd inbox && node --test --test-name-pattern TestActivityMigration test/store.test.js`
-- [ ] **DoD-2** — `noteActivity` twice with one `(repo, kind, ref)` leaves one row with the newer `at`.
+- [x] **DoD-2** — `noteActivity` twice with one `(repo, kind, ref)` leaves one row with the newer `at`.
   **Proof:** `cd inbox && node --test --test-name-pattern TestNoteActivityUpsert test/activity.test.js`
-- [ ] **DoD-3** — `inbox activity note --repo macro-pad --kind claude --ref 3f2a91c0` writes one row and exits 0.
+- [x] **DoD-3** — `inbox activity note --repo macro-pad --kind claude --ref 3f2a91c0` writes one row and exits 0.
   An unknown kind exits 2. **Proof:** `cd inbox && node --test --test-name-pattern TestActivityNoteCli test/cli.test.js`
-- [ ] **DoD-4** — The hook notes one `claude` row on `prompt` and none on `tool`.
+- [x] **DoD-4** — The hook notes one `claude` row on `prompt` and none on `tool`.
   **Proof:** `cd inbox && node --test --test-name-pattern TestHookNotesActivityOnPrompt test/cli.test.js`
-- [ ] **DoD-5** — Pressing `code` on an app notes `code`. A `.git/index` time alone notes nothing; a
+- [x] **DoD-5** — Pressing `code` on an app notes `code`. A `.git/index` time alone notes nothing; a
   `.git/logs/HEAD` time notes `git`. **Proof:** `cd inbox && node --test --test-name-pattern 'TestCodePressNotesActivity|TestGitLogNotesActivity' test/apps.test.js`
-- [ ] **DoD-6** — `parseEvents` maps `PushEvent`, an opened `PullRequestEvent`, and `PullRequestReviewEvent`.
+- [x] **DoD-6** — `parseEvents` maps `PushEvent`, an opened `PullRequestEvent`, and `PullRequestReviewEvent`.
   It drops other owners and other types. **Proof:** `cd inbox && node --test --test-name-pattern TestParseEvents test/activity.test.js`
-- [ ] **DoD-7** — `fetchEvents` asks for the events of the signed-in login, not of the owner.
+- [x] **DoD-7** — `fetchEvents` asks for the events of the signed-in login, not of the owner.
   **Proof:** `cd inbox && node --test --test-name-pattern TestEventsUseSignedInLogin test/activity.test.js`
-- [ ] **DoD-8** — A push 3 days old scores half a push now. A review outranks a `git` row of the same age.
+- [x] **DoD-8** — A push 3 days old scores half a push now. A review outranks a `git` row of the same age.
   **Proof:** `cd inbox && node --test --test-name-pattern TestScoreDecaysByHalfLife test/activity.test.js`
-- [ ] **DoD-9** — `orderRepos` puts repositories with events first, then the rest by name. The
+- [x] **DoD-9** — `orderRepos` puts repositories with events first, then the rest by name. The
   result is equal for any input order. **Proof:** `cd inbox && node --test --test-name-pattern TestOrderReposNoActivityLast test/activity.test.js`
-- [ ] **DoD-10** — `nextShown` with `open: true` keeps `shown` and adds new names at the end.
+- [x] **DoD-10** — `nextShown` with `open: true` keeps `shown` and adds new names at the end.
   **Proof:** `cd inbox && node --test --test-name-pattern TestNextShownFreezesWhileOpen test/activity.test.js`
-- [ ] **DoD-11** — `pruneActivity` deletes rows older than 30 days, and an events failure leaves the ledger as it was.
+- [x] **DoD-11** — `pruneActivity` deletes rows older than 30 days, and an events failure leaves the ledger as it was.
   **Proof:** `cd inbox && node --test --test-name-pattern 'TestPruneActivity|TestEventsFailureKeepsLedger' test/activity.test.js`
 - [ ] **DoD-12** — The READMEs record the kinds, weights, half-life, and retention; the PR links this spec.
   **Proof:** `inbox/README.md` section "Activity"; the PR in the `pr` field

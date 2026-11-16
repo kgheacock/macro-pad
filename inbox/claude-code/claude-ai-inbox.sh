@@ -23,6 +23,11 @@
 # `running` would hide `done`. A tool hook sends nothing while the state is
 # already running: the last state sent is kept in a file per session.
 #
+# A `prompt` also notes one `claude` event for the repository of the project
+# folder in the activity ledger (task 0090), one row per session, which
+# orders the repository keys. The repository name is the basename of
+# `git rev-parse --show-toplevel`. Other states note nothing.
+#
 # Never blocks Claude Code: every failure is silent and the exit code is 0.
 
 state="${1:-}"
@@ -30,10 +35,19 @@ payload="$(cat)"
 inbox="${INBOX_BIN:-$HOME/.local/bin/inbox}"
 { [ -x "$inbox" ] && command -v jq >/dev/null 2>&1; } || exit 0
 
+proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
+# The activity ledger: a prompt is an event of the repository the folder is in.
+# It runs before the channel is known, so a folder outside the source root counts.
+if [ "$state" = prompt ]; then
+  toplevel="$(git -C "${proj:-$PWD}" rev-parse --show-toplevel 2>/dev/null)"
+  sid="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
+  sid="$(printf '%s' "${sid:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_-')"
+  [ -n "$toplevel" ] && "$inbox" activity note --repo "$(basename "$toplevel")" --kind claude ${sid:+--ref "${sid:0:8}"} >/dev/null 2>&1
+fi
+
 # The project channel is what `inbox send` would infer in the project folder,
 # so both name it the same way. Outside the source root inbox infers nothing,
 # and the session is not reported.
-proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
 project="$(cd "${proj:-$PWD}" 2>/dev/null && "$inbox" channel 2>/dev/null)" || exit 0
 [ -n "$project" ] || exit 0
 

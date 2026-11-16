@@ -139,7 +139,7 @@ update still reaches the files at once and `Close` does not wait.
 ## Layers
 
 `macropadd` keeps one JSON object that says what the six keys show. A key can
-hold up to 20 children, and a child can hold children of its own, four levels
+hold up to 128 children (32 pages of four, task 0088), and a child can hold children of its own, four levels
 deep in all (task 0086). A press on a key with children opens its
 child layer, and a press on key 3 goes back one level. A child layer with more
 than five children has pages, with arrows (task 0078). The daemon draws the active
@@ -194,9 +194,12 @@ the poller used is not read any more; delete it.
 
 - `keys` has at most six entries. The index is the key position, and `null`
   is an empty key.
-- `children` has at most 20 entries. A child has the same fields as a key,
+- `children` has at most 128 entries. A child has the same fields as a key,
   and children of its own (task 0086). A key is level 1, and a node on level 4
-  has no children. The whole tree holds at most 200 nodes.
+  has no children. The whole tree holds at most 512 nodes.
+- `opens` (default false) makes a press open the node's layer while it has no
+  children, so a plugin can fill the layer after the press (task 0088). Only
+  a node above level 4 can have it.
 - `id` names a key or child, and is unique among its siblings. A node is
   named by its path: the `id` of a key, then the `id` of each child down to
   it.
@@ -262,9 +265,9 @@ the poller used is not read any more; delete it.
 | `WARN` | yellow | `0xFFE0` |
 | empty | black | `0x0000` |
 
-A file with seven keys, 21 children, a node on level 5, more than 200 nodes,
+A file with seven keys, 129 children, a node on level 5, more than 512 nodes,
 an unknown status, a duplicate `id` among siblings, or an `active` that does
-not end on a node with children is rejected.
+not end on a node with children, or with `opens`, is rejected.
 
 ### Key layout
 
@@ -280,7 +283,7 @@ shift arrow on key 3 and shows `assets/right.png` on key 5. A later page shows
 `assets/left.png` on key 3, and the right arrow on key 5 unless it is the last
 page. So every page but the last holds four children, on keys 0, 1, 2, and 4,
 and the last holds up to five, on keys 0, 1, 2, 4, and 5. Six children are
-four on page 1 and two on page 2; 20 children are five pages.
+four on page 1 and two on page 2; 20 children are five pages; 128 are 32.
 
 | Press | Result |
 |---|---|
@@ -289,7 +292,8 @@ four on page 1 and two on page 2; 20 children are five pages.
 | press, child layer, key 3 on page 1 | goes back one level, to the page it showed: the top layer from a key's layer |
 | press, child layer, key 3 on a later page | shows the page before |
 | press, child layer, key 5 with the right arrow | shows the next page |
-| press, child layer, a child with no children | sends `childPressed`; the layer stays |
+| press, child layer, a child with `opens` and no children | opens an empty layer, with the up key only, and sends `layerChanged` with `pages` 1 and no `childPressed` (task 0088) |
+| press, child layer, a child with no children and no `opens` | sends `childPressed`; the layer stays |
 | any other press | nothing: no key state is sent and `active` stays |
 
 `layers.json` saves the page as `page`, from 0, beside `active` and
@@ -495,6 +499,7 @@ Every message on the connection is JSON, shaped by
   {"kind": "setLayerKey", "setLayerKey": {"id": "build", "parent": "github", "status": "ERROR", "iconText": "github\nbuild"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "opens": true}}
   ```
 
 - **`removeLayerKey`** — client to server. Removes one key or child from the
@@ -503,7 +508,7 @@ Every message on the connection is JSON, shaped by
   children, and frees its slot. An unknown `id` changes nothing and sends
   nothing. If the removal empties the open layer (the open key, or its last
   child), the pad returns to the top layer and the daemon sends
-  `layerChanged`. The daemon redraws only the keys that changed.
+  `layerChanged`. A node with `opens` stays open when its last child goes. The daemon redraws only the keys that changed.
 
   ```json
   {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}}

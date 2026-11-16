@@ -77,6 +77,9 @@ type Update struct {
 	IconText string
 	// IconEmoji is one or two pictures under assets/emoji/ (task 0073).
 	IconEmoji []string
+	// Opens opens the node's layer on a press while it has no children
+	// (task 0088).
+	Opens bool
 }
 
 // ErrSlotTaken is returned for an update that names a slot another id
@@ -304,7 +307,7 @@ func (c *Controller) SetKey(u Update) error {
 }
 
 func applyUpdate(d *Doc, u Update) error {
-	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji}
+	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji, Opens: u.Opens}
 	if u.ID == "" {
 		return errors.New("layers: update has no id")
 	}
@@ -415,8 +418,9 @@ func (c *Controller) Press(keyIndex byte) (parent, child string) {
 }
 
 // PressNode handles a press on a key, the debounced press-down. On the top
-// layer a key with children opens its child layer, on its first page. In a
-// child layer a child with children opens its layer (task 0086), the up key
+// layer a key with children, or one marked Opens (task 0088), opens its child
+// layer, on its first page. In a child layer a child with children, or
+// marked Opens, opens its layer (task 0086), the up key
 // goes back one level, to the page it showed, the left arrow shows the page
 // before, and the right arrow the next page (task 0078). Every other press
 // changes nothing and sends nothing. A press on a child with no children
@@ -440,7 +444,7 @@ func (c *Controller) PressNode(keyIndex byte) (path []string, child string) {
 			switch pk := pageLayout(len(k.Children), d.Page)[keyIndex]; pk.role {
 			case roleChild:
 				ch := &k.Children[pk.child]
-				if len(ch.Children) > 0 {
+				if len(ch.Children) > 0 || ch.Opens {
 					d.Active = append(d.Active, ch.ID)
 					d.ParentPages = append(d.ParentPages, d.Page)
 					d.Page = 0
@@ -463,7 +467,7 @@ func (c *Controller) PressNode(keyIndex byte) (path []string, child string) {
 			return errNoChange
 		}
 		k := d.Keys[keyIndex]
-		if k == nil || len(k.Children) == 0 {
+		if k == nil || (len(k.Children) == 0 && !k.Opens) {
 			return errNoChange
 		}
 		d.Active = []string{k.ID}

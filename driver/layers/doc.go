@@ -21,14 +21,15 @@ const (
 	// KeyCount is the number of keys on the pad, and the most top-level
 	// keys a document holds.
 	KeyCount = 6
-	// MaxChildren is the most children one node holds. A child layer with
-	// more than OnePage children has pages (task 0078).
-	MaxChildren = 20
+	// MaxChildren is the most children one node holds: 32 pages of four
+	// (task 0088). A child layer with more than OnePage children has pages
+	// (task 0078).
+	MaxChildren = 128
 	// MaxDepth is the most levels a tree has: a top-level key is level 1,
 	// and a node on level MaxDepth has no children (task 0086).
 	MaxDepth = 4
-	// MaxNodes is the most nodes the whole tree holds (task 0086).
-	MaxNodes = 200
+	// MaxNodes is the most nodes the whole tree holds (tasks 0086, 0088).
+	MaxNodes = 512
 	// UpKey is the key that shows the shift icon in a child layer. A
 	// press on it returns to the parent layer. On a page after the first it
 	// shows the left arrow instead.
@@ -74,13 +75,16 @@ type Node struct {
 	// side on the round; a key in a child layer shows a hero and a sticker
 	// over a strip of the key color (task 0082). It excludes IconRef.
 	IconEmoji []string `json:"iconEmoji,omitempty"`
-	Children  []Node   `json:"children,omitempty"`
+	// Opens makes a press open this node's layer even when it has no
+	// children yet, so a plugin fills the layer after the press (task 0088).
+	Opens    bool   `json:"opens,omitempty"`
+	Children []Node `json:"children,omitempty"`
 }
 
 // hasContent reports whether n shows anything. A key with no content is a
 // reserved slot: the controller does not draw it.
 func (n *Node) hasContent() bool {
-	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || len(n.Children) > 0
+	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || n.Opens || len(n.Children) > 0
 }
 
 // Doc is the whole layers.json object.
@@ -264,7 +268,7 @@ func (d *Doc) Validate() error {
 		for depth := 1; depth <= len(d.Active); depth++ {
 			path := d.Active[:depth]
 			n := d.nodeAt(path)
-			if n == nil || len(n.Children) == 0 {
+			if n == nil || (len(n.Children) == 0 && !n.Opens) {
 				return fmt.Errorf("layers: active %q is not a key with children", strings.Join(path, "/"))
 			}
 			page := d.Page
@@ -287,6 +291,9 @@ func (n *Node) validateChildren(where string, depth int, nodes *int) error {
 	*nodes++
 	if *nodes > MaxNodes {
 		return fmt.Errorf("layers: more than %d nodes", MaxNodes)
+	}
+	if n.Opens && depth >= MaxDepth {
+		return fmt.Errorf("layers: %s (%s): a node on level %d cannot open a layer", where, n.ID, MaxDepth)
 	}
 	if len(n.Children) == 0 {
 		return nil

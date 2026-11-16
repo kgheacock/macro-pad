@@ -1,14 +1,14 @@
 ---
 id: "0088"
 title: "Raise the child and node caps so every repo shows, and open an empty layer on press"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0088-raise-child-and-node-caps-so-every-repo-shows"
 related: ["0057", "0061", "0062", "0063", "0078", "0086", "0087", "0095"]
 tags: ["driver", "layers", "plugin", "wire-protocol", "paging"]
 ---

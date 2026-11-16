@@ -1,13 +1,13 @@
 ---
 id: "0090"
 title: "An activity ledger of Keith's own events sorts the repository keys"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/116"
 branch: "0090-activity-ledger-and-repo-ordering"
 related: ["0062", "0073", "0081", "0085", "0087", "0088", "0089", "0092"]
 tags: ["inbox", "repos", "activity", "ordering", "hooks", "gh"]
@@ -133,7 +133,7 @@ ticked.
   **Proof:** `cd inbox && node --test --test-name-pattern TestNextShownFreezesWhileOpen test/activity.test.js`
 - [x] **DoD-11** — `pruneActivity` deletes rows older than 30 days, and an events failure leaves the ledger as it was.
   **Proof:** `cd inbox && node --test --test-name-pattern 'TestPruneActivity|TestEventsFailureKeepsLedger' test/activity.test.js`
-- [ ] **DoD-12** — The READMEs record the kinds, weights, half-life, and retention; the PR links this spec.
+- [x] **DoD-12** — The READMEs record the kinds, weights, half-life, and retention; the PR links this spec.
   **Proof:** `inbox/README.md` section "Activity"; the PR in the `pr` field
 
 ## Risks

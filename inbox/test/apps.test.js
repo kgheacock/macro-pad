@@ -7,6 +7,8 @@ import { detectRun, parseRunOverrides, runLine, shellWord } from '../src/apps.js
 import { startDaemon } from '../src/daemon.js';
 import { emojiFor } from '../src/emoji.js';
 import apps, { appName, chooseApps, createAppsRenderer, press, scan, startOfDay } from '../src/plugins/apps.js';
+import { dateRef } from '../src/activity.js';
+import { fetchFeed, syncFeed } from '../src/repolist.js';
 import { openStore } from '../src/store.js';
 import { run, scratch } from '../testlib/helpers.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
@@ -424,4 +426,39 @@ test('TestAppsInstall', (t) => {
     encoding: 'utf8',
   });
   assert.equal(pinned.stdout, 'pinned web\n', pinned.stderr);
+});
+
+test('TestCodePressNotesActivity', async (t) => {
+  // Task 0090: pressing Code is an event of the repository; the other keys are not.
+  const { sc, root, env } = fakeRoot(t);
+  fakeApp(root, 'Web.io', NOON, { Makefile: 'dev:\n\ttrue\n' });
+  const store = storeFor(t, sc);
+  const fed = scan({ env, store, now: NOON });
+  const { execFile } = fakeExec({ osascript: () => 'UUID\n' });
+  const deps = { execFile, platform: 'darwin' };
+  const go = (child) => press({ parent: 'app.Web-io', child, store, file: '/d/inbox.db', env, fed, focus: async () => {}, now: NOON, deps });
+  await go('term');
+  assert.deepEqual(store.activityRows(0), []);
+  await go('code');
+  await go('code');
+  assert.deepEqual(store.activityRows(0), [{ repo: 'web-io', kind: 'code', ref: dateRef(NOON), at: NOON }]);
+});
+
+test('TestGitLogNotesActivity', async (t) => {
+  // Task 0090: .git/logs/HEAD is a git event; .git/index alone is not.
+  const { sc, root, env } = fakeRoot(t);
+  const at = Date.now() - HOUR;
+  fakeApp(root, 'commit', at);
+  const cold = fakeApp(root, 'status', at);
+  // `git status` rewrote the index of `status`; its log is old.
+  const old = (Date.now() - 400 * 24 * HOUR) / 1000;
+  utimesSync(path.join(cold, '.git', 'logs', 'HEAD'), old, old);
+  mkdirSync(path.join(root, 'bare', '.git'), { recursive: true });
+  const store = storeFor(t, sc);
+  const execFile = (file, args, options, callback) =>
+    setImmediate(() => callback(args[0] === 'repo' ? null : new Error('offline'), args[0] === 'repo' ? '[]' : '', ''));
+  const answer = await fetchFeed({ env, store, execFile, log: () => {} });
+  syncFeed(store, answer);
+  assert.deepEqual(store.activityRows(0).map((r) => [r.repo, r.kind, r.ref]), [['commit', 'git', dateRef(at)]]);
+  assert.ok(answer.scores.get('commit').score > 0);
 });

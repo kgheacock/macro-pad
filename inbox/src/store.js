@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -64,6 +64,16 @@ const MIGRATIONS = [
      synced_at   INTEGER NOT NULL,
      PRIMARY KEY (owner, name)
    );`,
+  // Task 0090: the events of the signed-in user per repository (the activity
+  // ledger), shared by every plugin. A re-read of one event changes nothing.
+  `CREATE TABLE activity (
+     repo TEXT    NOT NULL,
+     kind TEXT    NOT NULL,
+     ref  TEXT    NOT NULL,
+     at   INTEGER NOT NULL,
+     PRIMARY KEY (repo, kind, ref)
+   );
+   CREATE INDEX activity_at ON activity (at);`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -411,6 +421,49 @@ export class Store {
         return changed;
       }),
     );
+  }
+
+  // Notes one event of the activity ledger (task 0090): `repo` is a repoKey,
+  // `kind` one of activity.js's KINDS, `ref` names the event. The same
+  // (repo, kind, ref) twice leaves one row with the newer `at`.
+  noteActivity(repo, kind, ref, at = Date.now()) {
+    this.#guard(() => this.#noteActivity(repo, kind, ref, at));
+  }
+
+  #noteActivity(repo, kind, ref, at) {
+    this.#db
+      .prepare(
+        `INSERT INTO activity (repo, kind, ref, at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (repo, kind, ref) DO UPDATE SET at = MAX(at, excluded.at)`,
+      )
+      .run(repo, kind, ref, at);
+  }
+
+  // Notes every event of `events` ([{ repo, kind, ref, at }]) in one
+  // transaction. Returns how many it noted.
+  noteActivities(events) {
+    return this.#guard(() =>
+      this.#inTransaction(() => {
+        for (const { repo, kind, ref, at } of events) this.#noteActivity(repo, kind, ref, at);
+        return events.length;
+      }),
+    );
+  }
+
+  // The ledger rows with `at` at or after `since` (ms), by repo, kind, ref:
+  // [{ repo, kind, ref, at }].
+  activityRows(since = 0) {
+    return this.#guard(() =>
+      this.#db
+        .prepare('SELECT repo, kind, ref, at FROM activity WHERE at >= ? ORDER BY repo, kind, ref')
+        .all(since)
+        .map((row) => ({ ...row })),
+    );
+  }
+
+  // Deletes the ledger rows with `at` before `before` (ms). Returns how many.
+  pruneActivity(before) {
+    return this.#guard(() => Number(this.#db.prepare('DELETE FROM activity WHERE at < ?').run(before).changes));
   }
 
   // The fallback "here" of a channel, or null.

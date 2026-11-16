@@ -1079,3 +1079,60 @@ test('TestHookSendsBranch', (t) => {
   assert.deepEqual(store.list().map((m) => [m.channel, m.status]), [['macro-pad.3f2a91c0', 'running']]);
   assert.equal(store.branchSession('macro-pad', 'claude/fix-x'), '3f2a91c0');
 });
+
+test('TestActivityNoteCli', (t) => {
+  // Task 0090.
+  const sc = scratch(t);
+  let r = run(['activity', 'note', '--repo', 'macro-pad', '--kind', 'claude', '--ref', '3f2a91c0'], { sc });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '');
+  // The same event again is the same row.
+  assert.equal(run(['activity', 'note', '--repo', 'macro-pad', '--kind', 'claude', '--ref', '3f2a91c0'], { sc }).status, 0);
+  // A dot becomes - and the case goes, as in a repository key; no ref gives today.
+  assert.equal(run(['activity', 'note', '--repo', 'Site.io', '--kind', 'git'], { sc }).status, 0);
+  const store = openStore(sc.db);
+  t.after(() => store.close());
+  const rows = store.activityRows(0);
+  assert.deepEqual(rows.map((x) => [x.repo, x.kind]), [['macro-pad', 'claude'], ['site-io', 'git']]);
+  assert.equal(rows[0].ref, '3f2a91c0');
+  assert.match(rows[1].ref, /^\d{4}-\d{2}-\d{2}$/);
+
+  r = run(['activity', 'note', '--repo', 'macro-pad', '--kind', 'bogus'], { sc });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /bad kind "bogus": use pr_review, pr_open, push, claude, code, git/);
+  assert.equal(run(['activity', 'note', '--kind', 'git'], { sc }).status, 2);
+  assert.equal(run(['activity', 'note', '--repo', '-x', '--kind', 'git'], { sc }).status, 2);
+  assert.equal(run(['activity', 'note', '--repo', 'x', '--kind', 'git', '--ref', 'a b'], { sc }).status, 2);
+  assert.equal(run(['activity', '--repo', 'x', '--kind', 'git'], { sc }).status, 2);
+  assert.equal(store.activityRows(0).length, 2);
+  assert.match(run(['activity', '-h'], { sc }).stdout, /inbox activity note --repo NAME --kind KIND/);
+});
+
+test('TestHookNotesActivityOnPrompt', (t) => {
+  // Task 0090: a prompt notes one claude row for the repository; a tool hook notes none.
+  const sc = scratch(t);
+  const repo = path.join(sc.root, 'Macro.Pad');
+  mkdirSync(path.join(repo, 'driver'), { recursive: true });
+  if (spawnSync('git', ['-C', repo, 'init', '-q', '-b', 'main']).status !== 0) return t.skip('no git');
+  const hook = fileURLToPath(new URL('../claude-code/claude-ai-inbox.sh', import.meta.url));
+  const send = (state, cwd = path.join(repo, 'driver')) =>
+    spawnSync('bash', [hook, state], {
+      input: JSON.stringify({ session_id: '3f2a91c0-1111-2222-3333-444455556666', cwd }),
+      env: envFor(sc, { INBOX_BIN: BIN, CLAUDE_AI_INBOX_CACHE: path.join(sc.dir, 'cache') }),
+      encoding: 'utf8',
+    });
+  let r = send('tool');
+  if (r.error) return t.skip('no bash');
+  const store = openStore(sc.db);
+  t.after(() => store.close());
+  assert.deepEqual(store.activityRows(0), []);
+  assert.equal(send('prompt').status, 0);
+  assert.equal(send('prompt').status, 0);
+  assert.equal(send('done').status, 0);
+  // One row per session, named for the top folder of the repository, not the subfolder.
+  assert.deepEqual(store.activityRows(0).map((x) => [x.repo, x.kind, x.ref]), [['macro-pad', 'claude', '3f2a91c0']]);
+  // A folder that is not a repository notes nothing.
+  r = send('prompt', sc.dir);
+  assert.equal(r.status, 0);
+  assert.equal(store.activityRows(0).length, 1);
+});

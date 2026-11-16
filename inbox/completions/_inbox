@@ -58,6 +58,7 @@ _inbox() {
     'pin:always show an app key (--plugin apps)'
     'unpin:stop pinning an app (--plugin apps)'
     'run:run an app and report its state (--plugin apps)'
+    'activity:note an event of yours in a repository'
     'help:show help for a command'
   )
   local here='--here=[where a press goes: iterm2:UUID, app:BUNDLE_ID, or url:URL]:here:'
@@ -119,6 +120,11 @@ _inbox() {
             '(--channel --folder)1::channel:_inbox_channels' && ret=0 ;;
         pin | unpin | run)
           _arguments "$db" "$plugin" '1::app:_inbox_apps' && ret=0 ;;
+        activity)
+          _arguments "$db" '1:subcommand:(note)' \
+            '--repo=[the repository name]:repository:' \
+            '--kind=[the kind of event]:kind:(pr_review pr_open push claude code git)' \
+            '--ref=[names the event (default: today)]:ref:' && ret=0 ;;
         help)
           _describe -t commands 'inbox command' commands && ret=0 ;;
       esac

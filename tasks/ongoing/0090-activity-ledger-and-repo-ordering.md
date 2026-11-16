@@ -1,14 +1,14 @@
 ---
 id: "0090"
 title: "An activity ledger of Keith's own events sorts the repository keys"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0090-activity-ledger-and-repo-ordering"
 related: ["0062", "0073", "0081", "0085", "0087", "0088", "0089", "0092"]
 tags: ["inbox", "repos", "activity", "ordering", "hooks", "gh"]
 ---

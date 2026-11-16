@@ -68,12 +68,13 @@ func pageLayout(n, page int) [KeyCount]pageKey {
 }
 
 // settle keeps the active layer and its pages valid after a change to the
-// tree. While the active node is gone or has no children, the pad goes up
+// tree. While the active node is gone, or has no children and does not open
+// an empty layer (task 0088), the pad goes up
 // one level, to the page that layer showed (task 0086). Then every page on
 // the path is clamped to its layer, and the top layer has page 0.
 func (d *Doc) settle() {
 	for len(d.Active) > 0 {
-		if n := d.open(); n != nil && len(n.Children) > 0 {
+		if n := d.open(); n != nil && (len(n.Children) > 0 || n.Opens) {
 			break
 		}
 		d.up()

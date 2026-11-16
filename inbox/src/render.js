@@ -14,8 +14,14 @@
 import { componentInput, componentOf, emojiFor, loadEmojiSet, splitSessionChannel } from './emoji.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from './protocol.js';
 
-// macropadd's layers.MaxChildren.
+// The most children the plugins that page their keys (basic, apps) send. It
+// is not macropadd's layers.MaxChildren: that grew to 128 for the repos
+// plugin (task 0088), and these plugins keep 20.
 export const MAX_CHILDREN = 20;
+
+// macropadd's layers.MaxChildren (task 0088). test/limits.test.js reads
+// driver/layers/doc.go and fails when the two numbers differ.
+export const REPO_MAX_CHILDREN = 128;
 
 // macropadd takes a caption of at most 16 runes over emoji, and cuts what is
 // still too wide.

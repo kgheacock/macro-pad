@@ -223,7 +223,7 @@ export function startDaemon({
     if (stopped || feeding) return;
     feeding = true;
     try {
-      const answer = await feed.fetch({ env, store: db });
+      const answer = await feed.fetch({ env, store: db, log });
       if (stopped) return;
       const wrote = feed.sync(db, answer);
       if (feedFailure !== null) log(`${feed.source} read again`);

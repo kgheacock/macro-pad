@@ -103,14 +103,14 @@ test('TestNewerSchemaRefused', (t) => {
   const { db } = scratch(t);
   openStore(db).close();
   const raw = new DatabaseSync(db);
-  raw.exec('PRAGMA user_version = 7');
+  raw.exec('PRAGMA user_version = 99');
   raw.close();
   const before = createHash('sha256').update(readFileSync(db)).digest('hex');
   assert.throws(
     () => openStore(db),
     (e) =>
       e instanceof StoreError &&
-      e.message.includes('schema 7') &&
+      e.message.includes('schema 99') &&
       e.message.includes(`reads up to ${SCHEMA_VERSION}`),
   );
   const after = createHash('sha256').update(readFileSync(db)).digest('hex');
@@ -298,7 +298,7 @@ test('TestReposMigration', (t) => {
   const { db } = scratch(t);
   openStore(db).close();
   const raw = new DatabaseSync(db);
-  raw.exec('DROP TABLE repos; PRAGMA user_version = 5');
+  raw.exec('DROP TABLE activity; DROP TABLE repos; PRAGMA user_version = 5');
   raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
   raw.close();
   const store = openStore(db);
@@ -307,7 +307,7 @@ test('TestReposMigration', (t) => {
   assert.deepEqual(store.listRepos('kgheacock'), []);
   const check = new DatabaseSync(db);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 6);
+  assert.equal(SCHEMA_VERSION, 7);
   check.close();
 });
 
@@ -351,4 +351,26 @@ test('TestReplaceRepos', (t) => {
   // Every plugin reads the same table.
   const other = store.forPlugin('github');
   assert.deepEqual(other.listRepos('kgheacock').map((r) => r.name), ['a', 'c']);
+});
+
+test('TestActivityMigration', (t) => {
+  // Task 0090: a schema 6 file gains the activity table, and keeps repos and messages.
+  const { db } = scratch(t);
+  const first = openStore(db);
+  first.replaceRepos('kgheacock', [repo('macro-pad', 1, 2)]);
+  first.close();
+  const raw = new DatabaseSync(db);
+  raw.exec('DROP TABLE activity; PRAGMA user_version = 6');
+  raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
+  raw.close();
+  const store = openStore(db);
+  t.after(() => store.close());
+  assert.deepEqual(store.list().map((m) => m.body), ['old']);
+  assert.deepEqual(store.listRepos('kgheacock').map((r) => [r.name, r.issues, r.prs]), [['macro-pad', 1, 2]]);
+  assert.deepEqual(store.activityRows(0), []);
+  store.noteActivity('macro-pad', 'push', 'e1', 5);
+  assert.equal(store.activityRows(0).length, 1);
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  check.close();
 });

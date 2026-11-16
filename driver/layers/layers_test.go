@@ -150,7 +150,7 @@ func TestDocValidation(t *testing.T) {
 	children := func(n int) string {
 		var cs []string
 		for i := 0; i < n; i++ {
-			cs = append(cs, key(string(rune('a'+i))))
+			cs = append(cs, key(fmt.Sprintf("k%d", i)))
 		}
 		return strings.Join(cs, ",")
 	}
@@ -165,7 +165,10 @@ func TestDocValidation(t *testing.T) {
 		{"null keys", `{"version":1,"active":null,"keys":[null,` + key("a") + `,null]}`, true},
 		{"five children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(5) + `]}]}`, true},
 		{"twenty children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(20) + `]}]}`, true},
-		{"twenty-one children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(21) + `]}]}`, false},
+		{"128 children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(MaxChildren) + `]}]}`, true},
+		{"129 children", `{"version":1,"active":null,"keys":[{"id":"p","children":[` + children(MaxChildren+1) + `]}]}`, false},
+		{"active opens node with no children", `{"version":1,"active":"p","keys":[{"id":"p","opens":true}]}`, true},
+		{"opens on level four", `{"version":1,"active":null,"keys":[{"id":"p","children":[{"id":"c","children":[{"id":"g","children":[{"id":"h","opens":true}]}]}]}]}`, false},
 		{"no page reads as page 0", `{"version":1,"active":"p","keys":[{"id":"p","children":[` + children(6) + `]}]}`, true},
 		{"page the layer has", `{"version":1,"active":"p","page":1,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, true},
 		{"page past the last", `{"version":1,"active":"p","page":2,"keys":[{"id":"p","children":[` + children(6) + `]}]}`, false},

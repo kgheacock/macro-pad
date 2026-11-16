@@ -470,3 +470,23 @@ func TestPressNamesChild(t *testing.T) {
 		t.Errorf("layerChanged page, pages: %v", pages)
 	}
 }
+
+// TestSetLayerKeyOpens is task 0088's DoD-8: opens reaches the controller,
+// and a press on that node opens its empty layer.
+func TestSetLayerKeyOpens(t *testing.T) {
+	s, ctl, dev, _ := layerServer(t)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "repos", IconText: "repos"}})
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "r0", Parent: "repos", IconText: "r0", Opens: true}})
+	waitForCondition(t, time.Second, func() bool {
+		k := ctl.Snapshot().Keys[0]
+		return k != nil && len(k.Children) == 1 && k.Children[0].Opens
+	})
+
+	click(t, dev, 0, 0)
+	click(t, dev, 0, 1_000_000)
+	waitForLayerChanges(t, conn, []string{"", "repos", "r0"})
+}

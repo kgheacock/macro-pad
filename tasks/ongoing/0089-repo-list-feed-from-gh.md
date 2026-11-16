@@ -123,28 +123,28 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — A file at schema 5 opens, gains the `repos` table, and keeps its
+- [x] **DoD-1** — A file at schema 5 opens, gains the `repos` table, and keeps its
   messages. **Proof:** `cd inbox && node --test --test-name-pattern TestReposMigration test/store.test.js`
-- [ ] **DoD-2** — `fetchRepos` runs `gh repo list OWNER --limit 1000 --no-archived --json`
+- [x] **DoD-2** — `fetchRepos` runs `gh repo list OWNER --limit 1000 --no-archived --json`
   with the owner from `INBOX_REPOS_OWNER`, and `kgheacock` when it is unset.
   **Proof:** `cd inbox && node --test --test-name-pattern TestFetchReposArgv test/repolist.test.js`
-- [ ] **DoD-3** — An owner such as `-x` or `a b` throws before any process starts.
+- [x] **DoD-3** — An owner such as `-x` or `a b` throws before any process starts.
   **Proof:** `cd inbox && node --test --test-name-pattern TestReposOwnerRejected test/repolist.test.js`
-- [ ] **DoD-4** — `parseRepos` gives the open issue count and open PR count of each
+- [x] **DoD-4** — `parseRepos` gives the open issue count and open PR count of each
   repository, and `cut: true` for a 1000-row answer.
   **Proof:** `cd inbox && node --test --test-name-pattern TestParseRepos test/repolist.test.js`
-- [ ] **DoD-5** — A sync with a repository gone deletes its row. A `cut` sync
+- [x] **DoD-5** — A sync with a repository gone deletes its row. A `cut` sync
   deletes nothing. **Proof:** `cd inbox && node --test --test-name-pattern TestReplaceRepos test/store.test.js`
-- [ ] **DoD-6** — When `gh` exits 1, `runFeed` logs one line and the stored rows
+- [x] **DoD-6** — When `gh` exits 1, `runFeed` logs one line and the stored rows
   stay. A second equal failure logs nothing. **Proof:**
   `cd inbox && node --test --test-name-pattern TestReposFeedOffline test/daemon.test.js`
-- [ ] **DoD-7** — A daemon that starts with `gh` failing and a filled table draws
+- [x] **DoD-7** — A daemon that starts with `gh` failing and a filled table draws
   from `cold`. **Proof:** `cd inbox && node --test --test-name-pattern TestReposColdStart test/daemon.test.js`
-- [ ] **DoD-8** — The live call returns more rows than gh's default of 30.
+- [x] **DoD-8** — The live call returns more rows than gh's default of 30.
   **Proof:** `gh repo list kgheacock --limit 1000 --no-archived --json name | jq length` prints 30 or more
-- [ ] **DoD-9** — `install.sh --dry-run --repos-owner acme` prints `INBOX_REPOS_OWNER=acme`.
+- [x] **DoD-9** — `install.sh --dry-run --repos-owner acme` prints `INBOX_REPOS_OWNER=acme`.
   **Proof:** run it and read the "would write" line
-- [ ] **DoD-10** — `inbox/README.md` lists `INBOX_REPOS_OWNER`, `INBOX_REPOS_ARCHIVED`,
+- [x] **DoD-10** — `inbox/README.md` lists `INBOX_REPOS_OWNER`, `INBOX_REPOS_ARCHIVED`,
   and the 60 s feed. **Proof:** `inbox/README.md`, sections "Environment" and "Repositories"
 - [ ] **DoD-11** — The PR body links to this spec. **Proof:** the PR in the `pr` field
 

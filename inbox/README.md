@@ -221,8 +221,10 @@ CREATE TABLE channel_here (  -- added in schema 3, keyed by plugin in schema 4
 );
 ```
 
-`PRAGMA user_version` is the schema version (now 4; version 2 added `status`,
-version 3 added `here` and `channel_here`, version 4 added `plugin`). An older
+`PRAGMA user_version` is the schema version (now 6; version 2 added `status`,
+version 3 added `here` and `channel_here`, version 4 added `plugin`, version 5
+added `messages.session` and `branch_sessions`, version 6 added `repos`, see
+"Repositories"). An older
 file is migrated in one transaction; its rows belong to `basic`. A newer file
 is refused and left unchanged.
 
@@ -256,6 +258,8 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_GH` | The `gh` program the `github` plugin runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
 | `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. `install.sh --github-query Q` sets it in the wrapper. | `is:pr is:open author:@me archived:false` |
 | `INBOX_GITHUB_WATCHED` | `0` leaves the PRs you watch out of the `github` plugin. | unset (watched PRs show) |
+| `INBOX_REPOS_OWNER` | The GitHub user or organisation whose repositories the repos feed lists (see "Repositories"). `install.sh --repos-owner OWNER` sets it in the wrapper. | `kgheacock` |
+| `INBOX_REPOS_ARCHIVED` | `1` keeps archived repositories in the repos feed. | unset (archived ones stay out) |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
 | `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
 | `INBOX_APPS_RUN` | Run commands that win over detection, `NAME=CMD;NAME=CMD`. `install.sh --apps-run NAME=CMD`. | unset |
@@ -608,6 +612,33 @@ adds the PRs you are assigned to, mentioned in, or commented on. Running
 inbox --plugin github list --all-channels
 INBOX_GITHUB_QUERY='is:pr is:open review-requested:@me' inbox daemon --plugin github
 ```
+
+### Repositories
+
+The repos feed (task 0089) lists every repository of one owner, with its open
+issue count (pull requests not counted) and its open PR count. It is the
+data for the `repos` plugin (task 0087); no key draws it yet. The daemon asks
+GitHub once a minute with one call,
+`gh repo list OWNER --limit 1000 --no-archived --json ...`, and `gh` pages
+by itself, so an owner with more than 100 repositories is complete. The owner
+is `$INBOX_REPOS_OWNER` (default `kgheacock`; `install.sh --repos-owner OWNER`
+writes it into the wrapper). A name that GitHub does not allow, such as `-x`,
+is refused before `gh` runs. Archived repositories stay out unless
+`INBOX_REPOS_ARCHIVED=1`; forks stay in.
+
+The store keeps the answer in the `repos` table (schema 6), one row per
+`(owner, name)`: `key` (the name in lower case, a dot becoming `-`), `url`,
+`is_fork`, `is_archived`, `pushed_at`, `issues`, `prs`, `synced_at`. Every
+plugin reads the same table, through `listRepos(owner)` and
+`replaceRepos(owner, repos, { complete })` in `src/store.js`. A repository
+that leaves the answer loses its row. An answer of 1000 rows may be cut, so it
+adds and updates rows but deletes none.
+
+- **A failure** (no `gh`, not logged in, no network) keeps the stored rows and
+  logs one line, `inbox: cannot read GitHub repositories: WHY`, until a read
+  succeeds.
+- **A start without a network** draws the stored rows: the daemon calls the
+  feed's `cold` hook once when the first read fails.
 
 ### The apps plugin
 

@@ -1,14 +1,14 @@
 ---
 id: "0087"
 title: "A repos inbox plugin: one key per repo replaces the ai and github plugins"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0087-repos-plugin-replaces-ai-and-github"
 related: ["0071", "0072", "0075", "0076", "0081", "0085", "0086", "0088", "0089", "0090", "0092", "0095"]
 tags: ["inbox", "plugin", "repos", "migration"]
 ---

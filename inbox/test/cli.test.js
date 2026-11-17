@@ -1148,3 +1148,28 @@ test('TestHookNotesActivityOnPrompt', (t) => {
   assert.equal(r.status, 0);
   assert.equal(store.activityRows(0).length, 1);
 });
+
+test('TestHookNotesActivityInAWorktree', (t) => {
+  // Task 0090: a session in a linked worktree counts for the main checkout's
+  // repository, not for the worktree folder's name.
+  const sc = scratch(t);
+  const repo = path.join(sc.root, 'macro-pad');
+  mkdirSync(repo, { recursive: true });
+  const git = (...args) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]);
+  if (git('init', '-q', '-b', 'main').status !== 0) return t.skip('no git');
+  git('commit', '-q', '--allow-empty', '-m', 'one');
+  const tree = path.join(repo, '.claude', 'worktrees', 'fix-login');
+  if (git('worktree', 'add', '-q', '-b', 'fix-login', tree).status !== 0) return t.skip('no git worktree');
+  if (spawnSync('git', ['-C', tree, 'rev-parse', '--path-format=absolute', '--git-common-dir']).status !== 0) return t.skip('git before 2.31');
+  const hook = fileURLToPath(new URL('../claude-code/claude-ai-inbox.sh', import.meta.url));
+  const r = spawnSync('bash', [hook, 'prompt'], {
+    input: JSON.stringify({ session_id: '3f2a91c0-1111-2222-3333-444455556666', cwd: tree }),
+    env: envFor(sc, { INBOX_BIN: BIN, CLAUDE_AI_INBOX_CACHE: path.join(sc.dir, 'cache') }),
+    encoding: 'utf8',
+  });
+  if (r.error) return t.skip('no bash');
+  assert.equal(r.status, 0);
+  const store = openStore(sc.db);
+  t.after(() => store.close());
+  assert.deepEqual(store.activityRows(0).map((x) => [x.repo, x.kind]), [['macro-pad', 'claude']]);
+});

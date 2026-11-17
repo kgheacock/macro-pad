@@ -35,7 +35,9 @@ A `UserPromptSubmit` (`prompt`) also runs
 `inbox activity note --repo NAME --kind claude --ref SID`, which notes one
 `claude` event for the repository in the activity ledger (task 0090; see
 "Activity" in `../README.md`). `NAME` is the basename of
-`git rev-parse --show-toplevel` in the session's folder, and `SID` is the 8
+`git rev-parse --show-toplevel` in the session's folder (in a linked
+worktree, of the main checkout, so `.claude/worktrees/NAME` counts for its
+repository), and `SID` is the 8
 first characters of the session id, so a session is one row whose time moves on
 with each prompt. It counts weight 2 and halves every 3 days; the ledger
 orders the repository keys of the repos plugin. A folder that is not a git

@@ -1,13 +1,13 @@
 ---
 id: "0092"
 title: "A repo key shows the repo emoji, a red issue count, a green PR count and a yellow count"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/122"
 branch: "0092-repo-key-emoji-and-counts"
 related: ["0062", "0073", "0081", "0082", "0087", "0088", "0089", "0090", "0091", "0093"]
 tags: ["inbox", "repos", "emoji", "badges"]
@@ -133,7 +133,7 @@ moves to `complete/` only when every box is ticked.
 - [x] **DoD-9** — The whole inbox suite passes. **Proof:** `cd inbox && node --test`
 - [x] **DoD-10** — `inbox/README.md` records the caption, the three colours, the 0 rule and the 99+ cap.
   **Proof:** `grep -n "Repo keys" inbox/README.md`
-- [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

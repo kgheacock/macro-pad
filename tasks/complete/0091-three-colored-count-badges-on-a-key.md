@@ -1,9 +1,9 @@
 ---
 id: "0091"
 title: "Show a red, a green, and a yellow count on one key, stamped by the board"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
-updated: "2026-11-16"
+updated: "2026-11-17"
 owner: "kgheacock"
 issue: null
 issue_url: null
@@ -109,8 +109,8 @@ ticked.
   - 2026-11-17, `make blink-trace SCENARIO=badges`, three runs: `six keys in` 167.9, 168.0 and 168.8 ms (limit 230); `push span` 34 ms.
 - [x] **DoD-9** — At least 2 MB of heap stay free with the sheet loaded. **Proof:** the figure in `firmware/README.md` from `make slot-probe`.
   - 2026-11-17, `make slot-probe`: 5,935,088 bytes free after the pool (limit 2,097,152). The probe leaves out the sheet (76,800 bytes), so at least 5.8 MB stay free with it. The figure is in `firmware/README.md`.
-- [ ] **DoD-10** — The owner sees three discs with legible digits on a white tile and on a key of each status color. **Proof:** `cd driver && go run ./cmd/blinksend --scenario=badges`, then the owner's note in this spec.
-  - Not confirmed: it needs the board. The owner runs `cd driver && go run ./cmd/blinksend --vendor-id=... --product-id=... --scenario=badges --trace-file=/dev/null` and notes the result here. The scenario shows five status colors and a white tile, three discs each.
+- [x] **DoD-10** — The owner sees three discs with legible digits on a white tile and on a key of each status color. **Proof:** `cd driver && go run ./cmd/blinksend --scenario=badges`, then the owner's note in this spec.
+  - 2026-11-17, `blinksend --scenario=badges` on the board: the owner saw three legible discs with digits on the white tile and on each status color ("LGTM").
 - [x] **DoD-11** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `.venv/bin/pytest test/ -q`, `cd inbox && node --test`, and the PR body.
 
 ## Risks
@@ -122,7 +122,7 @@ ticked.
 
 ## Open questions
 
-- [ ] Are 34 px and 13 px digits legible on the panel? — The owner, in DoD-10.
+- [x] Are 34 px and 13 px digits legible on the panel? — Yes. The owner checked on 2026-11-17, in DoD-10.
 
 ## Notes
 

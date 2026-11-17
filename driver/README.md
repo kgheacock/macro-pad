@@ -255,6 +255,26 @@ the poller used is not read any more; delete it.
   it; a top-level key keeps task 0073's look: the emoji side by side on the
   white round, 48 px each (64 px for one), the caption above them at up to
   20 px and 84 px wide, and the key color around the round.
+- `iconLines` is one or two lines of identifier on a key in a child layer, such
+  as `["PROJ-123", "#42"]` (task 0094). It excludes `iconText` and `iconRef`,
+  and `iconEmoji` may go with it, with 0, 1, or 2 refs. Each line has 1 to 16
+  runes, is valid UTF-8, and has no control character, a line break included.
+  A message with three lines, an empty line, a line of 17 runes, `iconText` or
+  `iconRef` as well, or a top-level key with `iconLines` is dropped and changes
+  nothing; `iconText` over `iconEmoji` is still one line. The tile is opaque
+  white with the key color as the 22 px strip at y 106 to 127, whether or not
+  there is an emoji, so the status color always shows. Both lines are black Go
+  Bold and share one size, the largest that fits 120 px. With no emoji that is
+  28, 24, 22, 20, 18, 16, or 14 px, centred in y 2 to 104 (`PROJ-123` over `#42`
+  is 24 px). With emoji the lines take 22, 20, 18, 16, or 14 px in y 2 to 56,
+  and the pictures y 57 to 105: one emoji is a 46 px hero centred at (64, 82);
+  two are a 44 px hero at (76, 82) and a 28 px sticker with a 3 px white outline
+  at (28, 90). A line still too wide at 14 px ends in `…`, and a rune that Go
+  Bold lacks draws as `?`. The count badges start at y 89, so they cover the
+  lower part of the pictures and no letter. Two keys with the same lines, emoji,
+  and color share one frame on the board, and a count stores no frame.
+  `layers.json` stays at version 1: a file from before task 0094 has no
+  `iconLines`. Task 0096 chooses which identifier goes on which line.
 - An emoji ref, in `iconEmoji` or as an `iconRef` such as `emoji/1f98a.png`,
   draws from Apple Color Emoji on a Mac (task 0074). `macropadd` reads the
   font's largest PNG strike at run time and fits it to the round; nothing is
@@ -339,7 +359,7 @@ in order while a redraw runs, up to 16.
 A layer change sends only the keys whose image or color changed. With task
 0058's compressed glyphs, a change with six icons takes about 0.8 s.
 
-A key with no status, icon, count, `iconRef`, `iconText`, or children is a reserved slot.
+A key with no status, icon, count, `iconRef`, `iconText`, `iconLines`, or children is a reserved slot.
 The daemon does not draw it, and clears it only if it drew it before.
 
 ### Saving
@@ -517,6 +537,7 @@ Every message on the connection is JSON, shaped by
   {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "opens": true}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "count": 3, "countGreen": 2, "countYellow": 1}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "PROJ-123", "parent": "repo.macro-pad", "status": "RUNNING", "iconLines": ["PROJ-123", "#42"], "iconEmoji": ["emoji/1f98a.png"]}}
   ```
 
 - **`removeLayerKey`** — client to server. Removes one key or child from the

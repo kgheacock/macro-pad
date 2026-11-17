@@ -170,6 +170,9 @@ type SetLayerKeyPayload struct {
 	IconText string `json:"iconText,omitempty"`
 	// IconEmoji is one or two refs under assets/emoji/ (task 0073).
 	IconEmoji []string `json:"iconEmoji,omitempty"`
+	// IconLines is one or two lines of identifier, at most 16 runes each, on
+	// a key in a child layer, with or without IconEmoji (task 0094).
+	IconLines []string `json:"iconLines,omitempty"`
 	// Opens makes a press open this node's layer while it has no children,
 	// and the plugin fills it after the press (task 0088).
 	Opens bool `json:"opens,omitempty"`

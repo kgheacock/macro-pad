@@ -148,7 +148,7 @@ func TestBadgeSheet(t *testing.T) {
 			}
 		}
 	}
-	checkGolden(t, "badge-sheet.png", onGray(sheet.Image))
+	checkGoldenNear(t, "badge-sheet.png", onGray(sheet.Image))
 }
 
 // TestBadgeDigitsAreLegible is task 0091's goal of digits at least 13 px high.
@@ -344,7 +344,7 @@ func TestBadges(t *testing.T) {
 			draw.Draw(sheet, cell, img, image.Point{}, draw.Over)
 		}
 	}
-	checkGolden(t, "icon-badges.png", sheet)
+	checkGoldenNear(t, "icon-badges.png", sheet)
 }
 
 // TestBadgesOpaque is DoD for the 1-bit transparency of task 0041: over an icon

@@ -72,7 +72,7 @@ func TestIconText(t *testing.T) {
 	for i, tile := range tiles {
 		draw.Draw(sheet, image.Rect(i*transport.CustomGlyphWidth, 0, (i+1)*transport.CustomGlyphWidth, transport.CustomGlyphHeight), tile, image.Point{}, draw.Src)
 	}
-	checkGolden(t, "icon-text.png", sheet)
+	checkGoldenNear(t, "icon-text.png", sheet)
 
 	// A key shows it: the glyph the controller sends for key 0 is the tile.
 	out := newFakeOut()

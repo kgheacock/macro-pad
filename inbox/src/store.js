@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -89,6 +89,20 @@ const MIGRATIONS = [
      checked_at INTEGER NOT NULL,
      tried_at   INTEGER NOT NULL,
      error      TEXT
+   );`,
+  // Task 0095: the open PRs per repository, shared by every plugin. repo is
+  // a repoKey; head_repo and branch name the PR's head, for the link to a
+  // Claude session (task 0081); ci is failing, pending, passing, or none.
+  `CREATE TABLE repo_pulls (
+     repo      TEXT    NOT NULL,
+     number    INTEGER NOT NULL,
+     title     TEXT    NOT NULL,
+     url       TEXT    NOT NULL,
+     ci        TEXT    NOT NULL,
+     head_repo TEXT,
+     branch    TEXT,
+     synced_at INTEGER NOT NULL,
+     PRIMARY KEY (repo, number)
    );`,
 ];
 
@@ -382,6 +396,17 @@ export class Store {
     );
   }
 
+  // The branches on which the Claude session `session` ran in the
+  // repository `repo` (the key of task 0081), newest first (task 0095).
+  sessionBranches(repo, session) {
+    return this.#guard(() =>
+      this.#db
+        .prepare('SELECT branch FROM branch_sessions WHERE repo = ? AND session = ? ORDER BY at DESC, branch')
+        .all(repo, session)
+        .map((row) => row.branch),
+    );
+  }
+
   // The repositories of `owner` by name, as parseRepos gives them (task 0089).
   listRepos(owner) {
     return this.#guard(() =>
@@ -434,6 +459,77 @@ export class Store {
           for (const name of have.keys()) {
             if (seen.has(name)) continue;
             drop.run(owner, name);
+            changed++;
+          }
+        }
+        return changed;
+      }),
+    );
+  }
+
+  // The open PRs of one repository, `key` a repoKey, newest number first, as
+  // [{ repo, number, title, url, ci, headRepo, branch }]. Without a key, the
+  // PRs of every repository (task 0095).
+  listPulls(key = null) {
+    return this.#guard(() => {
+      const select = 'SELECT repo, number, title, url, ci, head_repo, branch FROM repo_pulls';
+      const rows =
+        key === null
+          ? this.#db.prepare(`${select} ORDER BY repo, number DESC`).all()
+          : this.#db.prepare(`${select} WHERE repo = ? ORDER BY number DESC`).all(key);
+      return rows.map((row) => ({
+        repo: row.repo,
+        number: row.number,
+        title: row.title,
+        url: row.url,
+        ci: row.ci,
+        headRepo: row.head_repo,
+        branch: row.branch,
+      }));
+    });
+  }
+
+  // How many open PRs each repository key has: { key: n }.
+  pullCounts() {
+    return this.#guard(() =>
+      Object.fromEntries(
+        this.#db.prepare('SELECT repo, COUNT(*) AS n FROM repo_pulls GROUP BY repo').all().map((r) => [r.repo, r.n]),
+      ),
+    );
+  }
+
+  // Makes the open PRs those of `pulls` ([{ repo, number, title, url, ci,
+  // headRepo, branch }]), in one transaction: it adds and updates rows, and
+  // deletes the rows that `pulls` lacks only when `complete` is true (a cut
+  // answer says nothing about the rest). Returns how many rows it added,
+  // changed, or deleted (task 0095).
+  replacePulls(pulls, { complete = true, now = Date.now() } = {}) {
+    return this.#guard(() =>
+      this.#inTransaction(() => {
+        const id = (row) => `${row.repo}#${row.number}`;
+        const have = new Map(this.listPulls().map((row) => [id(row), row]));
+        const put = this.#db.prepare(
+          `INSERT INTO repo_pulls (repo, number, title, url, ci, head_repo, branch, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (repo, number) DO UPDATE SET title = excluded.title, url = excluded.url,
+             ci = excluded.ci, head_repo = excluded.head_repo, branch = excluded.branch,
+             synced_at = excluded.synced_at`,
+        );
+        const same = (a, b) => Object.keys(a).every((field) => a[field] === b[field]);
+        let changed = 0;
+        const seen = new Set();
+        for (const pr of pulls) {
+          seen.add(id(pr));
+          const old = have.get(id(pr));
+          if (old && same(old, pr)) continue;
+          put.run(pr.repo, pr.number, pr.title, pr.url, pr.ci, pr.headRepo ?? null, pr.branch ?? null, now);
+          changed++;
+        }
+        if (complete) {
+          const drop = this.#db.prepare('DELETE FROM repo_pulls WHERE repo = ? AND number = ?');
+          for (const row of have.values()) {
+            if (seen.has(id(row))) continue;
+            drop.run(row.repo, row.number);
             changed++;
           }
         }

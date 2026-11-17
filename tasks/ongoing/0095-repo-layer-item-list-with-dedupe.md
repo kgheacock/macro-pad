@@ -1,14 +1,14 @@
 ---
 id: "0095"
 title: "A press on a repo key opens its items: yellow items, open PRs, and Claude sessions, with no duplicates"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0095-repo-layer-item-list-with-dedupe"
 related: ["0068", "0076", "0078", "0081", "0085", "0086", "0087", "0088", "0089", "0092", "0093", "0096"]
 tags: ["inbox", "repos", "layers", "claude-code", "github"]
 ---

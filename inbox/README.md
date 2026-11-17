@@ -222,10 +222,12 @@ CREATE TABLE channel_here (  -- added in schema 3, keyed by plugin in schema 4
 );
 ```
 
-`PRAGMA user_version` is the schema version (now 7; version 2 added `status`,
+`PRAGMA user_version` is the schema version (now 10; version 2 added `status`,
 version 3 added `here` and `channel_here`, version 4 added `plugin`, version 5
 added `messages.session` and `branch_sessions`, version 6 added `repos`, see
-"Repositories", version 7 added `activity`, see "Activity"). An older
+"Repositories", version 7 added `activity`, see "Activity", version 8 moved
+the `ai` rows to `repos`, version 9 added `yellow_answers`, see "Yellow
+criteria", version 10 added `repo_pulls`, see "Repo layer"). An older
 file is migrated in one transaction; its rows belong to `basic`. A newer file
 is refused and left unchanged.
 
@@ -488,8 +490,7 @@ One top key, `repos`, with one child per repository of the repos feed (see
 child has the id `repo.KEY` (`KEY` is the repository key: the name in lower
 case, a dot becoming `-`, so `keithheacock.com` is `repo.keithheacock-com`),
 the repository's name as its caption, and the emoji of `repo:KEY`. A press
-opens the key's layer (`opens`), which has no keys yet (task 0095 fills it).
-Every repository of the feed shows, also one with no activity, up to
+on a key that has items opens its layer (see "Repo layer"). Every repository of the feed shows, also one with no activity, up to
 macropadd's 128 children; a longer feed is cut, and the daemon logs one line.
 
 Claude Code sessions report to this plugin through the hooks (see "Claude
@@ -708,6 +709,66 @@ The store keeps the answer in `yellow_answers(repo, items, checked_at, tried_at,
 error)` (schema 9), one row per repository name; `items` is the JSON list.
 `yellowCounts(now)` gives `{ repo: count }` and `yellowItems(repo, now)` the
 list, both ignoring an answer older than 24 hours.
+
+### Repo layer
+
+A press on a repository key (task 0095) opens the layer `repos` / `repo.KEY`.
+It holds one key for each piece of work in that repository: the yellow items of
+the criteria provider (see "Yellow criteria"), the open PRs, and the active
+Claude sessions. One piece of work is one key, because a ticket, the PR whose
+title names it, and the session on the PR's branch are one thing.
+
+**The merge.**
+
+1. Each yellow item is an item, with the id `y:ID`.
+2. Each open PR whose title holds a yellow id joins the first yellow item that has no PR yet.
+   The id must stand between characters that are not letters or digits, in any
+   letter case: `PROJ-123` is in `proj-123: fix login` and `fix (PROJ-123)`,
+   and not in `PROJ-1234` or `XPROJ-123`. A second PR for the same id, and a PR
+   that names no yellow id, is its own item, `pr:N`. The joined item takes the
+   PR's url and checks.
+3. A Claude session joins the item whose PR is on the session's branch
+   (`branch_sessions`, task 0081), or else the first yellow item whose id is in one of
+   the session's branches (for example `keith/PROJ-12-login`). One item holds one session;
+   any other session is its own item, `s:SID`.
+
+An item has `{ id, yellow, green, session, title, url }` and also `ci`
+(`failing`, `pending`, `passing`, `none`, or null) and `agent` (`waiting`,
+`running`, `done`, or null) for the drawing of task 0096. Until then, the key
+shows the yellow id, `#N`, or the session id, and one color: red for failing checks,
+yellow for a waiting agent, blue for pending checks or a running agent, green for the rest.
+
+**Active session.** A session is in a repository when its folder channel holds
+`.OWNER.NAME` with a segment edge on both sides, so `github.com.me.app.driver`
+is in `app` and `github.com.me.app-x` is not. It is active when its newest
+message is younger than one hour, and it has an unseen message (`end`
+marks the rows seen, so a closed session has none). A press never marks a session
+seen.
+
+**Order and size.** Yellow items first, then PRs, then sessions. Inside a group:
+failing checks, a waiting agent, pending checks, a running agent, the rest, then
+by id. At most 20 items show; macropadd pages them (task 0078).
+
+**When items exist.** A repository key has `opens` only when it has at least
+one item, so a press on a repository with nothing does nothing. No item node
+exists while the layer is shut. When the layer opens, the daemon sends the items,
+so the layer shows only its up key for one round trip. While it is open, no item
+moves or goes: a changed item updates in place, and a new one goes last (at most
+20 in all). A PR that joins a yellow item after its own key was drawn can show
+twice until you leave. When the layer closes, the items go. Item nodes exist
+for one repository at a time.
+
+**A press on an item** opens, once, the PR (`url:`), else the yellow item
+(`url:`), else the tab of the session (`iterm2:`). A target that is not a
+valid "here" is logged and nothing runs.
+
+**The PR feed.** Every 60 s the daemon asks `gh api graphql` for
+`is:pr is:open user:OWNER archived:false` (`INBOX_REPOS_OWNER`), the first 50
+PRs. It stores them in `repo_pulls(repo, number, title, url, ci, head_repo,
+branch, synced_at)` (schema 10, `repo` is a repository key). A search of more
+than 50 PRs is cut: the feed logs it once, keeps the rows it has, and deletes
+none. `listPulls(key)` gives the PRs of one repository, newest number first.
+The feed runs apart from the other two, so one that fails does not stop them.
 
 ### The apps plugin
 

@@ -109,8 +109,8 @@ export function acquirePidFile(
 // without a network still shows the rows of the store. cold counts for the
 // first feed only.
 //
-// A plugin may draw its own keys (task 0085): createRenderer({ slot, env, log })
-// returns a renderer like render.js's, with owns(parent), which says whether
+// A plugin may draw its own keys (task 0085): createRenderer({ slot, env, log,
+// store }) returns a renderer like render.js's, with owns(parent), which says whether
 // a key is one of its own. Its press({ parent, child, store, file, env, fed,
 // focus, changed, log }) -> Promise acts on a press on a child of such a key;
 // the daemon draws again when it settles, and when it calls changed().
@@ -132,7 +132,7 @@ export function startDaemon({
 }) {
   const db = store ?? openStore(file, env, { plugin: plugin.name });
   const renderer = plugin.createRenderer
-    ? plugin.createRenderer({ slot, env, log })
+    ? plugin.createRenderer({ slot, env, log, store: db })
     : createRenderer({ slot, rules: plugin.rules });
   const topId = renderer.topId;
   const url = `ws://127.0.0.1:${port}/`;

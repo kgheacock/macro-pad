@@ -7,7 +7,7 @@ updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/119"
 branch: "0095-repo-layer-item-list-with-dedupe"
 related: ["0068", "0076", "0078", "0081", "0085", "0086", "0087", "0088", "0089", "0092", "0093", "0096"]
 tags: ["inbox", "repos", "layers", "claude-code", "github"]
@@ -111,7 +111,7 @@ An outside reviewer verifies each item without help from the implementer. Each i
 - [x] **DoD-9** — Over a test WebSocket, `layerChanged` with the repo path draws the items, and `childPressed` reaches `press`. **Proof:** `node --test --test-name-pattern=TestDaemonRepoLayer test/repos-items.test.js`
 - [ ] **DoD-10** — On the board, a press on a repo opens its items, a sixth item adds a page, and a press on a PR key opens it. **Proof:** Keith's check, in Notes
   - Not ticked: needs the board. @keith: press a repo key, add a sixth item, press a PR key.
-- [ ] **DoD-11** — `inbox/README.md` "Repo layer" lists the rules, and the PR body links to this spec. **Proof:** `inbox/README.md`; the PR in the `pr` field
+- [x] **DoD-11** — `inbox/README.md` "Repo layer" lists the rules, and the PR body links to this spec. **Proof:** `inbox/README.md`; the PR in the `pr` field
 
 ## Risks
 

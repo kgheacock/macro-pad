@@ -258,6 +258,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_DEBUG` | `1` adds a stack to an internal error. | unset |
 | `INBOX_GH` | The `gh` program the repos feed runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
 | `INBOX_REPOS_OWNER` | The GitHub user or organisation whose repositories the repos feed lists (see "Repositories"). `install.sh --repos-owner OWNER` sets it in the wrapper. | `kgheacock` |
+| `INBOX_REPOS_YELLOW_CMD` | The program that gives the yellow items of a repository (see "Yellow criteria"). `install.sh --yellow-cmd PATH` sets it in the wrapper. Also `INBOX_REPOS_YELLOW_EVERY` (seconds, default 300) and `INBOX_REPOS_YELLOW_TIMEOUT` (seconds, default 20). | unset |
 | `INBOX_REPOS_ARCHIVED` | `1` keeps archived repositories in the repos feed. | unset (archived ones stay out) |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
 | `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
@@ -384,8 +385,8 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q]
-                         [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
+inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--repos-owner OWNER]
+                         [--yellow-cmd PATH] [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
                          [--no-completions] [--dry-run]
 inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
@@ -647,6 +648,66 @@ ledger keeps the kind, so a change needs no migration.
 is open, `nextShown` keeps the keys where they are and puts a new name at the
 end, so no key moves under your finger; when it is closed, the keys follow the
 order. The order moves within one feed run (60 s) of a write.
+
+### Yellow criteria
+
+The yellow items of a repository (task 0093) come from a program that you
+write, because only you know your criteria: for example the open JIRA tickets of
+the repository. The count on the repository key (task 0092) and the items under it
+(task 0095) read what this feed stores. Green stays "open PRs".
+
+**The contract.** Point `INBOX_REPOS_YELLOW_CMD` at an executable file (`install.sh
+--yellow-cmd PATH` writes the path into the wrapper). The repos feed runs it
+once per repository, without a shell, with the repository name (as GitHub
+spells it) as `argv[1]` and as `$INBOX_REPO`. It must print a JSON array on
+standard output and exit 0:
+
+```
+[{ "id": "PROJ-12", "title": "Fix the login", "url": "https://example.test/browse/PROJ-12" }]
+```
+
+The yellow count of the repository is the length of the list. The feed drops an
+item whose `id` is not `[A-Za-z0-9][A-Za-z0-9._-]{0,39}` or whose `url` is not
+`https://`, drops a repeated `id`, keeps the first 200 items, and cuts a title
+to 200 characters. Output that is not a JSON array, an exit other than 0, or
+more than 1 MiB of output fails the run. Without `INBOX_REPOS_YELLOW_CMD` the
+feed does nothing and logs nothing, and every count is 0.
+
+**Settings.**
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `INBOX_REPOS_YELLOW_CMD` | The program to run. | unset (no yellow items) |
+| `INBOX_REPOS_YELLOW_EVERY` | Seconds between two runs for one repository; at least 30. | `300` |
+| `INBOX_REPOS_YELLOW_TIMEOUT` | Seconds before a run is killed. | `20` |
+
+**Failure.** A slow or broken program never blanks a count: a failed run (exit
+1, a timeout, bad JSON) keeps the stored items, stores the error, and the
+repository waits one interval. The log gets one line per distinct error, for
+example `inbox: cannot read the yellow items of macro-pad: ... did not answer
+within 20 s`, not one per run. An answer older than 24 hours counts 0 and lists
+nothing. The feed runs apart from the GitHub feed, so a failure of one does not
+stop the other. Four runs go at once, and the daemon never waits for the program
+longer than its timeout. A script that starts other programs should `exec` the
+last one, so the kill reaches it.
+
+**Cost.** The program starts once per repository per interval: 100 repositories
+at 300 s make one start every 3 s. A script that must make fewer JIRA calls caches
+them in a file of its own.
+
+**Where credentials live.** Not in the repository, not in the wrapper (it has
+mode 755), and not in the store. The program reads its own from the macOS
+Keychain (`security find-generic-password -s NAME -w`), or from a file of mode
+600. `install.sh` has no option for a credential. The store keeps the first line
+of the standard error of a failed run, cut to 120 characters, and the log
+shows it: a program must not print a credential to standard error.
+`examples/yellow-jira.sh` is a complete example for JIRA, with the credential
+in the Keychain; the repository ships no JIRA client.
+
+The store keeps the answer in `yellow_answers(repo, items, checked_at, tried_at,
+error)` (schema 9), one row per repository name; `items` is the JSON list.
+`yellowCounts(now)` gives `{ repo: count }` and `yellowItems(repo, now)` the
+list, both ignoring an answer older than 24 hours.
 
 ### The apps plugin
 

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -81,7 +81,19 @@ const MIGRATIONS = [
    UPDATE OR REPLACE channel_here SET plugin = 'repos' WHERE plugin = 'ai';
    DELETE FROM messages WHERE plugin = 'github';
    DELETE FROM channel_here WHERE plugin = 'github';`,
+  // Task 0093: what the yellow criteria provider answered per repository,
+  // shared by every plugin. items is a JSON array of { id, title, url }.
+  `CREATE TABLE yellow_answers (
+     repo       TEXT    PRIMARY KEY,
+     items      TEXT    NOT NULL,
+     checked_at INTEGER NOT NULL,
+     tried_at   INTEGER NOT NULL,
+     error      TEXT
+   );`,
 ];
+
+// An answer of the yellow provider older than this counts for nothing.
+export const YELLOW_STALE_MS = 24 * 60 * 60 * 1000;
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 
@@ -471,6 +483,71 @@ export class Store {
   // Deletes the ledger rows with `at` before `before` (ms). Returns how many.
   pruneActivity(before) {
     return this.#guard(() => Number(this.#db.prepare('DELETE FROM activity WHERE at < ?').run(before).changes));
+  }
+
+  // Records one run of the yellow criteria provider for `repo` (task 0093).
+  // With `items` ([{ id, title, url }]) it replaces the stored items and
+  // clears the error. With `error` (a string) it keeps the stored items and
+  // sets the error. Both set tried_at. Returns true when the stored items
+  // changed.
+  putYellow(repo, { items = null, error = null, now = Date.now() } = {}) {
+    return this.#guard(() =>
+      this.#inTransaction(() => {
+        const old = this.#db.prepare('SELECT items FROM yellow_answers WHERE repo = ?').get(repo)?.items;
+        if (items === null) {
+          this.#db
+            .prepare(
+              `INSERT INTO yellow_answers (repo, items, checked_at, tried_at, error) VALUES (?, '[]', 0, ?, ?)
+               ON CONFLICT (repo) DO UPDATE SET tried_at = excluded.tried_at, error = excluded.error`,
+            )
+            .run(repo, now, error ?? 'failed');
+          return false;
+        }
+        const json = JSON.stringify(items);
+        this.#db
+          .prepare(
+            `INSERT INTO yellow_answers (repo, items, checked_at, tried_at, error) VALUES (?, ?, ?, ?, NULL)
+             ON CONFLICT (repo) DO UPDATE SET items = excluded.items, checked_at = excluded.checked_at,
+               tried_at = excluded.tried_at, error = NULL`,
+          )
+          .run(repo, json, now, now);
+        return old !== json;
+      }),
+    );
+  }
+
+  // When each repository was last tried, in ms: { repo: tried_at }.
+  yellowTried() {
+    return this.#guard(() =>
+      Object.fromEntries(this.#db.prepare('SELECT repo, tried_at FROM yellow_answers').all().map((r) => [r.repo, r.tried_at])),
+    );
+  }
+
+  // The error of the last run for `repo`, or null (task 0093).
+  yellowError(repo) {
+    return this.#guard(() => this.#db.prepare('SELECT error FROM yellow_answers WHERE repo = ?').get(repo)?.error ?? null);
+  }
+
+  // The yellow count per repository name, { repo: n }, from the answers not
+  // older than 24 h (task 0093). A repository with no fresh answer is absent.
+  yellowCounts(now = Date.now()) {
+    return this.#guard(() => {
+      const out = {};
+      const rows = this.#db.prepare('SELECT repo, items FROM yellow_answers WHERE checked_at > 0 AND checked_at >= ?').all(now - YELLOW_STALE_MS);
+      for (const row of rows) out[row.repo] = JSON.parse(row.items).length;
+      return out;
+    });
+  }
+
+  // The yellow items of one repository, [{ id, title, url }], or [] when its
+  // answer is missing or older than 24 h.
+  yellowItems(repo, now = Date.now()) {
+    return this.#guard(() => {
+      const row = this.#db
+        .prepare('SELECT items FROM yellow_answers WHERE repo = ? AND checked_at > 0 AND checked_at >= ?')
+        .get(repo, now - YELLOW_STALE_MS);
+      return row ? JSON.parse(row.items) : [];
+    });
   }
 
   // The fallback "here" of a channel, or null.

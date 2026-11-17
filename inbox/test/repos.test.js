@@ -30,7 +30,7 @@ test('the repos plugin has the rules of a plugin with a feed', () => {
   assert.equal(repos.defaultStatus, 'done');
   assert.deepEqual(repos.rules, { id: 'repos', activeMs: 3600000 });
   assert.equal(ACTIVE_MS, 3600000);
-  assert.equal(typeof repos.feed.fetch, 'function');
+  assert.equal(typeof repos.feed[0].fetch, 'function');
   // The old name is an alias.
   assert.equal(getPlugin('ai'), repos);
   assert.equal(rank(undefined), 0);

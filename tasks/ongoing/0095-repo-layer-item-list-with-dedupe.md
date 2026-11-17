@@ -100,16 +100,17 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — A PR titled `PROJ-123: fix login` merges into yellow `PROJ-123` in any letter case. `PROJ-1234` and `XPROJ-123` do not. Two PRs for one id give one merged and one green item. **Proof:** `cd inbox && node --test --test-name-pattern=TestMergePrIntoYellow test/repos-items.test.js`
-- [ ] **DoD-2** — A session mapped to a listed PR by `branch_sessions`, or on a branch with a listed yellow id, makes no item. An unmatched session is one `s:SID` item. **Proof:** `node --test --test-name-pattern=TestSessionDedupe test/repos-items.test.js`
-- [ ] **DoD-3** — A session is active only in its repo, within `ACTIVE_MS`, and not ended. **Proof:** `node --test --test-name-pattern=TestActiveSessions test/repos-items.test.js`
-- [ ] **DoD-4** — The order is yellow, green, session, with failing and waiting first. 23 candidates send 20 nodes. **Proof:** `node --test --test-name-pattern=TestItemOrder test/repos-items.test.js`
-- [ ] **DoD-5** — A repo node has `opens` only when it has items. With the layer shut, no item node exists. Opened, the renderer sends the items. On leave, it removes them. **Proof:** `node --test --test-name-pattern=TestRepoLayerLifecycle test/repos-items.test.js`
-- [ ] **DoD-6** — While open, a feed change updates items in place and removes none; a new item appends. Item nodes exist for one repo at a time. **Proof:** `node --test --test-name-pattern=TestRepoLayerStable test/repos-items.test.js`
-- [ ] **DoD-7** — `listPulls` returns the PRs of one repo after a cut answer, and `replacePulls` with `complete` false deletes no row. **Proof:** `node --test --test-name-pattern=TestRepoPulls test/store.test.js`
-- [ ] **DoD-8** — A press calls `focus` once: PR `url:`, else yellow `url:`, else `iterm2:`. A bad target calls nothing. **Proof:** `node --test --test-name-pattern=TestPressItem test/repos-items.test.js`
-- [ ] **DoD-9** — Over a test WebSocket, `layerChanged` with the repo path draws the items, and `childPressed` reaches `press`. **Proof:** `node --test --test-name-pattern=TestDaemonRepoLayer test/repos-items.test.js`
+- [x] **DoD-1** — A PR titled `PROJ-123: fix login` merges into yellow `PROJ-123` in any letter case. `PROJ-1234` and `XPROJ-123` do not. Two PRs for one id give one merged and one green item. **Proof:** `cd inbox && node --test --test-name-pattern=TestMergePrIntoYellow test/repos-items.test.js`
+- [x] **DoD-2** — A session mapped to a listed PR by `branch_sessions`, or on a branch with a listed yellow id, makes no item. An unmatched session is one `s:SID` item. **Proof:** `node --test --test-name-pattern=TestSessionDedupe test/repos-items.test.js`
+- [x] **DoD-3** — A session is active only in its repo, within `ACTIVE_MS`, and not ended. **Proof:** `node --test --test-name-pattern=TestActiveSessions test/repos-items.test.js`
+- [x] **DoD-4** — The order is yellow, green, session, with failing and waiting first. 23 candidates send 20 nodes. **Proof:** `node --test --test-name-pattern=TestItemOrder test/repos-items.test.js`
+- [x] **DoD-5** — A repo node has `opens` only when it has items. With the layer shut, no item node exists. Opened, the renderer sends the items. On leave, it removes them. **Proof:** `node --test --test-name-pattern=TestRepoLayerLifecycle test/repos-items.test.js`
+- [x] **DoD-6** — While open, a feed change updates items in place and removes none; a new item appends. Item nodes exist for one repo at a time. **Proof:** `node --test --test-name-pattern=TestRepoLayerStable test/repos-items.test.js`
+- [x] **DoD-7** — `listPulls` returns the PRs of one repo after a cut answer, and `replacePulls` with `complete` false deletes no row. **Proof:** `node --test --test-name-pattern=TestRepoPulls test/store.test.js`
+- [x] **DoD-8** — A press calls `focus` once: PR `url:`, else yellow `url:`, else `iterm2:`. A bad target calls nothing. **Proof:** `node --test --test-name-pattern=TestPressItem test/repos-items.test.js`
+- [x] **DoD-9** — Over a test WebSocket, `layerChanged` with the repo path draws the items, and `childPressed` reaches `press`. **Proof:** `node --test --test-name-pattern=TestDaemonRepoLayer test/repos-items.test.js`
 - [ ] **DoD-10** — On the board, a press on a repo opens its items, a sixth item adds a page, and a press on a PR key opens it. **Proof:** Keith's check, in Notes
+  - Not ticked: needs the board. @keith: press a repo key, add a sixth item, press a PR key.
 - [ ] **DoD-11** — `inbox/README.md` "Repo layer" lists the rules, and the PR body links to this spec. **Proof:** `inbox/README.md`; the PR in the `pr` field
 
 ## Risks

@@ -55,7 +55,6 @@ test('one repo child per fed repo', () => {
     assert.deepEqual(k[`repo.${key}`], {
       id: `repo.${key}`,
       parent: 'repos',
-      opens: true,
       status: '',
       count: 0,
       iconText: name,

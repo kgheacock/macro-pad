@@ -111,25 +111,27 @@ Files to change:
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task
 moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — `repoNode` gives id `repo.NAME`, parent `repos`, and one `iconEmoji` ref equal to
+- [x] **DoD-1** — `repoNode` gives id `repo.NAME`, parent `repos`, and one `iconEmoji` ref equal to
   `emojiFor('repo:NAME').iconRef`. **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoKeyIcon test/repo-key.test.js`
-- [ ] **DoD-2** — A name of 20 runes gives a caption of 16 runes that ends in "…". A name of 16 runes stays whole.
+- [x] **DoD-2** — A name of 20 runes gives a caption of 16 runes that ends in "…". A name of 16 runes stays whole.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoKeyCaptionClips test/repo-key.test.js`
-- [ ] **DoD-3** — Issues 7, PRs 3 and yellow 2 give red 7, green 3 and yellow 2 in `count`, `countGreen` and `countYellow`.
+- [x] **DoD-3** — Issues 7, PRs 3 and yellow 2 give red 7, green 3 and yellow 2 in `count`, `countGreen` and `countYellow`.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoKeyBadges test/repo-key.test.js`
-- [ ] **DoD-4** — A count of 0 leaves its field out, and three zeros leave all three out.
+- [x] **DoD-4** — A count of 0 leaves its field out, and three zeros leave all three out.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoKeyZeroDrawsNothing test/repo-key.test.js`
-- [ ] **DoD-5** — Counts 99, 100 and 5000 give 99, 100 and 100. A change from 150 to 160 sends no message.
+- [x] **DoD-5** — Counts 99, 100 and 5000 give 99, 100 and 100. A change from 150 to 160 sends no message.
   **Proof:** `cd inbox && node --test --test-name-pattern='TestRepoKeyCapsAt100|TestReposPlanSendsOnlyChange' test/repo-key.test.js`
-- [ ] **DoD-6** — `waiting`, `running`, `done` and none give `WARN`, `RUNNING`, `DONE` and `''`. The worst session wins.
+- [x] **DoD-6** — `waiting`, `running`, `done` and none give `WARN`, `RUNNING`, `DONE` and `''`. The worst session wins.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoKeyStatus test/repo-key.test.js`
-- [ ] **DoD-7** — The top key has `iconRef: 'github.png'`, the totals of the three counts, and the worst status.
+- [x] **DoD-7** — The top key has `iconRef: 'github.png'`, the totals of the three counts, and the worst status.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestRepoTopKey test/repo-key.test.js`
-- [ ] **DoD-8** — With a store that holds three `repos` rows, the renderer plans three keys with the right
+- [x] **DoD-8** — With a store that holds three `repos` rows, the renderer plans three keys with the right
   counts. A change of one `prs` value plans one message. **Proof:**
   `cd inbox && node --test --test-name-pattern=TestRepoKeysFromStore test/repo-key.test.js`
-- [ ] **DoD-9** — The whole inbox suite passes. **Proof:** `cd inbox && node --test`
-- [ ] **DoD-10** — `inbox/README.md` records the caption, the three colours, the 0 rule and the 99+ cap.
+  Note: the change plans that repo key and also the top key, because the top total follows it (two messages, no
+  other key).
+- [x] **DoD-9** — The whole inbox suite passes. **Proof:** `cd inbox && node --test`
+- [x] **DoD-10** — `inbox/README.md` records the caption, the three colours, the 0 rule and the 99+ cap.
   **Proof:** `grep -n "Repo keys" inbox/README.md`
 - [ ] **DoD-11** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
@@ -147,4 +149,8 @@ moves to `complete/` only when every box is ticked.
 ## Notes
 
 - Superseded by this spec: the single red pip of `github.js` `rules.top` and `rules.child`.
+- The top key took the sums (DoD-7). The open question above is still Keith's to settle; a change to "repos with a
+  non-zero count" touches only `topKey` in `inbox/src/repo-key.js`.
+- A repo key sets `iconEmoji` from the repo key (`repo:KEY`, a dot as `-`), as 0087 did, so it equals
+  `repo:NAME` for a name without a dot.
 - Precedent for a plugin's own renderer: `createAppsRenderer` in `inbox/src/plugins/apps.js`.

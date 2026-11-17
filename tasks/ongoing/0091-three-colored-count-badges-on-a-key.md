@@ -7,7 +7,7 @@ updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/120"
 branch: "0091-three-colored-count-badges-on-a-key"
 related: ["0062", "0061", "0063", "0082", "0092"]
 tags: ["driver", "firmware", "wire-protocol", "layers", "rendering", "platform"]
@@ -111,7 +111,7 @@ ticked.
   - Not confirmed: it needs the board. The owner runs `make slot-probe` and adds the free-heap figure to the "The count badges" section of `firmware/README.md`.
 - [ ] **DoD-10** — The owner sees three discs with legible digits on a white tile and on a key of each status color. **Proof:** `cd driver && go run ./cmd/blinksend --scenario=badges`, then the owner's note in this spec.
   - Not confirmed: it needs the board. The owner runs `cd driver && go run ./cmd/blinksend --vendor-id=... --product-id=... --scenario=badges --trace-file=/dev/null` and notes the result here. The scenario shows five status colors and a white tile, three discs each.
-- [ ] **DoD-11** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `.venv/bin/pytest test/ -q`, `cd inbox && node --test`, and the PR body.
+- [x] **DoD-11** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `.venv/bin/pytest test/ -q`, `cd inbox && node --test`, and the PR body.
 
 ## Risks
 

@@ -3,7 +3,7 @@
 // runs it every minute and the store keeps the answer in `repos`.
 
 import { execFile as nodeExecFile } from 'node:child_process';
-import { KEEP_MS, FIRST_RUN_PAGES, fetchEvents, gitEvents, repoKey, scoreRepos } from './activity.js';
+import { KEEP_MS, FIRST_RUN_PAGES, fetchEvents, gitEvents, repoKey, scoreRepos, signedInLogin } from './activity.js';
 import { GH_TIMEOUT_MS, runGh } from './gh.js';
 import { appsRoot } from './plugins/apps.js';
 
@@ -86,6 +86,11 @@ export function syncRepos(store, { owner, repos, cut }) {
 // The kinds that only the events of gh give.
 const GH_KINDS = ['push', 'pr_open', 'pr_review'];
 let lastEventsError = null;
+// The signed-in login, asked once per gh program (task 0090 asks `gh api
+// user` once, not every minute). Keyed by execFile, so a test stub never
+// sees the login of another. A failed events read forgets it, so a new
+// `gh auth login` is picked up.
+const logins = new WeakMap();
 
 // Asks for the repositories (fetchRepos) and for the activity of the
 // signed-in user (task 0090): the events of gh, and the .git/logs/HEAD times
@@ -97,10 +102,16 @@ export async function fetchFeed({ env = process.env, store, execFile, log = () =
   answer.events = [];
   answer.git = [];
   const first = !store || !store.activityRows(0).some((row) => GH_KINDS.includes(row.kind));
+  const run = execFile ?? nodeExecFile;
+  const gh = env.INBOX_GH || 'gh';
+  if (!logins.has(run)) logins.set(run, new Map());
+  const known = logins.get(run);
   try {
-    answer.events = await fetchEvents({ env, owner: answer.owner, pages: first ? FIRST_RUN_PAGES : 1, execFile });
+    if (!known.has(gh)) known.set(gh, await signedInLogin({ env, execFile: run }));
+    answer.events = await fetchEvents({ env, owner: answer.owner, pages: first ? FIRST_RUN_PAGES : 1, login: known.get(gh), execFile: run });
     lastEventsError = null;
   } catch (e) {
+    known.delete(gh);
     if (e.message !== lastEventsError) log(`cannot read GitHub events: ${e.message}`);
     lastEventsError = e.message;
   }

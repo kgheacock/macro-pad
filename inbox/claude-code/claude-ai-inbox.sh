@@ -26,7 +26,8 @@
 # A `prompt` also notes one `claude` event for the repository of the project
 # folder in the activity ledger (task 0090), one row per session, which
 # orders the repository keys. The repository name is the basename of
-# `git rev-parse --show-toplevel`. Other states note nothing.
+# `git rev-parse --show-toplevel`, or of the main checkout in a linked
+# worktree. Other states note nothing.
 #
 # Never blocks Claude Code: every failure is silent and the exit code is 0.
 
@@ -40,6 +41,11 @@ proj="${CLAUDE_PROJECT_DIR:-$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)}"
 # It runs before the channel is known, so a folder outside the source root counts.
 if [ "$state" = prompt ]; then
   toplevel="$(git -C "${proj:-$PWD}" rev-parse --show-toplevel 2>/dev/null)"
+  # In a linked worktree (git worktree add, or a Claude Code worktree under
+  # .claude/worktrees/) the top folder is the worktree's, so name the folder
+  # of the main checkout instead: the parent of the shared .git.
+  common="$(git -C "${proj:-$PWD}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  case $common in */.git) [ -z "$toplevel" ] || toplevel="${common%/.git}" ;; esac
   sid="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
   sid="$(printf '%s' "${sid:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_-')"
   [ -n "$toplevel" ] && "$inbox" activity note --repo "$(basename "$toplevel")" --kind claude ${sid:+--ref "${sid:0:8}"} >/dev/null 2>&1

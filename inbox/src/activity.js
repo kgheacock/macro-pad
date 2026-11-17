@@ -137,15 +137,25 @@ export function parseEvents(text, { owner }) {
 // A login GitHub allows; it goes into a URL path.
 const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$/;
 
-// The push, PR-open and PR-review events of the signed-in user, in the
-// repositories of `owner`. It asks `gh api user` for the login once, then
-// `gh api users/LOGIN/events`: GitHub shows the private events of a user
-// only to that user. `pages` is how many pages of 100 to read (it stops at
-// a short page). execFile is for a test. Rejects when gh does.
-export async function fetchEvents({ env = process.env, owner, pages = 1, execFile = nodeExecFile, timeoutMs = GH_TIMEOUT_MS }) {
+// The login gh is signed in as. Rejects when gh does, or when its answer is
+// not a login.
+export async function signedInLogin({ env = process.env, execFile = nodeExecFile, timeoutMs = GH_TIMEOUT_MS } = {}) {
   const gh = env.INBOX_GH || 'gh';
   const login = (await runGh(gh, ['api', 'user', '--jq', '.login'], { env, execFile, timeoutMs })).trim();
   if (!LOGIN.test(login)) throw new Error(`gh gave no login: "${login.slice(0, 40)}"`);
+  return login;
+}
+
+// The push, PR-open and PR-review events of the signed-in user, in the
+// repositories of `owner`. It asks `gh api user` for the login, unless the
+// caller passes `login` (the repos feed asks once, task 0090), then
+// `gh api users/LOGIN/events`: GitHub shows the private events of a user
+// only to that user. `pages` is how many pages of 100 to read (it stops at
+// a short page). execFile is for a test. Rejects when gh does.
+export async function fetchEvents({ env = process.env, owner, pages = 1, login, execFile = nodeExecFile, timeoutMs = GH_TIMEOUT_MS }) {
+  const gh = env.INBOX_GH || 'gh';
+  if (login === undefined) login = await signedInLogin({ env, execFile, timeoutMs });
+  else if (!LOGIN.test(login)) throw new Error(`no login: "${String(login).slice(0, 40)}"`);
   const events = [];
   for (let page = 1; page <= pages; page++) {
     const url = `users/${login}/events?per_page=${EVENT_PAGE_SIZE}${page > 1 ? `&page=${page}` : ''}`;

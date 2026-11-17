@@ -1,14 +1,14 @@
 ---
 id: "0093"
 title: "A client writes its own yellow criteria as a command that the feed runs per repo"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0093-criteria-provider-for-yellow-items"
 related: ["0064", "0075", "0076", "0087", "0089", "0090", "0091", "0092", "0095"]
 tags: ["inbox", "repos", "provider", "jira", "secrets"]
 ---

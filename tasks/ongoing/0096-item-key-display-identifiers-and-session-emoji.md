@@ -7,7 +7,7 @@ updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/123"
 branch: "0096-item-key-display-identifiers-and-session-emoji"
 related: ["0073", "0081", "0082", "0085", "0092", "0093", "0094", "0095"]
 tags: ["inbox", "repos", "emoji", "layers", "ui"]

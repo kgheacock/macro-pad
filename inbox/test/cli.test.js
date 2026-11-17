@@ -1042,11 +1042,11 @@ test('TestPluginHelp', (t) => {
   const send = runRepos(['send', '-h'], { sc }).stdout;
   assert.ok(send.includes('Usage: inbox send'), send);
   assert.ok(send.includes('waiting | running | done (default: done)'), send);
-  assert.ok(send.includes('counts the sessions that wait'), send);
+  assert.ok(send.includes('badges total the open issues'), send);
 
   const basicTop = run(['-h'], { sc }).stdout;
   for (const word of ['--plugin NAME', 'basic', 'repos ', 'plugins']) assert.ok(basicTop.includes(word), word);
-  assert.ok(!basicTop.includes('counts the sessions that wait'));
+  assert.ok(!basicTop.includes('badges total the open issues'));
   assert.ok(run(['send', '-h'], { sc }).stdout.includes('letters, digits, - and _ (default: info)'));
   assert.ok(runRepos(['bogus'], { sc }).stderr.includes("Run 'inbox -h'"));
   for (const r of [top, runRepos(['send', '-h'], { sc }), runRepos(['bogus'], { sc }), run(['plugins', '-h'], { sc })]) {

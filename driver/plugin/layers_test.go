@@ -582,3 +582,69 @@ func (l *logCollector) count(substr string) int {
 	}
 	return n
 }
+
+// TestSetLayerKeyIconLines is task 0094's DoD-8 for the server: a setLayerKey
+// with iconLines reaches the controller and draws a glyph on the board, and a
+// bad one is logged and dropped.
+func TestSetLayerKeyIconLines(t *testing.T) {
+	s, ctl, dev, logs := layerServer(t)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+	var raw Message
+	msg := `{"kind":"setLayerKey","setLayerKey":{"id":"i1","parent":"repos","status":"RUNNING","iconLines":["PROJ-123","#42"],"iconEmoji":["emoji/1f98a.png"]}}`
+	if err := json.Unmarshal([]byte(msg), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if p := raw.SetLayerKey; !reflect.DeepEqual(p.IconLines, []string{"PROJ-123", "#42"}) {
+		t.Fatalf("the message decoded as %+v", p)
+	}
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "repos", IconText: "repos"}})
+	conn.send(t, raw)
+	waitForCondition(t, 5*time.Second, func() bool {
+		k := ctl.Snapshot().Keys[0]
+		return k != nil && len(k.Children) == 1 && reflect.DeepEqual(k.Children[0].IconLines, []string{"PROJ-123", "#42"})
+	})
+
+	// Open the layer. The Show that draws it holds the up key's frame, and
+	// the child's frame next to it: a tile over ColorNone with pixels.
+	click(t, dev, 0, 0)
+	waitForCondition(t, 5*time.Second, func() bool {
+		slots, _ := dev.LastShowFrames()
+		up, tile := false, false
+		for _, slot := range slots {
+			f, ok := dev.StoredFrame(slot)
+			if !ok {
+				continue
+			}
+			up = up || f.Color == layers.ColorUp
+			tile = tile || (f.Pixels != nil && f.Color == layers.ColorNone)
+		}
+		return up && tile
+	})
+
+	before := ctl.Snapshot()
+	for _, p := range []SetLayerKeyPayload{
+		{ID: "i1", Parent: "repos", Status: "RUNNING", IconLines: []string{"a", "b", "c"}},
+		{ID: "i1", Parent: "repos", Status: "RUNNING", IconLines: []string{"a\nb"}},
+		{ID: "i1", Parent: "repos", Status: "RUNNING", IconLines: []string{"a"}, IconText: "x"},
+		{ID: "repos", Status: "RUNNING", IconLines: []string{"a"}},
+	} {
+		p := p
+		conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &p})
+	}
+	waitForCondition(t, 5*time.Second, func() bool { return logs.count("dropped") == 4 })
+	if !reflect.DeepEqual(ctl.Snapshot(), before) {
+		t.Errorf("a bad iconLines changed the layer tree: %+v, was %+v", ctl.Snapshot(), before)
+	}
+
+	// A message with no iconLines encodes without the field.
+	data, err := json.Marshal(Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "a", IconText: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "iconLines") {
+		t.Errorf("the message encodes as %s", data)
+	}
+}

@@ -6,7 +6,7 @@
 wrote. See tasks/complete/0044-blink-independence-persist-off-blink-path.md.
 
     blink_trace.py install CIRCUITPY_VOLUME
-    blink_trace.py report --scenario single|burst|busyburst|sync|batch|batchloss|cached|pips|icons|glyphs TRACE_FILE
+    blink_trace.py report --scenario single|burst|busyburst|sync|batch|batchloss|cached|badges|icons|glyphs TRACE_FILE
 
 `install` edits `firmware/code.py` in memory and writes the result to the
 board only. The repo's `code.py` is not touched. `make flash` puts the
@@ -76,9 +76,12 @@ MAX_PUSH_SPAN_LIMIT_MS = 40
 # DoD-2 limits the time from the board's Show to the end of the last push, and
 # the span between the first PUSH_STARTED of the six keys.
 MAX_SHOW_LIMIT_MS = 150
-# Task 0062's `pips` scenario: a Show of six keys with pips is a Show of six
-# cached keys (108 ms) and six stamps (about 100 ms). The owner accepted 215 ms.
-MAX_PIPS_SHOW_LIMIT_MS = 215
+# Task 0091's `badges` scenario: a Show of six keys with three badges each is a
+# Show of six cached keys (108 ms) and six stamps of up to three discs (task 0062
+# measured 15.4 ms for one disc, and each extra disc and its digits add about 3
+# ms). The limit is an estimate: the owner resets it after the first run on the
+# board.
+MAX_BADGES_SHOW_LIMIT_MS = 230
 ALL_KEYS_MASK = 0b111111
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -257,8 +260,8 @@ def report(records, scenario, out):
     if scenario == "cached":
         return report_cached(records, out)
 
-    if scenario == "pips":
-        return report_pips(records, out)
+    if scenario == "badges":
+        return report_badges(records, out)
 
     if scenario in ("icons", "glyphs"):
         return report_icons(records, out)
@@ -403,8 +406,8 @@ def show_figures(records, keys=BATCH_KEYS):
     return figures
 
 
-def pips_figures(records, keys=BATCH_KEYS):
-    """Return `(six_keys_ms, push_span_ms)` for each Show frames with pips that
+def badges_figures(records, keys=BATCH_KEYS):
+    """Return `(six_keys_ms, push_span_ms)` for each Show frames with badges that
     named all six keys, in time order, or `None` for one whose pushes are not
     all in the trace.
 
@@ -437,15 +440,15 @@ def pips_figures(records, keys=BATCH_KEYS):
     return figures
 
 
-def report_pips(records, out):
-    """Print the `pips` run's `six keys in`, which includes the stamps, and its
-    `push span`, the worst of its Shows (task 0062). Return True when `six keys
-    in` is within its limit and every Show has all its pushes in the trace. The
-    push span is printed and not limited: task 0062 does not claim the 40 ms of
-    task 0060 (task 0061 measured 58 ms)."""
-    figures = pips_figures(records)
+def report_badges(records, out):
+    """Print the `badges` run's `six keys in`, which includes the stamps, and its
+    `push span`, the worst of its Shows (tasks 0062 and 0091). Return True when
+    `six keys in` is within its limit and every Show has all its pushes in the
+    trace. The push span is printed and not limited: task 0091 does not claim the
+    40 ms of task 0060 (task 0061 measured 58 ms)."""
+    figures = badges_figures(records)
     if not figures:
-        print("no Show frames with pips of six keys in the trace", file=out)
+        print("no Show frames with badges of six keys in the trace", file=out)
         return False
     complete = [figure for figure in figures if figure is not None]
     print("shows {}".format(len(figures)), file=out)
@@ -455,9 +458,9 @@ def report_pips(records, out):
         return False
     six_keys = max(figure[0] for figure in complete)
     span = max(figure[1] for figure in complete)
-    print("six keys in {:.1f} ms (limit {})".format(six_keys, MAX_PIPS_SHOW_LIMIT_MS), file=out)
+    print("six keys in {:.1f} ms (limit {})".format(six_keys, MAX_BADGES_SHOW_LIMIT_MS), file=out)
     print("push span {:.1f} ms (not limited)".format(span), file=out)
-    return len(complete) == len(figures) and six_keys <= MAX_PIPS_SHOW_LIMIT_MS
+    return len(complete) == len(figures) and six_keys <= MAX_BADGES_SHOW_LIMIT_MS
 
 
 def report_cached(records, out):
@@ -518,7 +521,7 @@ def main(argv, out=sys.stdout):
     install.add_argument("volume")
 
     report_parser = sub.add_parser("report", help="print a trace's figures")
-    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "batchloss", "cached", "pips", "icons", "glyphs"), required=True)
+    report_parser.add_argument("--scenario", choices=("single", "burst", "busyburst", "sync", "batch", "batchloss", "cached", "badges", "icons", "glyphs"), required=True)
     report_parser.add_argument("trace_file")
 
     args = parser.parse_args(argv)

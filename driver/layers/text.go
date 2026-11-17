@@ -25,8 +25,8 @@ const (
 	MaxIconTextRunes = 32
 	MaxIconTextLines = 2
 
-	// The text goes in a box that ends above the count pip, which starts at y
-	// 79 (pipDiscRect), so a count never covers a letter.
+	// The text goes in a box that ends above the count badges, which start at
+	// y 89 (badgeDiscRect), so a count never covers a letter.
 	textBoxX0 = 8
 	textBoxX1 = 120
 	textBoxY0 = 10
@@ -45,7 +45,7 @@ var (
 	textParent = color.NRGBA{R: 0x6B, G: 0x6B, B: 0x6B, A: 0xFF}
 
 	// A line takes the largest size here that fits the box. The sizes are
-	// pixels, as pipBigPx is.
+	// pixels, as badgeBigPx is.
 	textSizesOne = []int{44, 36, 28, 22, 18}
 	textSizesTwo = []int{28, 22, 18, 14}
 )

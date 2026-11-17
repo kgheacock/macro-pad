@@ -759,7 +759,10 @@ host for it:
   on purpose, and `tools/blink_trace.py report --scenario=batchloss` prints how
   long after the last report the batch released (limit 1,000 ms).
 
-## The count pip (task 0062)
+## The count pip (task 0062, retired by task 0091)
+
+Task 0091 replaced the pip with three badges, below. The driver no longer sends
+types 13 and 14. The firmware still accepts them, until a later task removes them.
 
 A count change used to send a new image: each count of one icon on one color
 was its own frame, and a Store frame costs 94 to 109 ms. The pip is no longer
@@ -820,6 +823,53 @@ and dropped, on the same board:
   group took 100 ms on the wire, and `six keys in` was 215 to 224 ms.
 
 The `probe` used for the stamp figures is a one-off `code.py`, not in the repo.
+
+## The count badges (task 0091)
+
+A key shows up to three discs along its bottom edge: red, green, and yellow, each
+with its own count. Like the pip, the badges are not part of a frame: the board
+stamps them on a copy, so a count change sends no image and takes no slot.
+
+- **The pool** is as in task 0062: 52 slots, and 12 overlay buffers (called pip
+  buffers in `frame_cache.py`), two for each of six keys.
+- **Store badge sheet** (type 15). `wire.CustomGlyphReader._badge_sheet` inflates
+  the stream on core 0 to exactly 76,800 bytes, the 256×150 sheet, and
+  `MacroPad` hands it to `FrameCache.set_badge_sheet`, which blits it into one
+  `Bitmap` that the cache allocates when it is built, so the heap does not change
+  for the run. The old 256×64 pip sheet bitmap is no longer allocated at start: it
+  comes only if a type 13 message arrives. The sheet adds 45 KB to the heap.
+- **Show frames with badges** (type 16). For a key with a count above 0,
+  `MacroPad._badge_frame` copies the slot into the key's idle overlay buffer,
+  `display_render.stamp_badges` blits, for each count above 0, the disc of that
+  fill for the slot's color and then the characters, and `show_cached` queues that
+  buffer. The key alternates its two buffers and `_wait_for_view` holds a stamp
+  that would still change a buffer on the wire, as in task 0062. Counts of 0 queue
+  the slot's own view, as type 9 does. Before the sheet arrives, a count draws the
+  slot with no badge.
+- **Trace.** `SHOW_WITH_PIPS_STARTED` (code 13) is recorded for a Show with badges
+  too, so `tools/blink_trace.py report --scenario=badges` prints a `six keys in`
+  that includes the stamps (limit 230 ms, an estimate to reset after the first
+  run).
+
+The layout of the sheet is in `docs/wire-protocol.md` and `driver/layers/pip.go`
+(`badgeSpriteRect`), and `display_render.py` repeats it: a disc of 34×34 for each
+fill (row) and key color (column) at `(34 * column, 34 * fill)`, big cells of
+11×16 for `0` to `9` and `+` at `(11 * index, y)` with `y` of 102, 118, and 134 for
+red, green, and yellow, and small cells of 8×12 for the `9` and `+` of `99+` after
+them. The discs lie at y 89 to 123, red at x 89, green at x 52, and yellow at
+x 15. `test/test_app.py` builds a sheet with one value for each sprite and checks
+the pixel positions, and the Go sheet drawn by `layers.BuildBadgeSheet` gave the
+same pixels as `stamp_badges` on the same frame when the two were compared by
+hand, so a change to one side that the other does not follow fails a test.
+
+`make blink-trace SCENARIO=badges` stores the sheet and six frames, and shows them
+six times with three counts on every key. `cd driver && go run ./cmd/blinksend
+--scenario=badges` sends the same run for the owner to look at: five status colors
+and a white tile with three discs each.
+
+The figures on the board (the free heap with the sheet loaded, from `make
+slot-probe`, and `six keys in` for three runs) are not measured yet. They need the
+board: the owner adds them here.
 
 ## The second core: the `glyphcore` module (task 0059)
 

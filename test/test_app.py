@@ -2326,3 +2326,249 @@ def test_a_show_with_pips_draws_every_named_key_in_one_pass_and_traces_it():
     assert codes.index(tracer_module.SHOW_WITH_PIPS_STARTED) < codes.index(tracer_module.FRAMES_SHOWN)
     assert tracer_module.SHOW_WITH_PIPS_STARTED == 13
 
+
+# --- The count badges (task 0091) ---------------------------------------------
+
+BADGE_COLORS = [0x3AFF, 0x16C9, 0xF800, 0xFFE0, 0xFFFF]
+
+
+def _badge_sheet_pixels():
+    """A sheet with one value for each sprite: the disc of fill f on column c is
+    0x1100 + 0x10 * f + c, the big cell of fill f and character index c is
+    0x2000 + 0x100 * f + c, and the small 9 and + of fill f are 0x3000 + 0x100 *
+    f + 9 and + 10. The top-left pixel of each disc is transparent."""
+    sheet = bytearray(256 * 150 * 2)
+
+    def fill(x1, y1, x2, y2, value):
+        for y in range(y1, y2):
+            for x in range(x1, x2):
+                offset = (y * 256 + x) * 2
+                sheet[offset] = value >> 8
+                sheet[offset + 1] = value & 0xFF
+
+    for f, y in enumerate((102, 118, 134)):
+        for column in range(5):
+            fill(34 * column, 34 * f, 34 * (column + 1), 34 * (f + 1), 0x1100 + 0x10 * f + column)
+            offset = (34 * f * 256 + 34 * column) * 2
+            sheet[offset : offset + 2] = b"\x00\x00"
+        for index in range(11):
+            fill(11 * index, y, 11 * (index + 1), y + 16, 0x2000 + 0x100 * f + index)
+        fill(121, y, 129, y + 12, 0x3000 + 0x100 * f + 9)
+        fill(129, y, 137, y + 12, 0x3000 + 0x100 * f + 10)
+    return bytes(sheet)
+
+
+def _badge_sheet_bytes(colors=BADGE_COLORS):
+    writer = FakeSerial()
+    payload = bytes((len(colors),))
+    for color in colors:
+        payload += bytes((color & 0xFF, color >> 8))
+    payload += zlib.compress(_badge_sheet_pixels(), 9)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_BADGE_SHEET, payload)
+    return bytes(writer.written)
+
+
+def _show_frames_badges_bytes(slots, badges):
+    writer = FakeSerial()
+    payload = b"".join(
+        bytes((slot, red, green, yellow)) for slot, (red, green, yellow) in zip(slots, badges)
+    )
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_BADGES, payload)
+    return bytes(writer.written)
+
+
+def _badge_pad(color=0xF800):
+    """A pad that holds the badge sheet and one stored frame, in slot 3: a glyph
+    of 0x07E0 over `color` with a transparent top-left pixel."""
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_badge_sheet_bytes())
+    pad.step(900)
+    serial.feed(_store_frame_bytes(3, color, _rgb565_pixels_with_transparent_corner(0x07E0)))
+    pad.step(1000)
+    return pad, panels, serial
+
+
+def _show_badges(pad, serial, badges, slot=3, now=2000):
+    """Show `slot` on key 0 with `badges`, a (red, green, yellow) tuple."""
+    slots = [slot] + [UNCHANGED] * 5
+    serial.feed(_show_frames_badges_bytes(slots, [badges] + [(0, 0, 0)] * 5))
+    pad.step(now)
+    pad.step(now + 1)
+
+
+# The rectangle of the disc of each fill on the panel: red, green, yellow.
+BADGE_RECTS = [(89, 89, 123, 123), (52, 89, 86, 123), (15, 89, 49, 123)]
+
+
+def test_a_show_with_badges_changes_the_copy_only_inside_the_badge_rectangles():
+    """DoD-5: the slot bytes stay the same, and only the rectangles of the
+    counts above 0 change."""
+    pad, panels, serial = _badge_pad()
+    slot_before = bytes(pad._frame_cache.view(3))
+    cases = [
+        ((1, 0, 0), [0]),
+        ((0, 42, 0), [1]),
+        ((0, 0, 100), [2]),
+        ((7, 8, 9), [0, 1, 2]),
+        ((100, 0, 255), [0, 2]),
+    ]
+
+    for step, (badges, fills) in enumerate(cases):
+        _show_badges(pad, serial, badges, now=2000 + 10 * step)
+        frame = _last_frame(panels.per_key[0])
+        differs = 0
+        for y in range(128):
+            for x in range(128):
+                inside = any(
+                    BADGE_RECTS[f][0] <= x < BADGE_RECTS[f][2]
+                    and BADGE_RECTS[f][1] <= y < BADGE_RECTS[f][3]
+                    for f in fills
+                )
+                index = y * 128 + x
+                same = frame[2 * index : 2 * index + 2] == slot_before[2 * index : 2 * index + 2]
+                if not inside:
+                    assert same, "{} changed ({}, {}) outside its badges".format(badges, x, y)
+                differs += not same
+        assert differs > 400 * len(fills), "{} drew too little".format(badges)
+        assert bytes(pad._frame_cache.view(3)) == slot_before
+
+
+def test_each_badge_is_the_disc_of_its_fill_and_the_slots_color_with_its_digits():
+    pad, panels, serial = _badge_pad(color=0xF800)
+
+    _show_badges(pad, serial, (7, 42, 3))
+    frame = _last_frame(panels.per_key[0])
+    assert _panel_pixel(frame, 0, 0) == 0xF800  # the corner shows the key color
+    assert _panel_pixel(frame, 92, 106) == 0x1102  # red disc of column 2, the one for 0xF800
+    assert _panel_pixel(frame, 55, 106) == 0x1112  # green disc
+    assert _panel_pixel(frame, 18, 106) == 0x1122  # yellow disc
+    assert _panel_pixel(frame, 89, 89) == 0x07E0  # a transparent disc pixel keeps the slot's
+    assert _panel_pixel(frame, 105, 105) == 0x2007  # a red 7, one big cell, centred
+    assert _panel_pixel(frame, 58, 105) == 0x2104  # the 4 of the green 42
+    assert _panel_pixel(frame, 69, 105) == 0x2102  # and its 2
+    assert _panel_pixel(frame, 30, 105) == 0x2203  # a yellow 3
+
+
+def test_a_badge_on_a_color_the_sheet_has_no_disc_for_uses_the_first_column():
+    pad, panels, serial = _badge_pad(color=0x1234)
+
+    _show_badges(pad, serial, (7, 0, 0))
+
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 92, 106) == 0x1100
+
+
+def test_a_count_above_99_draws_99_plus_and_counts_of_0_show_the_slot_itself():
+    pad, panels, serial = _badge_pad()
+
+    _show_badges(pad, serial, (100, 0, 0))
+    hundred = _last_frame(panels.per_key[0])
+    assert _panel_pixel(hundred, 96, 106) == 0x3009
+    assert _panel_pixel(hundred, 104, 106) == 0x3009
+    assert _panel_pixel(hundred, 112, 106) == 0x300A
+
+    _show_badges(pad, serial, (255, 0, 0), now=3000)
+    assert _last_frame(panels.per_key[0]) == hundred
+
+    _show_badges(pad, serial, (0, 0, 0), now=4000)
+    assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 92, 106) == 0x07E0
+
+
+def test_badges_without_a_sheet_draw_the_slot_with_no_badge():
+    """DoD-5: before the sheet arrives, the key shows the slot."""
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_store_frame_bytes(3, 0xF800, _rgb565_pixels_with_transparent_corner(0x07E0)))
+    pad.step(1000)
+
+    _show_badges(pad, serial, (12, 3, 4))
+
+    assert pad.key_states[0]._on_frame is pad._frame_cache.view(3)
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 92, 106) == 0x07E0
+    assert _show_misses(serial) == []
+
+
+def test_a_badge_sheet_replaces_the_one_before():
+    pad, panels, serial = _badge_pad()
+    serial.feed(_badge_sheet_bytes([0xF800]))
+    pad.step(1500)
+
+    _show_badges(pad, serial, (1, 0, 0))
+
+    assert pad._frame_cache._badge_colors == [0xF800]
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 92, 106) == 0x1100
+
+
+def test_badges_on_a_frame_with_no_picture_still_draw_and_mark_the_key_as_a_glyph():
+    pad, _, panels, _, _, serial = _build_pad()
+    _paint_power_on(pad)
+    serial.feed(_badge_sheet_bytes())
+    pad.step(900)
+    serial.feed(_store_frame_bytes(3, 0xF800))
+    pad.step(1000)
+
+    _show_badges(pad, serial, (0, 0, 3))
+
+    assert _panel_pixel(_last_frame(panels.per_key[0]), 18, 106) == 0x1122
+    assert pad.key_states[0].emoji_id == wire.CUSTOM_GLYPH_SENTINEL_EMOJI_ID
+
+
+def test_two_badge_shows_in_a_row_use_the_two_buffers_of_the_key_in_turn():
+    pad, panels, serial = _badge_pad()
+    cache = pad._frame_cache
+
+    _show_badges(pad, serial, (1, 0, 0))
+    first = pad.key_states[0]._on_frame
+    first_bytes = bytes(first)
+    _show_badges(pad, serial, (2, 0, 0), now=3000)
+    second = pad.key_states[0]._on_frame
+
+    assert first is not second
+    assert first is cache.view(cache.pip_buffer(0, 0))
+    assert second is cache.view(cache.pip_buffer(0, 1))
+    assert bytes(first) == first_bytes  # the stamp of count 2 did not touch it
+    _show_badges(pad, serial, (3, 0, 0), now=4000)
+    assert pad.key_states[0]._on_frame is first  # back to the first buffer
+
+
+def test_a_show_with_badges_of_a_slot_above_the_numbered_ones_is_a_miss():
+    pad, panels, serial = _badge_pad()
+
+    serial.feed(_store_frame_bytes(52, 0x1234))  # an overlay buffer, not a slot
+    pad.step(2000)
+    _show_badges(pad, serial, (5, 0, 0), slot=52, now=3000)
+
+    assert not pad._frame_cache.filled(52)
+    assert _show_misses(serial) == [0b1]
+
+
+def test_a_show_with_badges_draws_every_named_key_in_one_pass_and_traces_it():
+    tracer = _FakeTracer()
+    pad, bus, _ = _parallel_pad(tracer=tracer)
+    serial = pad._serial
+    _paint_power_on(pad)
+    serial.feed(_badge_sheet_bytes())
+    pad.step(900)
+    for key in range(6):
+        serial.feed(_store_frame_bytes(10 + key, 0xF800))
+        pad.step(1000 + key)
+    groups_before = len(bus.groups)
+    del tracer.records[:]
+
+    serial.feed(
+        _show_frames_badges_bytes(
+            [10, 11, 12, 13, 14, 15],
+            [(1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12), (99, 100, 101), (0, 0, 1)],
+        )
+    )
+    pad.step(5000)
+    pad.step(5001)
+
+    assert bus.groups[groups_before:] == [[0, 1, 2], [3, 4, 5]]
+    shown = [p for code, _, p in tracer.records if code == tracer_module.FRAMES_SHOWN]
+    assert shown == [ALL_KEYS]
+    codes = [code for code, _, _ in tracer.records]
+    started = [p for code, _, p in tracer.records if code == tracer_module.SHOW_WITH_PIPS_STARTED]
+    assert started == [ALL_KEYS]
+    assert codes.index(tracer_module.SHOW_WITH_PIPS_STARTED) < codes.index(tracer_module.FRAMES_SHOWN)

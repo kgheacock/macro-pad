@@ -32,9 +32,9 @@ type Emulator struct {
 	frames          map[byte]StoredFrame
 	lastShow        []byte
 	shows           int
-	lastCounts      []byte
-	pipSheet        PipSheet
-	havePipSheet    bool
+	lastBadges      []Badges
+	badgeSheet      BadgeSheet
+	haveBadgeSheet  bool
 
 	msgQueue chan Message
 }
@@ -107,7 +107,7 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 			if slots, err := decodeShowFrames(payload); err == nil {
 				e.mu.Lock()
 				e.lastShow = append([]byte(nil), slots...)
-				e.lastCounts = nil
+				e.lastBadges = nil
 				e.shows++
 				// The emulator's board draws each named key, so what a test
 				// reads back as the last key state and glyph is what a Set
@@ -128,18 +128,18 @@ func (e *Emulator) receiveCustomGlyphs(r *io.PipeReader) {
 				e.mu.Unlock()
 			}
 			continue
-		case MessageTypeStorePipSheet:
-			if sheet, err := decodeStorePipSheet(payload); err == nil {
+		case MessageTypeStoreBadgeSheet:
+			if sheet, err := decodeStoreBadgeSheet(payload); err == nil {
 				e.mu.Lock()
-				e.pipSheet, e.havePipSheet = sheet, true
+				e.badgeSheet, e.haveBadgeSheet = sheet, true
 				e.mu.Unlock()
 			}
 			continue
-		case MessageTypeShowFramesPips:
-			if slots, counts, err := decodeShowFramesPips(payload); err == nil {
+		case MessageTypeShowFramesBadges:
+			if slots, badges, err := decodeShowFramesBadges(payload); err == nil {
 				e.mu.Lock()
 				e.lastShow = slots
-				e.lastCounts = counts
+				e.lastBadges = badges
 				e.shows++
 				for key, slot := range slots {
 					f, ok := e.frames[slot]
@@ -227,41 +227,41 @@ func (e *Emulator) ShowFrames(slots []byte) error {
 	return writeFrame(e.customGlyphW, MessageTypeShowFrames, payload)
 }
 
-// StorePipSheet implements Transport. It encodes a Store pip sheet message per
-// docs/wire-protocol.md and delivers it to the emulator's device side.
-func (e *Emulator) StorePipSheet(colors []uint16, pixels []byte) error {
-	payload, err := encodeStorePipSheet(colors, pixels)
+// StoreBadgeSheet implements Transport. It encodes a Store badge sheet message
+// per docs/wire-protocol.md and delivers it to the emulator's device side.
+func (e *Emulator) StoreBadgeSheet(colors []uint16, pixels []byte) error {
+	payload, err := encodeStoreBadgeSheet(colors, pixels)
 	if err != nil {
 		return err
 	}
-	return writeFrame(e.customGlyphW, MessageTypeStorePipSheet, payload)
+	return writeFrame(e.customGlyphW, MessageTypeStoreBadgeSheet, payload)
 }
 
-// ShowFramesWithPips implements Transport. It encodes a Show frames with pips
-// message per docs/wire-protocol.md and delivers it to the emulator's device
-// side.
-func (e *Emulator) ShowFramesWithPips(slots, counts []byte) error {
-	payload, err := encodeShowFramesPips(slots, counts)
+// ShowFramesWithBadges implements Transport. It encodes a Show frames with
+// badges message per docs/wire-protocol.md and delivers it to the emulator's
+// device side.
+func (e *Emulator) ShowFramesWithBadges(slots []byte, badges []Badges) error {
+	payload, err := encodeShowFramesBadges(slots, badges)
 	if err != nil {
 		return err
 	}
-	return writeFrame(e.customGlyphW, MessageTypeShowFramesPips, payload)
+	return writeFrame(e.customGlyphW, MessageTypeShowFramesBadges, payload)
 }
 
-// PipSheet returns the pip sheet the emulator's device side received last, and
-// whether one has arrived.
-func (e *Emulator) PipSheet() (PipSheet, bool) {
+// BadgeSheet returns the badge sheet the emulator's device side received last,
+// and whether one has arrived.
+func (e *Emulator) BadgeSheet() (BadgeSheet, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.pipSheet, e.havePipSheet
+	return e.badgeSheet, e.haveBadgeSheet
 }
 
-// LastShowCounts returns the counts of the most recent Show frames with pips
+// LastShowBadges returns the badges of the most recent Show frames with badges
 // message, or nil if the last Show had none.
-func (e *Emulator) LastShowCounts() []byte {
+func (e *Emulator) LastShowBadges() []Badges {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return append([]byte(nil), e.lastCounts...)
+	return append([]Badges(nil), e.lastBadges...)
 }
 
 // StoredFrame returns the frame the emulator's device side holds in slot, and

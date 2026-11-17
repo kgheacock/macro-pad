@@ -127,12 +127,12 @@ func (r *fanoutReader) ShowFrames(slots []byte) error {
 	return r.t.ShowFrames(slots)
 }
 
-func (r *fanoutReader) StorePipSheet(colors []uint16, pixels []byte) error {
-	return r.t.StorePipSheet(colors, pixels)
+func (r *fanoutReader) StoreBadgeSheet(colors []uint16, pixels []byte) error {
+	return r.t.StoreBadgeSheet(colors, pixels)
 }
 
-func (r *fanoutReader) ShowFramesWithPips(slots, counts []byte) error {
-	return r.t.ShowFramesWithPips(slots, counts)
+func (r *fanoutReader) ShowFramesWithBadges(slots []byte, badges []Badges) error {
+	return r.t.ShowFramesWithBadges(slots, badges)
 }
 
 func (r *fanoutReader) ReadMessage() (Message, error) {

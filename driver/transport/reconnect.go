@@ -21,9 +21,9 @@ const defaultSettleDelay = time.Second
 // for a reason other than the board being absent.
 const reconnectRetryDelay = time.Second
 
-// pipSheetRec is the pip sheet that Reconnecting sends to each board it
+// badgeSheetRec is the badge sheet that Reconnecting sends to each board it
 // connects.
-type pipSheetRec struct {
+type badgeSheetRec struct {
 	colors []uint16
 	pixels []byte
 }
@@ -91,11 +91,11 @@ type Reconnecting struct {
 	// shown is the slot each key last showed by a Show frames, until a key
 	// state or a glyph replaces it.
 	shown map[byte]byte
-	// pips is the count each key in shown last showed with, when above 0 (task
-	// 0062). sheet is the pip sheet the board must hold before it can draw one,
-	// sent again at every connect.
-	pips  map[byte]byte
-	sheet *pipSheetRec
+	// badges is the three counts each key in shown last showed with, when one
+	// is above 0 (tasks 0062 and 0091). sheet is the badge sheet the board must
+	// hold before it can draw one, sent again at every connect.
+	badges map[byte]Badges
+	sheet  *badgeSheetRec
 	// gen counts the connections. A frame whose gen is not the current one is
 	// not on the board.
 	gen int
@@ -142,7 +142,7 @@ func newReconnecting(open func(context.Context) (Transport, error), settle time.
 		glyphs: make(map[byte]glyphRec),
 		frames: make(map[byte]*frameRec),
 		shown:  make(map[byte]byte),
-		pips:   make(map[byte]byte),
+		badges: make(map[byte]Badges),
 	}
 	if stateDir != "" {
 		r.store = &stateStore{dir: stateDir}
@@ -246,8 +246,8 @@ func (r *Reconnecting) connect(dev Transport) bool {
 	sheet := r.sheet
 	r.mu.Unlock()
 	if sheet != nil {
-		if err := dev.StorePipSheet(sheet.colors, sheet.pixels); err != nil {
-			r.logf("pips: send the pip sheet: %v", err)
+		if err := dev.StoreBadgeSheet(sheet.colors, sheet.pixels); err != nil {
+			r.logf("badges: send the badge sheet: %v", err)
 		}
 	}
 
@@ -327,7 +327,7 @@ func (r *Reconnecting) SendKeyState(ks KeyState) error {
 	}
 	r.saveKeysLocked(r.recordKeyLocked(ks, glyph))
 	delete(r.shown, ks.KeyIndex)
-	delete(r.pips, ks.KeyIndex)
+	delete(r.badges, ks.KeyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -390,7 +390,7 @@ func (r *Reconnecting) SendCustomGlyph(keyIndex byte, pixels []byte) error {
 	ks.EmojiID = CustomGlyphSentinelEmojiID
 	r.saveKeysLocked(r.recordKeyLocked(ks, &g))
 	delete(r.shown, keyIndex)
-	delete(r.pips, keyIndex)
+	delete(r.badges, keyIndex)
 	dev := r.dev
 	r.mu.Unlock()
 
@@ -435,13 +435,14 @@ func (r *Reconnecting) ShowFrames(slots []byte) error {
 	return r.show(slots, nil)
 }
 
-// StorePipSheet implements Transport. It remembers the sheet, and sends it when
-// a device is connected and again at every connect (task 0062).
-func (r *Reconnecting) StorePipSheet(colors []uint16, pixels []byte) error {
-	if _, err := encodeStorePipSheet(colors, pixels); err != nil {
+// StoreBadgeSheet implements Transport. It remembers the sheet, and sends it
+// when a device is connected and again at every connect, before any Show frames
+// with badges (task 0091).
+func (r *Reconnecting) StoreBadgeSheet(colors []uint16, pixels []byte) error {
+	if _, err := encodeStoreBadgeSheet(colors, pixels); err != nil {
 		return err
 	}
-	rec := &pipSheetRec{colors: append([]uint16(nil), colors...), pixels: append([]byte(nil), pixels...)}
+	rec := &badgeSheetRec{colors: append([]uint16(nil), colors...), pixels: append([]byte(nil), pixels...)}
 
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
@@ -453,21 +454,21 @@ func (r *Reconnecting) StorePipSheet(colors []uint16, pixels []byte) error {
 	if dev == nil {
 		return nil
 	}
-	return dev.StorePipSheet(rec.colors, rec.pixels)
+	return dev.StoreBadgeSheet(rec.colors, rec.pixels)
 }
 
-// ShowFramesWithPips implements Transport. It is ShowFrames with a count for
-// each key, which Reconnecting remembers with the slot, so that a reconnect
-// stamps the pip again (task 0062).
-func (r *Reconnecting) ShowFramesWithPips(slots, counts []byte) error {
-	if _, err := encodeShowFramesPips(slots, counts); err != nil {
+// ShowFramesWithBadges implements Transport. It is ShowFrames with three counts
+// for each key, which Reconnecting remembers with the slot, so that a reconnect
+// stamps the badges again (tasks 0062 and 0091).
+func (r *Reconnecting) ShowFramesWithBadges(slots []byte, badges []Badges) error {
+	if _, err := encodeShowFramesBadges(slots, badges); err != nil {
 		return err
 	}
-	return r.show(slots, counts)
+	return r.show(slots, badges)
 }
 
-// show is ShowFrames and ShowFramesWithPips. counts is nil for the first.
-func (r *Reconnecting) show(slots, counts []byte) error {
+// show is ShowFrames and ShowFramesWithBadges. badges is nil for the first.
+func (r *Reconnecting) show(slots []byte, badges []Badges) error {
 	if _, err := encodeShowFrames(slots); err != nil {
 		return err
 	}
@@ -496,10 +497,10 @@ func (r *Reconnecting) show(slots, counts []byte) error {
 			changed = true
 		}
 		r.shown[byte(key)] = slot
-		if counts != nil && counts[key] > 0 {
-			r.pips[byte(key)] = counts[key]
+		if badges != nil && badges[key].Any() {
+			r.badges[byte(key)] = badges[key]
 		} else {
-			delete(r.pips, byte(key))
+			delete(r.badges, byte(key))
 		}
 	}
 	r.saveKeysLocked(changed)
@@ -527,8 +528,8 @@ func (r *Reconnecting) show(slots, counts []byte) error {
 			return err
 		}
 	}
-	if counts != nil {
-		return dev.ShowFramesWithPips(slots, counts)
+	if badges != nil {
+		return dev.ShowFramesWithBadges(slots, badges)
 	}
 	return dev.ShowFrames(slots)
 }
@@ -596,42 +597,42 @@ func (r *Reconnecting) restoreFrames(dev Transport, gen int) {
 	if restored > 0 {
 		r.logf("frames: stored %d frames again", restored)
 	}
-	r.showPipsAgain(dev, gen)
+	r.showBadgesAgain(dev, gen)
 }
 
-// showPipsAgain stamps the pips of the keys that showed one, on a board that
-// just got its frames again. The replay of the key states draws the frames
-// with no pip.
-func (r *Reconnecting) showPipsAgain(dev Transport, gen int) {
+// showBadgesAgain stamps the badges of the keys that showed one, on a board
+// that just got its frames again. The replay of the key states draws the frames
+// with no badge.
+func (r *Reconnecting) showBadgesAgain(dev Transport, gen int) {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
 
 	r.mu.Lock()
-	if r.dev != dev || r.gen != gen || r.sheet == nil || len(r.pips) == 0 {
+	if r.dev != dev || r.gen != gen || r.sheet == nil || len(r.badges) == 0 {
 		r.mu.Unlock()
 		return
 	}
-	slots, counts := r.pipShowLocked()
+	slots, badges := r.badgeShowLocked()
 	r.mu.Unlock()
-	if err := dev.ShowFramesWithPips(slots, counts); err != nil {
-		r.logf("pips: show again: %v", err)
+	if err := dev.ShowFramesWithBadges(slots, badges); err != nil {
+		r.logf("badges: show again: %v", err)
 	}
 }
 
-// pipShowLocked builds a Show frames with pips payload for the keys that show
-// a pip, and leaves the others unchanged. The caller holds mu.
-func (r *Reconnecting) pipShowLocked() (slots, counts []byte) {
+// badgeShowLocked builds a Show frames with badges payload for the keys that
+// show a badge, and leaves the others unchanged. The caller holds mu.
+func (r *Reconnecting) badgeShowLocked() (slots []byte, badges []Badges) {
 	slots = make([]byte, 8)
-	counts = make([]byte, 8)
+	badges = make([]Badges, 8)
 	for i := range slots {
 		slots[i] = SlotUnchanged
 	}
-	for key, count := range r.pips {
+	for key, b := range r.badges {
 		if slot, ok := r.shown[key]; ok && key < 8 && r.frames[slot] != nil {
-			slots[key], counts[key] = slot, count
+			slots[key], badges[key] = slot, b
 		}
 	}
-	return slots, counts
+	return slots, badges
 }
 
 // handleShowMiss answers a Show miss: the board named some keys whose slot it
@@ -652,7 +653,7 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 		slots[i] = SlotUnchanged
 	}
 	var again []byte
-	var counts []byte
+	var badges []Badges
 	for key := byte(0); key < 8; key++ {
 		if mask&(1<<key) == 0 {
 			continue
@@ -663,10 +664,10 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 		}
 		slots[key] = slot
 		if r.sheet != nil {
-			if counts == nil {
-				counts = make([]byte, 8)
+			if badges == nil {
+				badges = make([]Badges, 8)
 			}
-			counts[key] = r.pips[key]
+			badges[key] = r.badges[key]
 		}
 		r.frames[slot].gen = 0
 		again = append(again, slot)
@@ -683,8 +684,8 @@ func (r *Reconnecting) handleShowMiss(dev Transport, mask byte) {
 		}
 	}
 	var err error
-	if counts != nil {
-		err = dev.ShowFramesWithPips(slots, counts)
+	if badges != nil {
+		err = dev.ShowFramesWithBadges(slots, badges)
 	} else {
 		err = dev.ShowFrames(slots)
 	}

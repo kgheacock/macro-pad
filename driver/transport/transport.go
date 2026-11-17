@@ -162,18 +162,19 @@ type Transport interface {
 	// docs/wire-protocol.md (task 0061).
 	ShowFrames(slots []byte) error
 
-	// StorePipSheet writes one Store pip sheet message to the device over
-	// CDC serial: the sprites the board stamps on a frame to draw the count
-	// pip. colors is the key color each disc of the sheet is blended against,
-	// and pixels is CustomGlyphPixelsSize bytes in the pixel format of a
-	// custom glyph. See "Store pip sheet" in docs/wire-protocol.md (task 0062).
-	StorePipSheet(colors []uint16, pixels []byte) error
+	// StoreBadgeSheet writes one Store badge sheet message to the device over
+	// CDC serial: the sprites the board stamps on a frame to draw the three
+	// count badges. colors is the key color each column of discs is blended
+	// against, and pixels is BadgeSheetPixelsSize bytes in the pixel format of
+	// a custom glyph. See "Store badge sheet" in docs/wire-protocol.md (task
+	// 0091).
+	StoreBadgeSheet(colors []uint16, pixels []byte) error
 
-	// ShowFramesWithPips is ShowFrames with a count for each key: the board
-	// copies the frame in slots[k], stamps a pip with counts[k] on the copy,
-	// and shows that. A count of 0 shows the slot as it is. See "Show frames
-	// with pips" in docs/wire-protocol.md (task 0062).
-	ShowFramesWithPips(slots, counts []byte) error
+	// ShowFramesWithBadges is ShowFrames with three counts for each key: the
+	// board copies the frame in slots[k], stamps a red, a green, and a yellow
+	// badge with badges[k] on the copy, and shows that. A count of 0 draws no
+	// disc. See "Show frames with badges" in docs/wire-protocol.md (task 0091).
+	ShowFramesWithBadges(slots []byte, badges []Badges) error
 
 	// ReadMessage blocks until one device→host message arrives over CDC
 	// serial, or the transport is closed. A frame whose type this package

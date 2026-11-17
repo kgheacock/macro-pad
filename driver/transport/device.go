@@ -404,24 +404,24 @@ func (d *Device) ShowFrames(slots []byte) error {
 	return d.writeFrame(MessageTypeShowFrames, payload)
 }
 
-// StorePipSheet implements Transport. It writes a framed Store pip sheet
+// StoreBadgeSheet implements Transport. It writes a framed Store badge sheet
 // message to the device over CDC.
-func (d *Device) StorePipSheet(colors []uint16, pixels []byte) error {
-	payload, err := encodeStorePipSheet(colors, pixels)
+func (d *Device) StoreBadgeSheet(colors []uint16, pixels []byte) error {
+	payload, err := encodeStoreBadgeSheet(colors, pixels)
 	if err != nil {
 		return err
 	}
-	return d.writeFrame(MessageTypeStorePipSheet, payload)
+	return d.writeFrame(MessageTypeStoreBadgeSheet, payload)
 }
 
-// ShowFramesWithPips implements Transport. It writes a framed Show frames with
-// pips message to the device over CDC.
-func (d *Device) ShowFramesWithPips(slots, counts []byte) error {
-	payload, err := encodeShowFramesPips(slots, counts)
+// ShowFramesWithBadges implements Transport. It writes a framed Show frames
+// with badges message to the device over CDC.
+func (d *Device) ShowFramesWithBadges(slots []byte, badges []Badges) error {
+	payload, err := encodeShowFramesBadges(slots, badges)
 	if err != nil {
 		return err
 	}
-	return d.writeFrame(MessageTypeShowFramesPips, payload)
+	return d.writeFrame(MessageTypeShowFramesBadges, payload)
 }
 
 // ReadMessage implements Transport. It decodes one frame from the CDC

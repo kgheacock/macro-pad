@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,6 +370,16 @@ func TestInboxProtocolFixtures(t *testing.T) {
 	if err := json.Unmarshal(data, &fixtures); err != nil {
 		t.Fatal(err)
 	}
+	// Task 0091: a fixture carries the three counts.
+	counted := false
+	for _, m := range fixtures.SetLayerKey {
+		if p := m.SetLayerKey; p != nil && p.Count == 3 && p.CountGreen == 2 && p.CountYellow == 1 {
+			counted = true
+		}
+	}
+	if !counted {
+		t.Error("no setLayerKey fixture has count 3, countGreen 2, and countYellow 1")
+	}
 	if len(fixtures.RemoveLayerKey) != 3 || len(fixtures.SetLayerKey) == 0 {
 		t.Fatalf("fixtures hold %d removeLayerKey and %d setLayerKey messages", len(fixtures.RemoveLayerKey), len(fixtures.SetLayerKey))
 	}
@@ -489,4 +500,85 @@ func TestSetLayerKeyOpens(t *testing.T) {
 	click(t, dev, 0, 0)
 	click(t, dev, 0, 1_000_000)
 	waitForLayerChanges(t, conn, []string{"", "repos", "r0"})
+}
+
+// TestSetLayerKeyCounts is task 0091's DoD-6 for the server: a setLayerKey with
+// only count draws one red badge, countGreen and countYellow add the others, and
+// a negative count drops the message and changes nothing. The Show the board
+// gets names the three counts.
+func TestSetLayerKeyCounts(t *testing.T) {
+	s, ctl, dev, logs := layerServer(t)
+	conn := newFakeConn()
+	if s.addClient(conn) == nil {
+		t.Fatal("client rejected")
+	}
+
+	badges := func() transport.Badges {
+		b := dev.LastShowBadges()
+		if len(b) == 0 {
+			return transport.Badges{}
+		}
+		return b[0]
+	}
+	waitForBadges := func(want transport.Badges) {
+		t.Helper()
+		waitForCondition(t, 5*time.Second, func() bool { return badges() == want })
+	}
+	// The sheet goes to the board before any Show.
+	waitForCondition(t, 5*time.Second, func() bool { _, ok := dev.BadgeSheet(); return ok })
+
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "a", Status: "DONE", IconText: "repo", Count: 3}})
+	waitForBadges(transport.Badges{Red: 3})
+
+	// The same message with the two new fields at 0 changes nothing.
+	conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "a", Status: "DONE", IconText: "repo", Count: 3, CountGreen: 0, CountYellow: 0}})
+
+	var raw Message
+	if err := json.Unmarshal([]byte(`{"kind":"setLayerKey","setLayerKey":{"id":"a","status":"DONE","iconText":"repo","count":3,"countGreen":5,"countYellow":120}}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if p := raw.SetLayerKey; p.Count != 3 || p.CountGreen != 5 || p.CountYellow != 120 {
+		t.Fatalf("the message decoded as %+v", p)
+	}
+	conn.send(t, raw)
+	waitForBadges(transport.Badges{Red: 3, Green: 5, Yellow: 120})
+
+	before := ctl.Snapshot()
+	for _, p := range []SetLayerKeyPayload{
+		{ID: "a", Status: "DONE", IconText: "repo", Count: -1},
+		{ID: "a", Status: "DONE", IconText: "repo", Count: 3, CountGreen: -5},
+		{ID: "a", Status: "DONE", IconText: "repo", CountYellow: -1},
+	} {
+		p := p
+		conn.send(t, Message{Kind: KindSetLayerKey, SetLayerKey: &p})
+	}
+	waitForCondition(t, 5*time.Second, func() bool { return logs.count("setLayerKey id=\"a\" dropped") == 3 })
+	if !reflect.DeepEqual(ctl.Snapshot(), before) {
+		t.Error("a negative count changed the layer tree")
+	}
+	if got := badges(); got != (transport.Badges{Red: 3, Green: 5, Yellow: 120}) {
+		t.Errorf("the board shows %v after the dropped messages", got)
+	}
+
+	// The JSON of a message with no new field stays what it was.
+	data, err := json.Marshal(Message{Kind: KindSetLayerKey, SetLayerKey: &SetLayerKeyPayload{ID: "a", Count: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"count":3,`; !strings.Contains(string(data), want) || strings.Contains(string(data), "countGreen") {
+		t.Errorf("the message encodes as %s", data)
+	}
+}
+
+// count returns how many lines contain substr.
+func (l *logCollector) count(substr string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, line := range l.lines {
+		if strings.Contains(line, substr) {
+			n++
+		}
+	}
+	return n
 }

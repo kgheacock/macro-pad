@@ -26,6 +26,16 @@ test('TestSetLayerKeyCounts', () => {
   assert.equal('countYellow' in sent, false);
 });
 
+// Task 0094: a child key has one or two lines of identifier, with or without
+// emoji. The fixture is the one the Go server reads.
+test('TestSetLayerKeyIconLines', () => {
+  const withLines = fixtures.setLayerKey.find((f) => f.setLayerKey.iconLines !== undefined);
+  assert.deepEqual(withLines.setLayerKey.iconLines, ['PROJ-123', '#42']);
+  const sent = JSON.parse(encodeSetLayerKey(withLines.setLayerKey)).setLayerKey;
+  assert.deepEqual(sent.iconLines, ['PROJ-123', '#42']);
+  assert.equal('iconLines' in JSON.parse(encodeSetLayerKey({ id: 'a', iconText: 'x' })).setLayerKey, false);
+});
+
 test('TestEncodeRemoveMatchesFixtures', () => {
   for (const fixture of fixtures.removeLayerKey) {
     const { id, parent, path } = fixture.removeLayerKey;

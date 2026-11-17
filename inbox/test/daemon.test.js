@@ -4,9 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { acquirePidFile, pidPath, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
-import ai from '../src/plugins/ai.js';
-import github from '../src/plugins/github.js';
-import { createRenderer } from '../src/render.js';
+import repos, { createReposRenderer } from '../src/plugins/repos.js';
 import { feed as reposFeed, fetchRepos } from '../src/repolist.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
@@ -258,56 +256,6 @@ test('TestPressMarksChannelOnPage2', async (t) => {
   assert.deepEqual(counts(writer), { a: 1, b: 1, c: 1, d: 1, e: 1, g: 1 });
 });
 
-test('TestAiDaemonReadsOwnLayer', async (t) => {
-  const sc = scratch(t);
-  const server = await serve(t);
-  const writer = openStore(sc.db, undefined, { plugin: 'ai' });
-  t.after(() => writer.close());
-  writer.insert('a', 'needs input', sc.root, { status: 'waiting' });
-  // A basic message in the same store is not the ai daemon's.
-  const basic = openStore(sc.db);
-  t.after(() => basic.close());
-  basic.insert('mine', 'hello', sc.root);
-  launch(t, sc, server, { pollMs: 10_000, plugin: ai });
-  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'a'), 3000, 'the child');
-  assert.equal(server.received.some((m) => m.setLayerKey?.id === 'mine'), false);
-  assert.equal(server.received.find((m) => m.setLayerKey?.id === 'ai-inbox').setLayerKey.status, 'WARN');
-  // The inbox daemon's layer is open, not ours: a press on key 0 marks nothing.
-  server.layerChanged('inbox');
-  pressChild(server, 'inbox', 'a');
-  await pause(150);
-  assert.deepEqual(counts(writer), { a: 1 });
-  // Our layer is open: the same press marks the channel.
-  server.layerChanged('ai-inbox');
-  pressChild(server, 'ai-inbox', 'a');
-  await waitFor(() => counts(writer).a === undefined, 1000, 'a seen');
-  await waitFor(() => server.received.findLast((m) => m.setLayerKey?.id === 'ai-inbox')?.setLayerKey.status === '', 1000, 'the top key cleared');
-});
-
-test('TestAiDaemonShowsRecentSeenChannels', async (t) => {
-  const sc = scratch(t);
-  const server = await serve(t);
-  const writer = openStore(sc.db, undefined, { plugin: 'ai' });
-  t.after(() => writer.close());
-  const now = Date.now();
-  writer.insert('old', 'stale', sc.root, { status: 'waiting', now: now - ai.rules.activeMs - 60_000 });
-  writer.insert('seen', 'finished', sc.root, { now: now - 1000 });
-  writer.insert('fresh', 'working', sc.root, { status: 'running', now });
-  writer.markSeen('seen', Number.MAX_SAFE_INTEGER);
-  launch(t, sc, server, { pollMs: 10_000, plugin: ai });
-  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'fresh'), 3000, 'the children');
-  const children = server.received.filter((m) => m.setLayerKey?.parent).map((m) => m.setLayerKey.id);
-  // Newest first; the channel with all seen shows, the one past the hour does not.
-  assert.deepEqual(children, ['fresh', 'seen']);
-  assert.equal(server.received.find((m) => m.setLayerKey?.id === 'seen').setLayerKey.status, '');
-  // Pressing a seen channel is harmless.
-  server.layerChanged('ai-inbox');
-  pressChild(server, 'ai-inbox', 'seen', 1);
-  await pause(150);
-  // The stale channel is hidden, not marked.
-  assert.deepEqual(counts(writer), { fresh: 1, old: 1 });
-});
-
 test('TestOpenPressMarksNothing', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
@@ -440,28 +388,28 @@ test('TestPidFile', (t) => {
 test('TestPidFilePerPlugin', (t) => {
   const sc = scratch(t);
   mkdirSync(path.dirname(sc.db), { recursive: true });
-  // A basic and an ai daemon share one store, each with its own pid file.
+  // A basic and a repos daemon share one store, each with its own pid file.
   const basic = acquirePidFile(sc.db, { plugin: 'basic', pid: 4242, alive: () => true });
-  const second = acquirePidFile(sc.db, { plugin: 'ai', pid: 4343, alive: () => true });
+  const second = acquirePidFile(sc.db, { plugin: 'repos', pid: 4343, alive: () => true });
   assert.ok(existsSync(`${sc.db}.basic.daemon.pid`));
-  assert.ok(existsSync(`${sc.db}.ai.daemon.pid`));
-  // A second ai daemon is refused.
+  assert.ok(existsSync(`${sc.db}.repos.daemon.pid`));
+  // A second repos daemon is refused.
   assert.throws(
-    () => acquirePidFile(sc.db, { plugin: 'ai', pid: 4444, alive: () => true }),
-    (e) => e instanceof DaemonRunningError && e.message.includes('ai daemon') && e.message.includes('(pid 4343)'),
+    () => acquirePidFile(sc.db, { plugin: 'repos', pid: 4444, alive: () => true }),
+    (e) => e instanceof DaemonRunningError && e.message.includes('repos daemon') && e.message.includes('(pid 4343)'),
   );
   basic();
   second();
 });
 
-// The github plugin with a feed that answers from `answers`, one per run; an
-// Error is thrown as a failed read.
-function fedGithub(answers) {
+// The repos plugin with a feed that answers from `answers`, one per run; an
+// Error is thrown as a failed read. The answer is { owner, repos }.
+function fedRepos(answers) {
   let runs = 0;
   const plugin = {
-    ...github,
+    ...repos,
     feed: {
-      ...github.feed,
+      ...repos.feed,
       fetch: async () => {
         const next = answers[Math.min(runs, answers.length - 1)];
         runs++;
@@ -473,44 +421,54 @@ function fedGithub(answers) {
   return { plugin, runs: () => runs };
 }
 
-const onePr = (state) => ({
-  total: 1,
-  pulls: [{ channel: 'kgheacock.macro-pad.97', title: 'x', url: 'https://github.com/kgheacock/macro-pad/pull/97', status: state }],
+const oneRepo = (extra = {}) => ({
+  owner: 'kgheacock',
+  repos: [{ name: 'macro-pad', key: 'macro-pad', url: 'u', fork: false, archived: false, pushedAt: null, issues: 0, prs: 0 }],
+  cut: false,
+  offline: null,
+  ...extra,
 });
 
 test('TestDaemonFeed', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
-  const calls = [];
-  const { plugin } = fedGithub([onePr('failing')]);
+  const writer = openStore(sc.db, undefined, { plugin: 'repos' });
+  t.after(() => writer.close());
+  writer.insert('macro-pad.3f2a91c0', 'needs input', sc.root, { status: 'waiting' });
+  const { plugin } = fedRepos([oneRepo()]);
   // A slow poll and a slow feed: only the first run, at start, can draw it.
   const started = Date.now();
-  launch(t, sc, server, { plugin, pollMs: 10_000, feedMs: 10_000, focus: async (here) => calls.push(here) });
-  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'kgheacock.macro-pad.97'), 1000, 'the PR');
+  launch(t, sc, server, { plugin, pollMs: 10_000, feedMs: 10_000 });
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
   assert.ok(Date.now() - started < 1000);
-  const top = server.received.findLast((m) => m.setLayerKey?.id === 'github-inbox').setLayerKey;
-  assert.deepEqual([top.status, top.count], ['ERROR', 1]);
-
-  server.layerChanged('github-inbox');
-  pressChild(server, 'github-inbox', 'kgheacock.macro-pad.97');
-  await waitFor(() => calls.length === 1, 1000, 'the focus');
-  assert.equal(calls[0], 'url:https://github.com/kgheacock/macro-pad/pull/97');
+  const top = server.received.findLast((m) => m.setLayerKey?.id === 'repos').setLayerKey;
+  assert.deepEqual([top.status, top.count], ['WARN', 1]);
+  const key = server.received.findLast((m) => m.setLayerKey?.id === 'repo.macro-pad').setLayerKey;
+  assert.deepEqual([key.parent, key.opens, key.status, key.iconText], ['repos', true, 'WARN', 'macro-pad']);
+  // The first connect removes the keys of the retired plugins.
+  const removed = server.received.filter((m) => m.kind === 'removeLayerKey').map((m) => m.removeLayerKey.id);
+  assert.deepEqual(removed, ['ai-inbox', 'github-inbox', 'repos']);
+  // A press on a repository key marks nothing: its layer holds no session.
+  server.layerChanged('repos');
+  pressChild(server, 'repos', 'repo.macro-pad');
+  await pause(150);
+  assert.deepEqual(counts(writer), { 'macro-pad.3f2a91c0': 1 });
 });
 
 test('TestDaemonFeedFails', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
   const down = new Error('no gh; install the GitHub CLI or set INBOX_GH');
-  const fed = fedGithub([down, down, down, onePr('passing')]);
+  const fed = fedRepos([down, down, down, oneRepo()]);
   const { logs } = launch(t, sc, server, { plugin: fed.plugin, feedMs: 20 });
   await waitFor(() => fed.runs() >= 4, 2000, 'four runs');
-  await waitFor(() => logs.includes('GitHub read again'), 1000, 'the recovery');
+  await waitFor(() => logs.includes('GitHub repositories read again'), 1000, 'the recovery');
   const failures = logs.filter((line) => line.startsWith('cannot read GitHub'));
-  assert.deepEqual(failures, ['cannot read GitHub: no gh; install the GitHub CLI or set INBOX_GH']);
-  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'kgheacock.macro-pad.97'), 1000, 'the PR');
+  assert.deepEqual(failures, ['cannot read GitHub repositories: no gh; install the GitHub CLI or set INBOX_GH']);
+  await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
 });
 
-// The github plugin with the repos feed (task 0089) and a gh that answers
+// The repos plugin with the repos feed (task 0089) and a gh that answers
 // from `results`, one per run. `fed` records what the renderer is given.
 function reposPlugin(results) {
   const seen = [];
@@ -521,10 +479,10 @@ function reposPlugin(results) {
     setImmediate(() => callback(next.error ?? null, next.stdout ?? '', next.stderr ?? ''));
   };
   const plugin = {
-    ...github,
+    ...repos,
     feed: { ...reposFeed, fetch: ({ env }) => fetchRepos({ env, execFile }) },
     createRenderer: ({ slot }) => {
-      const renderer = createRenderer({ slot, rules: github.rules });
+      const renderer = createReposRenderer({ slot });
       return { ...renderer, plan: (args) => (seen.push(args.fed), renderer.plan(args)) };
     },
   };

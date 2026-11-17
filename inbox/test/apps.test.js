@@ -60,9 +60,9 @@ test('TestAppsChoose', (t) => {
   mkdirSync(path.join(root, 'not-a-repo'));
   const store = storeFor(t, sc);
   // A Claude session today in a subfolder of delta, at 09:00.
-  storeFor(t, sc, 'ai').insert('github.com.acme.delta.web.3f2a91c0', 'working', root, { status: 'running', now: NOON - 3 * HOUR });
+  storeFor(t, sc, 'repos').insert('github.com.acme.delta.web.3f2a91c0', 'working', root, { status: 'running', now: NOON - 3 * HOUR });
   // A session in another org's delta does not count.
-  storeFor(t, sc, 'ai').insert('github.com.other.gamma.3f2a91c1', 'working', root, { status: 'running', now: NOON });
+  storeFor(t, sc, 'repos').insert('github.com.other.gamma.3f2a91c1', 'working', root, { status: 'running', now: NOON });
   store.insert('eps.pin', 'pinned', root, { status: 'pinned', now: NOON - 5 * HOUR });
 
   const fed = scan({ env, store, now: NOON });
@@ -213,8 +213,8 @@ test('TestAppsPress', async (t) => {
   assert.deepEqual([calls[0].file, calls[0].args], ['open', ['-b', 'com.microsoft.VSCode', web]]);
 
   // Claude: a session of today in web comes to the front.
-  const ai = storeFor(t, sc, 'ai');
-  ai.insert('github.com.acme.web.3f2a91c0', 'done', web, { status: 'done', here: 'iterm2:AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA', now: NOON - HOUR });
+  const sessions = storeFor(t, sc, 'repos');
+  sessions.insert('github.com.acme.web.3f2a91c0', 'done', web, { status: 'done', here: 'iterm2:AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA', now: NOON - HOUR });
   await go('claude');
   assert.deepEqual(focused, ['iterm2:AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA']);
   // Its tab is closed: a new tab runs claude, and the next press focuses it.

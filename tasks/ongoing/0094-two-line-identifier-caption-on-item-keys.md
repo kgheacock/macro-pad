@@ -97,15 +97,15 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — A key with `iconLines` `["PROJ-123", "#42"]` and no emoji draws an opaque tile. Its strip is the status color at y 106 to 127, and both lines are inked at 24 px. **Proof:** `cd driver && go test ./layers -run 'TestIconLines$'` passes, with `driver/layers/testdata/icon-lines.png`.
-- [ ] **DoD-2** — With one or two emoji, the lines lie in y 2 to 56. The emoji art lies in y 57 to 105. **Proof:** `cd driver && go test ./layers -run TestIconLinesLayout` passes.
-- [ ] **DoD-3** — A line of 16 runes fits 120 px, or ends in `…` at 14 px. No line uses a size below 14 px. Both lines share one size with no emoji. **Proof:** `cd driver && go test ./layers -run TestIconLinesFit` passes.
-- [ ] **DoD-4** — These messages are rejected and change nothing: three lines, an empty line, a line of 17 runes, or a newline in a line. So are `iconLines` with `iconText`, with `iconRef`, or on a top-level key. **Proof:** `cd driver && go test ./layers -run TestIconLinesInvalid` passes.
-- [ ] **DoD-5** — A one-line caption over emoji and a text icon draw the same pixels as on `main`. `validateIconCaption` still rejects a newline. **Proof:** `cd driver && go test ./layers -run 'TestIconEmoji|TestIconText'` passes, with no change to the files in `driver/layers/testdata`.
-- [ ] **DoD-6** — Two keys with the same lines, emoji, and color share one slot. A different line or color takes another slot. A count change stores no frame. **Proof:** `cd driver && go test ./layers -run TestIconLinesFrames` passes.
-- [ ] **DoD-7** — `iconLines` survives a save and a load of `layers.json`, and an old file with no `iconLines` still loads at version 1. **Proof:** `cd driver && go test ./layers -run TestIconLinesPersist` passes.
-- [ ] **DoD-8** — A `setLayerKey` with `iconLines` reaches the controller and draws a glyph. A bad one is logged and dropped. **Proof:** `cd driver && go test ./plugin -run TestSetLayerKeyIconLines` and `cd inbox && node --test test/protocol.test.js` pass.
-- [ ] **DoD-9** — `driver/README.md` records the field, the layouts, and the sizes. **Proof:** `driver/README.md`, section "Protocol", bullet `iconLines`.
+- [x] **DoD-1** — A key with `iconLines` `["PROJ-123", "#42"]` and no emoji draws an opaque tile. Its strip is the status color at y 106 to 127, and both lines are inked at 24 px. **Proof:** `cd driver && go test ./layers -run 'TestIconLines$'` passes, with `driver/layers/testdata/icon-lines.png`.
+- [x] **DoD-2** — With one or two emoji, the lines lie in y 2 to 56. The emoji art lies in y 57 to 105. **Proof:** `cd driver && go test ./layers -run TestIconLinesLayout` passes.
+- [x] **DoD-3** — A line of 16 runes fits 120 px, or ends in `…` at 14 px. No line uses a size below 14 px. Both lines share one size with no emoji. **Proof:** `cd driver && go test ./layers -run TestIconLinesFit` passes.
+- [x] **DoD-4** — These messages are rejected and change nothing: three lines, an empty line, a line of 17 runes, or a newline in a line. So are `iconLines` with `iconText`, with `iconRef`, or on a top-level key. **Proof:** `cd driver && go test ./layers -run TestIconLinesInvalid` passes.
+- [x] **DoD-5** — A one-line caption over emoji and a text icon draw the same pixels as on `main`. `validateIconCaption` still rejects a newline. **Proof:** `cd driver && go test ./layers -run 'TestIconEmoji|TestIconText'` passes, with no change to the files in `driver/layers/testdata`.
+- [x] **DoD-6** — Two keys with the same lines, emoji, and color share one slot. A different line or color takes another slot. A count change stores no frame. **Proof:** `cd driver && go test ./layers -run TestIconLinesFrames` passes.
+- [x] **DoD-7** — `iconLines` survives a save and a load of `layers.json`, and an old file with no `iconLines` still loads at version 1. **Proof:** `cd driver && go test ./layers -run TestIconLinesPersist` passes.
+- [x] **DoD-8** — A `setLayerKey` with `iconLines` reaches the controller and draws a glyph. A bad one is logged and dropped. **Proof:** `cd driver && go test ./plugin -run TestSetLayerKeyIconLines` and `cd inbox && node --test test/protocol.test.js` pass.
+- [x] **DoD-9** — `driver/README.md` records the field, the layouts, and the sizes. **Proof:** `driver/README.md`, section "Protocol", bullet `iconLines`.
 - [ ] **DoD-10** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `cd inbox && node --test`, and the PR body.
 
 ## Risks

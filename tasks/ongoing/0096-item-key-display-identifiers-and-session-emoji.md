@@ -105,16 +105,17 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — An item with yellow `PROJ-123` and green `#42` gives `iconLines` `['PROJ-123', '#42']` and no `iconText`. **Proof:** `cd inbox && node --test --test-name-pattern=TestItemKeyTwoLines test/repos-item-key.test.js`
-- [ ] **DoD-2** — An item with one id gives `iconLines` of one entry. An item with no id and no session throws. **Proof:** `node --test --test-name-pattern=TestItemKeyOneLine test/repos-item-key.test.js`
-- [ ] **DoD-3** — With both ids null, `iconEmoji` is the one emoji of `session:<8hex>`, and `iconLines` is `[<8-hex id>]`. **Proof:** `node --test --test-name-pattern=TestItemKeySessionOnly test/repos-item-key.test.js`
-- [ ] **DoD-4** — With a yellow or a green id, `iconEmoji` is only the repo emoji. It never holds the session emoji, also when `session` is set. **Proof:** `node --test --test-name-pattern=TestItemKeyNoSessionEmoji test/repos-item-key.test.js`
-- [ ] **DoD-5** — The status table above holds for each `ci` and `agent` value, and the worst one wins. **Proof:** `node --test --test-name-pattern=TestItemKeyStatus test/repos-item-key.test.js`
-- [ ] **DoD-6** — A 20-rune id gives a line of 16 runes with `…` that ends in the last 5 runes. **Proof:** `node --test --test-name-pattern=TestItemKeyClip test/repos-item-key.test.js`
-- [ ] **DoD-7** — For 30 generated items, each key has at most 2 `iconLines` entries of at most 16 runes, no control character, one emoji ref that is a file under `assets/emoji/`, `count` 0, and no `iconRef` or `iconText`. **Proof:** `node --test --test-name-pattern=TestItemKeyWire test/repos-item-key.test.js`
-- [ ] **DoD-8** — The repo layer sends the `itemKey` fields for each item node. The existing suite still passes. **Proof:** `node --test --test-name-pattern=TestRepoLayerItemKeys test/repos-item-key.test.js` and `node --test`
+- [x] **DoD-1** — An item with yellow `PROJ-123` and green `#42` gives `iconLines` `['PROJ-123', '#42']` and no `iconText`. **Proof:** `cd inbox && node --test --test-name-pattern=TestItemKeyTwoLines test/repos-item-key.test.js`
+- [x] **DoD-2** — An item with one id gives `iconLines` of one entry. An item with no id and no session throws. **Proof:** `node --test --test-name-pattern=TestItemKeyOneLine test/repos-item-key.test.js`
+- [x] **DoD-3** — With both ids null, `iconEmoji` is the one emoji of `session:<8hex>`, and `iconLines` is `[<8-hex id>]`. **Proof:** `node --test --test-name-pattern=TestItemKeySessionOnly test/repos-item-key.test.js`
+- [x] **DoD-4** — With a yellow or a green id, `iconEmoji` is only the repo emoji. It never holds the session emoji, also when `session` is set. **Proof:** `node --test --test-name-pattern=TestItemKeyNoSessionEmoji test/repos-item-key.test.js`
+- [x] **DoD-5** — The status table above holds for each `ci` and `agent` value, and the worst one wins. **Proof:** `node --test --test-name-pattern=TestItemKeyStatus test/repos-item-key.test.js`
+- [x] **DoD-6** — A 20-rune id gives a line of 16 runes with `…` that ends in the last 5 runes. **Proof:** `node --test --test-name-pattern=TestItemKeyClip test/repos-item-key.test.js`
+- [x] **DoD-7** — For 30 generated items, each key has at most 2 `iconLines` entries of at most 16 runes, no control character, one emoji ref that is a file under `assets/emoji/`, `count` 0, and no `iconRef` or `iconText`. **Proof:** `node --test --test-name-pattern=TestItemKeyWire test/repos-item-key.test.js`
+- [x] **DoD-8** — The repo layer sends the `itemKey` fields for each item node. The existing suite still passes. **Proof:** `node --test --test-name-pattern=TestRepoLayerItemKeys test/repos-item-key.test.js` and `node --test`
 - [ ] **DoD-9** — On the board, a one-line key, a two-line key, and a session-only key draw as above, and a failing PR shows a red strip. **Proof:** Keith's check, in Notes
-- [ ] **DoD-10** — `inbox/README.md` "Item keys" holds the caption rule, the emoji rule, and the status table. The PR body links to this spec. **Proof:** `inbox/README.md`; the PR in the `pr` field
+  - Not ticked: needs the board. @keith: see Notes.
+- [x] **DoD-10** — `inbox/README.md` "Item keys" holds the caption rule, the emoji rule, and the status table. The PR body links to this spec. **Proof:** `inbox/README.md`; the PR in the `pr` field
 
 ## Risks
 
@@ -129,4 +130,10 @@ An outside reviewer verifies each item without help from the implementer. Each i
 
 ## Notes
 
-Board check: not done yet.
+Board check: not done yet. @keith: open the `repos` layer, press a repository with items, and check three keys.
+(1) A one-line key, such as a PR `#50` or a yellow item with no PR, shows one line over the repo emoji.
+(2) A two-line key, a yellow item with a PR such as `PROJ-123` over `#42`, shows both lines, and a failing PR shows a red strip.
+(3) A session-only key shows its 8-hex id over the session emoji.
+If two lines are too small to read at 128 pixels, lower the clip limit in `captionOf` (`MAX_CAPTION` in `inbox/src/render.js`).
+
+Implementation notes. The repo layer spreads `itemKey` in `inbox/src/plugins/repos.js`, where the item nodes are built, not in `repos-items.js`, which only decides which items exist. `itemStatus` in `repos-items.js` is now the `statusOf` of `repos-item-key.js`. `inbox/src/render.js` already passes every field of a plugin's `icon()` through, so only its comment and a test (`TestRenderPassesIconLines`) changed. `itemKey` takes the repository key (as the repository key draws its emoji from), so the item emoji matches the repository key. No store schema change: the schema stays at 10. The open question stays at its default: a yellow-only item has no strip colour.

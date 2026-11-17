@@ -761,9 +761,41 @@ title names it, and the session on the PR's branch are one thing.
 
 An item has `{ id, yellow, green, session, title, url }` and also `ci`
 (`failing`, `pending`, `passing`, `none`, or null) and `agent` (`waiting`,
-`running`, `done`, or null) for the drawing of task 0096. Until then, the key
-shows the yellow id, `#N`, or the session id, and one color: red for failing checks,
-yellow for a waiting agent, blue for pending checks or a running agent, green for the rest.
+`running`, `done`, or null). Task 0096 draws them (see "Item keys").
+
+**Item keys.** `itemKey(item, { repo, set })` in `src/plugins/repos-item-key.js`
+gives the picture of one item key. The repo layer sends it as `status`,
+`count` (always 0), `iconLines`, and `iconEmoji`. It never sends `iconText`:
+the driver takes `iconLines` for a child key (task 0094).
+
+- *Caption.* Line 1 is the yellow id, for example `PROJ-123`. Line 2 is the
+  green id, for example `#42`. An item with one id shows that id alone. An
+  item with neither shows the 8-hex session id. An item with no id and no
+  session is a bug, and `itemKey` throws.
+- *Long ids.* A line is cut to 16 runes and keeps its end, because the number
+  tells ids apart: 9 head runes, `…`, 6 tail runes. `PLATFORM-INFRA-12345`
+  shows as `PLATFORM-…-12345`.
+- *Emoji.* An item with a yellow or a green id shows one emoji: the emoji of
+  its repository, the same as on the repository key. It never shows the
+  session emoji, also when the item has a session. An item with neither id
+  shows one emoji: the emoji of `session:<8hex>`.
+- *Strip colour.* The worst of the checks and the agent wins, in the order
+  `ERROR`, `WARN`, `RUNNING`, `DONE`, none.
+
+| Source | Value | Strip |
+|---|---|---|
+| PR checks (`ci`) | failing | `ERROR` (red) |
+| PR checks | pending | `RUNNING` (blue) |
+| PR checks | passing | `DONE` (green) |
+| PR checks | none, or no PR | none |
+| Claude session (`agent`) | waiting | `WARN` (yellow) |
+| Claude session | running | `RUNNING` (blue) |
+| Claude session | done | `DONE` (green) |
+| Yellow item alone | no machine state | none |
+
+A PR that passes, with a session that waits, shows `WARN`. A key with two
+lines is a frame on the board: each distinct caption, emoji, and colour takes
+one frame slot, and one layer holds at most 20 keys.
 
 **Active session.** A session is in a repository when its folder channel holds
 `.OWNER.NAME` with a segment edge on both sides, so `github.com.me.app.driver`

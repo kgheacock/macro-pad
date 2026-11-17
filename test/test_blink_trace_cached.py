@@ -77,8 +77,8 @@ def test_cached_run_with_no_show_fails():
     assert "no Show frames" in out.getvalue()
 
 
-def _pips_lines(show_times_us, stamp_us=40_000, group_gap_us=30_000, push_us=26_000):
-    """One Show frames with pips of six keys per entry: SHOW_WITH_PIPS_STARTED,
+def _badges_lines(show_times_us, stamp_us=40_000, group_gap_us=30_000, push_us=26_000):
+    """One Show frames with badges of six keys per entry: SHOW_WITH_PIPS_STARTED,
     the stamps (`stamp_us`), FRAMES_SHOWN, then two groups of three pushes."""
     lines = []
     for t in show_times_us:
@@ -92,28 +92,28 @@ def _pips_lines(show_times_us, stamp_us=40_000, group_gap_us=30_000, push_us=26_
     return lines
 
 
-def test_the_show_with_pips_started_code_is_13():
+def test_the_show_with_pips_started_code_is_13_and_the_badges_show_uses_it():
     assert blink_trace.SHOW_WITH_PIPS_STARTED == 13
 
 
-def test_pips_run_counts_the_stamps_in_six_keys_in_and_does_not_limit_the_span():
-    records = blink_trace.load_trace(_pips_lines([1_000_000, 2_000_000], group_gap_us=45_000))
+def test_badges_run_counts_the_stamps_in_six_keys_in_and_does_not_limit_the_span():
+    records = blink_trace.load_trace(_badges_lines([1_000_000, 2_000_000], group_gap_us=45_000))
     out = io.StringIO()
 
-    assert blink_trace.report(records, "pips", out) is True
+    assert blink_trace.report(records, "badges", out) is True
     text = out.getvalue()
     assert "shows 2" in text
-    assert "six keys in 111.1 ms (limit 215)" in text  # 40 stamp + 100 us + 45 gap + 26 push
+    assert "six keys in 111.1 ms (limit 230)" in text  # 40 stamp + 100 us + 45 gap + 26 push
     assert "push span 45.0 ms (not limited)" in text
 
 
-def test_pips_run_with_slow_stamps_fails():
-    records = blink_trace.load_trace(_pips_lines([1_000_000], stamp_us=200_000))
+def test_badges_run_with_slow_stamps_fails():
+    records = blink_trace.load_trace(_badges_lines([1_000_000], stamp_us=200_000))
 
-    assert blink_trace.report(records, "pips", io.StringIO()) is False
+    assert blink_trace.report(records, "badges", io.StringIO()) is False
 
 
-def test_pips_run_with_no_show_with_pips_fails():
+def test_badges_run_with_no_show_with_badges_fails():
     records = blink_trace.load_trace(_cached_lines([1_000_000]))
 
-    assert blink_trace.report(records, "pips", io.StringIO()) is False
+    assert blink_trace.report(records, "badges", io.StringIO()) is False

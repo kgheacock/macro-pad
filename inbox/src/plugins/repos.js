@@ -18,11 +18,12 @@ import { yellowFeed } from './repos-yellow.js';
 import { pullsFeed } from './repos-pulls.js';
 import { MAX_ITEMS, activeSessions, itemStatus, itemsOf, press } from './repos-items.js';
 import { MAX_CAPTION, REPO_MAX_CHILDREN, clip } from '../render.js';
+import { PAD_STATUS, RANK_STATUS, TOP_ICON, repoNode, topKey } from '../repo-key.js';
 
 export const REPOS_STATUSES = ['waiting', 'running', 'done'];
 
 // Pad status names (driver/layers/doc.go), by rank. Rank 1 is the lowest.
-export const PAD_STATUS = [null, 'DONE', 'RUNNING', 'WARN'];
+export { PAD_STATUS };
 
 // How long a session stays in the rows after its last message.
 export const ACTIVE_MS = 60 * 60 * 1000;
@@ -33,7 +34,7 @@ export const SESSION_PLUGIN = 'repos';
 // The top key, the id of a repository's child, and the picture of the top
 // key (under macropadd's assets directory).
 export const TOP_ID = 'repos';
-export const TOP_ICON = 'github.png';
+export { TOP_ICON };
 const REPO_PREFIX = 'repo.';
 export const repoId = (key) => `${REPO_PREFIX}${key}`;
 // The key under which `sent` holds an item node of one repository.
@@ -123,30 +124,26 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet, store = nu
       // The highest rank of the sessions of each repository, and of all.
       const ranks = new Map();
       let top = 0;
-      let waiting = 0;
       for (const row of rows) {
         const r = rank(row);
         top = Math.max(top, r);
-        if (r === 3) waiting++;
         const key = sessionRepo(row.channel);
         ranks.set(key, Math.max(ranks.get(key) ?? 0, r));
       }
 
       // Every repository of the feed, in the order of the ledger, once each.
       const wanted = [];
+      const repoByKey = new Map();
       for (const repo of orderRepos(fed.repos ?? [], fed.scores)) {
         if (wanted.includes(repo.key)) continue;
         wanted.push(repo.key);
         names.set(repo.key, repo.name);
+        repoByKey.set(repo.key, repo);
       }
       if (wanted.length > REPO_MAX_CHILDREN && !cutLogged) {
         cutLogged = true;
         log(`the feed has ${wanted.length} repositories; the pad shows the first ${REPO_MAX_CHILDREN}`);
       }
-
-      const key = { id: TOP_ID, status: PAD_STATUS[top] ?? '', count: waiting, iconRef: TOP_ICON };
-      if (slot !== undefined) key.slot = slot;
-      set(out, TOP_ID, key);
 
       const open = path ? path[0] === TOP_ID : active === TOP_ID;
 
@@ -205,17 +202,29 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet, store = nu
         );
       };
 
-      for (const k of shown) {
-        const id = repoId(k);
+      // The top key shows the totals of the repository keys (task 0092) and
+      // the worst status of all sessions, also of one whose repository the
+      // pad does not show. It goes first: a child needs its parent.
+      const nodes = shown.map((k) => {
         const name = names.get(k) ?? k;
-        const fields = {
-          id,
-          parent: TOP_ID,
-          status: PAD_STATUS[ranks.get(k) ?? 0] ?? '',
-          count: 0,
-          iconText: clip(name, MAX_CAPTION),
-          iconEmoji: [emojiFor(componentInput(k), emojiSet).iconRef],
+        const repo = repoByKey.get(k);
+        return {
+          key: k,
+          name,
+          issues: repo?.issues ?? 0,
+          prs: repo?.prs ?? 0,
+          yellow: yellow[name] ?? 0,
+          status: RANK_STATUS[ranks.get(k) ?? 0],
         };
+      });
+      const topFields = topKey(nodes, [RANK_STATUS[top]]);
+      if (slot !== undefined) topFields.slot = slot;
+      set(out, TOP_ID, topFields);
+
+      for (const node of nodes) {
+        const k = node.key;
+        const id = repoId(k);
+        const fields = repoNode(node, emojiSet);
         if (hasItems(k) || (k === openKey && sent.get(id)?.includes('"opens":true'))) fields.opens = true;
         set(out, id, fields);
       }
@@ -263,7 +272,8 @@ export default {
 (\$INBOX_REPOS_OWNER, default kgheacock), the ones you worked on first. A
 Claude Code session colours the key of its repository: waiting (yellow),
 running (blue), done (green). The top key shows the highest status of all
-sessions, and its pip counts the sessions that wait. A session stays on
+sessions, and its badges total the open issues (red), the open PRs (green)
+and the yellow items of its repositories. A session stays on
 for an hour after its last message. A press on a repository key opens its
 items: the yellow items of $INBOX_REPOS_YELLOW_CMD, its open PRs, and its
 Claude sessions, one key for one piece of work. A press on an item opens its

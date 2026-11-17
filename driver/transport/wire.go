@@ -51,14 +51,18 @@ const (
 	// order of the frames, so a key state is never overwritten by the next one,
 	// and needs no gap between two of them (task 0059).
 	MessageTypeKeyState MessageType = 12
-	// MessageTypeStorePipSheet is a host→device frame that carries the sprites
-	// of the count pip. See "Store pip sheet" in docs/wire-protocol.md (task
-	// 0062).
-	MessageTypeStorePipSheet MessageType = 13
-	// MessageTypeShowFramesPips is a host→device frame that names a slot and a
-	// count for each key. See "Show frames with pips" in
-	// docs/wire-protocol.md (task 0062).
-	MessageTypeShowFramesPips MessageType = 14
+	// Types 13 and 14 (Store pip sheet and Show frames with pips, task 0062)
+	// are retired: the driver no longer sends them, and the firmware still
+	// accepts them until a later task removes them (task 0091).
+
+	// MessageTypeStoreBadgeSheet is a host→device frame that carries the
+	// sprites of the three count badges. See "Store badge sheet" in
+	// docs/wire-protocol.md (task 0091).
+	MessageTypeStoreBadgeSheet MessageType = 15
+	// MessageTypeShowFramesBadges is a host→device frame that names a slot and
+	// three counts for each key. See "Show frames with badges" in
+	// docs/wire-protocol.md (task 0091).
+	MessageTypeShowFramesBadges MessageType = 16
 )
 
 const (

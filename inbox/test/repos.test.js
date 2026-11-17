@@ -47,7 +47,7 @@ test('one repo child per fed repo', () => {
   };
   const messages = plan(r, { fed });
   const k = keys(messages);
-  assert.deepEqual(k.repos, { id: 'repos', status: '', count: 0, iconRef: 'github.png', slot: 2 });
+  assert.deepEqual(k.repos, { id: 'repos', status: '', iconRef: 'github.png', slot: 2 });
   // The order of the ledger. The key of a name with a dot has the dot as -
   // (task 0089's open question); the caption keeps the name.
   assert.deepEqual(children(messages), ['repo.zed', 'repo.keithheacock-com', 'repo.macro-pad']);
@@ -56,7 +56,6 @@ test('one repo child per fed repo', () => {
       id: `repo.${key}`,
       parent: 'repos',
       status: '',
-      count: 0,
       iconText: name,
       iconEmoji: [emojiFor(componentInput(key)).iconRef],
     });
@@ -107,11 +106,11 @@ test('a waiting session colours its repo key and the top key', () => {
   ];
   const k = keys(plan(r, { fed, unseen }));
   assert.deepEqual([k['repo.macro-pad'].status, k['repo.other'].status], ['WARN', 'RUNNING']);
-  assert.deepEqual([k.repos.status, k.repos.count], ['WARN', 1]);
+  assert.deepEqual([k.repos.status, k.repos.count], ['WARN', undefined]);
   // Seen: no colour on the repo, the top key, or the pip.
   const seen = [session('macro-pad.3f2a91c0', {}, 4)];
   const after = keys(plan(r, { fed, unseen: seen }));
-  assert.deepEqual([after['repo.macro-pad'].status, after['repo.other'].status, after.repos.status, after.repos.count], ['', '', '', 0]);
+  assert.deepEqual([after['repo.macro-pad'].status, after['repo.other'].status, after.repos.status, after.repos.count], ['', '', '', undefined]);
   // Done is green.
   const done = keys(plan(r, { fed, unseen: [session('other.bbbbbbbb', { done: 2 }, 5)] }));
   assert.deepEqual([done['repo.other'].status, done.repos.status], ['DONE', 'DONE']);

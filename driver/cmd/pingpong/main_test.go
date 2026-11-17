@@ -40,11 +40,11 @@ func (f *fakeTransport) ShowFrames(slots []byte) error {
 	return nil
 }
 
-func (f *fakeTransport) StorePipSheet(colors []uint16, pixels []byte) error {
+func (f *fakeTransport) StoreBadgeSheet(colors []uint16, pixels []byte) error {
 	return nil
 }
 
-func (f *fakeTransport) ShowFramesWithPips(slots, counts []byte) error {
+func (f *fakeTransport) ShowFramesWithBadges(slots []byte, badges []transport.Badges) error {
 	return nil
 }
 

@@ -8,6 +8,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -66,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	productID := fs.Uint("product-id", 0, "USB product ID of the macro pad, e.g. 0x10A3")
 	serialNumber := fs.String("serial", "", "USB serial number, to pick one device when more than one matches")
 	cdcPort := fs.String("cdc-port", "", "CDC serial port to use directly, bypassing discovery")
-	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, pips, or warmup (send nothing)")
+	scenario := fs.String("scenario", "single", "which run to send: single, burst, busyburst, sync, glyphs, icons, batch, cached, badges, or warmup (send nothing)")
 	keyStateOverHID := fs.Bool("key-state-over-hid", false, "send key states as HID reports, 150 ms apart, as before task 0059; for the burst and busyburst scenarios, which test lost HID reports")
 	assetsDir := fs.String("assets-dir", "../assets", "directory of 128x128 PNG icons, for the icons scenario")
 	traceFile := fs.String("trace-file", "", "write the board's trace to this JSONL file (required)")
@@ -109,10 +110,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "cached":
 		// Task 0061: store two sets of six frames, then show them in turn.
 		script = func(dev transport.Transport) error { return sendCached(dev, stdout, *assetsDir) }
-	case "pips":
-		// Task 0062: send the pip sheet and six frames, then show them in turn
-		// with a count on each key.
-		script = func(dev transport.Transport) error { return sendPips(dev, stdout, *assetsDir) }
+	case "badges":
+		// Task 0091: send the badge sheet and six frames, then show them in turn
+		// with three badges on each key.
+		script = func(dev transport.Transport) error { return sendBadges(dev, stdout, *assetsDir) }
 	case "warmup":
 		// Sends nothing. The first connection after the board reloads
 		// code.py has given an unreadable trace stream and no decoded
@@ -120,7 +121,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// `make blink-trace` opens the board once before it measures.
 		script = func(transport.Transport) error { return nil }
 	default:
-		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, batchloss, cached, pips or warmup\n", *scenario)
+		fmt.Fprintf(stderr, "blinksend: unknown scenario %q, want single, burst, busyburst, sync, glyphs, icons, batch, batchloss, cached, badges or warmup\n", *scenario)
 		return 2
 	}
 
@@ -341,21 +342,22 @@ func sendCached(dev transport.Transport, stdout io.Writer, assetsDir string) err
 	return nil
 }
 
-// sendPips sends the pip sheet, stores six frames in slots 0 to 5, one for each
-// status color, and then shows them in turn with a count on every key, one Show
-// frames with pips message for all six each time. `tools/blink_trace.py report
-// --scenario=pips` reads `six keys in`, which includes the stamps, and `push
-// span` from the trace, for each Show (task 0062).
-func sendPips(dev transport.Transport, stdout io.Writer, assetsDir string) error {
-	sheet, err := layers.BuildPipSheet()
+// sendBadges sends the badge sheet, stores six frames in slots 0 to 5, a frame
+// of each of the five status colors and a plain white tile, and then shows them
+// in turn with three badges on every key, one Show frames with badges message
+// for all six each time. The owner reads the discs on the panels (task 0091's
+// DoD-10), and `tools/blink_trace.py report --scenario=badges` reads `six keys
+// in`, which includes the stamps, and `push span` from the trace, for each Show.
+func sendBadges(dev transport.Transport, stdout io.Writer, assetsDir string) error {
+	sheet, err := layers.BuildBadgeSheet()
 	if err != nil {
 		return err
 	}
-	if err := dev.StorePipSheet(sheet.Colors, sheet.Pixels); err != nil {
+	if err := dev.StoreBadgeSheet(sheet.Colors, sheet.Pixels); err != nil {
 		return err
 	}
 	// The frames are what a layer stores: the icon on its white round, with no
-	// pip, because the board stamps the pip.
+	// badge, because the board stamps the badges.
 	names, err := filepath.Glob(filepath.Join(assetsDir, "*.png"))
 	if err != nil {
 		return err
@@ -365,30 +367,39 @@ func sendPips(dev transport.Transport, stdout io.Writer, assetsDir string) error
 		if int(key) >= len(names) {
 			return fmt.Errorf("%s holds %d PNG files, want at least 6", assetsDir, len(names))
 		}
-		color := layers.PipColors[int(key)%len(layers.PipColors)]
-		png, err := layers.RenderGlyph(assetsDir, filepath.Base(names[key]), 0, color)
-		if err != nil {
-			return err
-		}
-		pixels, err := transport.DecodePNGToRGB565(png)
-		if err != nil {
-			return err
+		color := layers.BadgeColors[int(key)%len(layers.BadgeColors)]
+		var pixels []byte
+		if int(key) < len(layers.BadgeColors) {
+			png, err := layers.RenderGlyph(assetsDir, filepath.Base(names[key]), layers.Badges{}, color)
+			if err != nil {
+				return err
+			}
+			if pixels, err = transport.DecodePNGToRGB565(png); err != nil {
+				return err
+			}
+		} else {
+			// The sixth key is a white tile, as a text icon is.
+			color = layers.ColorNone
+			pixels = bytes.Repeat([]byte{0xFF, 0xFF}, transport.CustomGlyphWidth*transport.CustomGlyphHeight)
 		}
 		if err := dev.StoreFrame(key, color, pixels); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintln(stdout, "blinksend: stored the pip sheet and 6 frames")
+	fmt.Fprintln(stdout, "blinksend: stored the badge sheet and 6 frames")
 	time.Sleep(settle)
 
-	counts := [][]byte{{1, 12, 99, 100, 7, 42}, {2, 13, 98, 255, 8, 41}}
+	sets := [2][]transport.Badges{
+		{{Red: 1, Green: 12, Yellow: 99}, {Red: 7, Green: 3, Yellow: 1}, {Red: 42, Green: 42, Yellow: 42}, {Red: 100, Green: 5, Yellow: 9}, {Red: 9, Green: 100, Yellow: 10}, {Red: 12, Green: 34, Yellow: 56}},
+		{{Red: 2, Green: 13, Yellow: 98}, {Red: 8, Green: 4, Yellow: 2}, {Red: 41, Green: 41, Yellow: 41}, {Red: 255, Green: 6, Yellow: 8}, {Red: 10, Green: 255, Yellow: 11}, {Red: 13, Green: 35, Yellow: 57}},
+	}
 	slots := []byte{0, 1, 2, 3, 4, 5}
 	for i := 0; i < cachedShows; i++ {
 		start := time.Now()
-		if err := dev.ShowFramesWithPips(slots, counts[i%2]); err != nil {
+		if err := dev.ShowFramesWithBadges(slots, sets[i%2]); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "blinksend: show %d with pips %v, write %s\n", i, counts[i%2], time.Since(start).Round(time.Microsecond))
+		fmt.Fprintf(stdout, "blinksend: show %d with badges %v, write %s\n", i, sets[i%2], time.Since(start).Round(time.Microsecond))
 		time.Sleep(cachedSpacing)
 	}
 	return nil

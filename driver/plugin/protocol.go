@@ -152,14 +152,19 @@ type SignalPayload struct {
 // id on the slot drops the message. A message with only ID and Slot
 // reserves the slot. See task 0057.
 type SetLayerKeyPayload struct {
-	ID      string   `json:"id"`
-	Parent  string   `json:"parent,omitempty"`
-	Path    []string `json:"path,omitempty"`
-	Slot    *int     `json:"slot,omitempty"`
-	Icon    byte     `json:"icon"`
-	Status  string   `json:"status"`
-	Count   int      `json:"count"`
-	IconRef string   `json:"iconRef"`
+	ID     string   `json:"id"`
+	Parent string   `json:"parent,omitempty"`
+	Path   []string `json:"path,omitempty"`
+	Slot   *int     `json:"slot,omitempty"`
+	Icon   byte     `json:"icon"`
+	Status string   `json:"status"`
+	// Count is the red count of the key's badges. CountGreen and CountYellow
+	// are the green and the yellow count, 0 by default (task 0091). A message
+	// with only Count draws one red badge, as before.
+	Count       int    `json:"count"`
+	CountGreen  int    `json:"countGreen,omitempty"`
+	CountYellow int    `json:"countYellow,omitempty"`
+	IconRef     string `json:"iconRef"`
 	// IconText is words drawn as the icon instead of IconRef (task 0069), or
 	// the caption over IconEmoji.
 	IconText string `json:"iconText,omitempty"`

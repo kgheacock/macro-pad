@@ -409,7 +409,7 @@ function fedRepos(answers) {
   const plugin = {
     ...repos,
     feed: {
-      ...repos.feed,
+      ...repos.feed[0],
       fetch: async () => {
         const next = answers[Math.min(runs, answers.length - 1)];
         runs++;
@@ -434,16 +434,21 @@ test('TestDaemonFeed', async (t) => {
   const server = await serve(t);
   const writer = openStore(sc.db, undefined, { plugin: 'repos' });
   t.after(() => writer.close());
-  writer.insert('macro-pad.3f2a91c0', 'needs input', sc.root, { status: 'waiting' });
-  const { plugin } = fedRepos([oneRepo()]);
+  writer.insert('github.com.kgheacock.macro-pad.3f2a91c0', 'needs input', sc.root, { status: 'waiting' });
+  const { plugin } = fedRepos([
+    oneRepo({ repos: [{ name: 'macro-pad', key: 'macro-pad', url: 'u', fork: false, archived: false, pushedAt: null, issues: 3, prs: 2 }] }),
+  ]);
   // A slow poll and a slow feed: only the first run, at start, can draw it.
   const started = Date.now();
   launch(t, sc, server, { plugin, pollMs: 10_000, feedMs: 10_000 });
   await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
   assert.ok(Date.now() - started < 1000);
   const top = server.received.findLast((m) => m.setLayerKey?.id === 'repos').setLayerKey;
-  assert.deepEqual([top.status, top.count], ['WARN', 1]);
+  // The top key shows the totals of the repo keys (task 0092), not the sessions.
+  assert.deepEqual([top.status, top.count, top.countGreen, top.countYellow], ['WARN', 3, 2, undefined]);
   const key = server.received.findLast((m) => m.setLayerKey?.id === 'repo.macro-pad').setLayerKey;
+  assert.deepEqual([key.count, key.countGreen, key.countYellow], [3, 2, undefined]);
+  // The session is in the layer, so the key opens (task 0095).
   assert.deepEqual([key.parent, key.opens, key.status, key.iconText], ['repos', true, 'WARN', 'macro-pad']);
   // The first connect removes the keys of the retired plugins.
   const removed = server.received.filter((m) => m.kind === 'removeLayerKey').map((m) => m.removeLayerKey.id);
@@ -452,7 +457,7 @@ test('TestDaemonFeed', async (t) => {
   server.layerChanged('repos');
   pressChild(server, 'repos', 'repo.macro-pad');
   await pause(150);
-  assert.deepEqual(counts(writer), { 'macro-pad.3f2a91c0': 1 });
+  assert.deepEqual(counts(writer), { 'github.com.kgheacock.macro-pad.3f2a91c0': 1 });
 });
 
 test('TestDaemonFeedFails', async (t) => {
@@ -533,4 +538,70 @@ test('TestReposColdStart', async (t) => {
   // The next good read replaces it.
   await waitFor(() => fed.seen.some((answer) => answer && answer.offline === null), 2000, 'the live answer');
   assert.deepEqual(writer.listRepos('kgheacock').map((r) => [r.name, r.issues, r.prs]), [['macro-pad', 0, 5]]);
+});
+
+test('TestDaemonRunsEveryFeed', async (t) => {
+  // The first feed draws; the second rejects every run.
+  {
+    const sc = scratch(t);
+    const server = await serve(t);
+    let bad = 0;
+    const plugin = {
+      ...repos,
+      feed: [
+        { ...reposFeed, fetch: async () => oneRepo(), sync: () => 0 },
+        {
+          source: 'second feed',
+          everyMs: 20,
+          fetch: async () => {
+            bad++;
+            throw new Error('down');
+          },
+          sync: () => 0,
+        },
+      ],
+    };
+    const { logs } = launch(t, sc, server, { plugin, feedMs: 20 });
+    await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
+    await waitFor(() => bad >= 3, 1000, 'three failed runs');
+    // One line for three equal failures, and the first feed was not logged.
+    assert.deepEqual(logs.filter((line) => line.startsWith('cannot read')), ['cannot read second feed: down']);
+  }
+
+  // The first feed rejects; the second still runs and its rows draw.
+  {
+    const sc = scratch(t);
+    const server = await serve(t);
+    let first = 0;
+    const plugin = {
+      name: 'basic',
+      rules: { id: 'inbox', icon: 'gmail.png' },
+      feed: [
+        {
+          source: 'first feed',
+          everyMs: 20,
+          fetch: async () => {
+            first++;
+            throw new Error('down');
+          },
+          sync: () => 0,
+        },
+        {
+          source: 'second feed',
+          everyMs: 20,
+          fetch: async ({ store }) => store,
+          sync: (store) => {
+            if (store.count('news') === 0) store.insert('news', 'from the second feed', sc.root);
+            return 1;
+          },
+        },
+      ],
+    };
+    const real = await import('../src/plugins/basic.js');
+    plugin.rules = real.default.rules;
+    plugin.createRenderer = real.default.createRenderer;
+    launch(t, sc, server, { plugin: { ...real.default, feed: plugin.feed }, feedMs: 20 });
+    await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'news'), 1000, 'the key of the second feed');
+    assert.ok(first >= 1);
+  }
 });

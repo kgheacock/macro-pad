@@ -6,7 +6,8 @@
     {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}},
     {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}},
     {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "opens": true}},
-    {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "count": 3, "countGreen": 2, "countYellow": 1}}
+    {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "count": 3, "countGreen": 2, "countYellow": 1}},
+    {"kind": "setLayerKey", "setLayerKey": {"id": "PROJ-123", "parent": "repo.macro-pad", "status": "RUNNING", "iconLines": ["PROJ-123", "#42"], "iconEmoji": ["emoji/1f98a.png"]}}
   ],
   "removeLayerKey": [
     {"kind": "removeLayerKey", "removeLayerKey": {"id": "build", "parent": "github"}},

@@ -83,20 +83,41 @@ func RenderGlyph(assetsDir, ref string, counts Badges, keyColor uint16) ([]byte,
 // the color the edges of the round and the badges are blended against, so that
 // no edge pixel is half transparent (tasks 0062 and 0091).
 func renderGlyph(assetsDir, ref string, counts Badges, keyColor uint16) ([]byte, error) {
-	return renderIcon(assetsDir, ref, "", "", false, counts, keyColor)
+	return renderIcon(assetsDir, ref, "", "", "", false, counts, keyColor)
 }
 
 // renderIcon is renderGlyph for an icon that is a PNG at ref, the words in text
-// (task 0069), or the emoji in emoji, joined by line breaks, with text as their
-// caption (task 0073). A text icon is a plain white tile, so the key color
+// (task 0069), the emoji in emoji, joined by line breaks, with text as their
+// caption (task 0073), or the lines in lines, joined by line breaks, with the
+// emoji in emoji, if any, under them (task 0094). An id tile is a plain white tile
+// with the key color in its strip, so its badges are blended as an emoji
+// tile's are, and it has no round. A text icon is a plain white tile, so the key color
 // cannot show; the badges are blended against ColorNone, as the board draws them on a
 // frame stored for a text icon. An emoji icon is a white tile too, with the key
 // color only in its strip (task 0082), so its badges are blended the same way. With
 // round, an emoji icon is drawn on the round of task 0073 instead, as a
 // top-level key is, and the key color shows around it.
-func renderIcon(assetsDir, ref, text, emoji string, round bool, counts Badges, keyColor uint16) ([]byte, error) {
+func renderIcon(assetsDir, ref, text, lines, emoji string, round bool, counts Badges, keyColor uint16) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
-	if emoji != "" {
+	if lines != "" {
+		if ref != "" || text != "" {
+			return nil, errors.New("iconLines excludes iconRef and iconText")
+		}
+		if round {
+			return nil, errors.New("iconLines has no round: a top-level key has no iconLines")
+		}
+		ls, refs := splitEmoji(lines), splitEmoji(emoji)
+		if err := ValidateIconLines(ls); err != nil {
+			return nil, err
+		}
+		if err := ValidateIconEmoji(refs); err != nil {
+			return nil, err
+		}
+		if err := drawIconLines(canvas, assetsDir, refs, ls, keyColor); err != nil {
+			return nil, err
+		}
+		keyColor = ColorNone
+	} else if emoji != "" {
 		refs := splitEmoji(emoji)
 		if ref != "" {
 			return nil, errors.New("iconRef and iconEmoji are exclusive")

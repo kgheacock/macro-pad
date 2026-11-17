@@ -5,27 +5,41 @@
 // session colours the key of its repository and the top key: waiting
 // (yellow), running (blue), done (green).
 //
-// The plugin has no key for a session or a PR. Its rows are the sessions only.
+// A press on a repository key opens its layer (task 0095): the yellow items
+// of the criteria provider, the open PRs, and the active Claude sessions of
+// the repository, merged so that one piece of work is one key (see
+// repos-items.js). The items exist only while that layer is open.
 
-import { componentInput, componentOf, emojiFor, splitSessionChannel } from '../emoji.js';
+import { componentOf, splitSessionChannel } from '../emoji.js';
 import { orderRepos, nextShown } from '../activity.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from '../protocol.js';
 import { feed } from '../repolist.js';
-import { MAX_CAPTION, REPO_MAX_CHILDREN, clip } from '../render.js';
+import { yellowFeed } from './repos-yellow.js';
+import { pullsFeed } from './repos-pulls.js';
+import { MAX_ITEMS, activeSessions, itemsOf, press } from './repos-items.js';
+import { itemKey } from './repos-item-key.js';
+import { REPO_MAX_CHILDREN } from '../render.js';
+import { PAD_STATUS, RANK_STATUS, TOP_ICON, repoNode, topKey } from '../repo-key.js';
 
 export const REPOS_STATUSES = ['waiting', 'running', 'done'];
 
 // Pad status names (driver/layers/doc.go), by rank. Rank 1 is the lowest.
-export const PAD_STATUS = [null, 'DONE', 'RUNNING', 'WARN'];
+export { PAD_STATUS };
 
 // How long a session stays in the rows after its last message.
 export const ACTIVE_MS = 60 * 60 * 1000;
 
+// The plugin the Claude Code hook reports sessions to.
+export const SESSION_PLUGIN = 'repos';
+
 // The top key, the id of a repository's child, and the picture of the top
 // key (under macropadd's assets directory).
 export const TOP_ID = 'repos';
-export const TOP_ICON = 'github.png';
-export const repoId = (key) => `repo.${key}`;
+export { TOP_ICON };
+const REPO_PREFIX = 'repo.';
+export const repoId = (key) => `${REPO_PREFIX}${key}`;
+// The key under which `sent` holds an item node of one repository.
+const itemNodeKey = (repoKey, id) => `${repoId(repoKey)}/${id}`;
 
 // The keys of the plugins this one replaces. The first connect removes them,
 // so no key stays in the pad's layers.json.
@@ -48,7 +62,11 @@ export const sessionRepo = (channel) => componentOf(splitSessionChannel(channel)
 // renderer: `plan` draws nothing before the first answer of the feed; the
 // first plan after a connect removes the keys of the retired plugins and the
 // `repos` key itself, with whatever an earlier daemon left under it.
-export function createReposRenderer({ slot, log = () => {}, emojiSet } = {}) {
+//
+// With a `store` the renderer also reads the yellow counts, the open PRs, and
+// the PR and branch tables: a repository key has `opens` only when it has
+// items, and while its layer is open the renderer sends them (task 0095).
+export function createReposRenderer({ slot, log = () => {}, emojiSet, store = null } = {}) {
   const sent = new Map();
   // The keys shown, in the order macropadd holds them.
   let shown = [];
@@ -57,6 +75,12 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet } = {}) {
   const names = new Map();
   let known = false;
   let cutLogged = false;
+  let readLogged = false;
+  // The repository whose items are on the pad, with the ids in the order
+  // sent and the last item sent under each id. Null when no layer is open.
+  let itemsKey = null;
+  let itemIds = [];
+  let itemData = new Map();
 
   const set = (out, key, fields) => {
     const json = JSON.stringify(fields);
@@ -73,17 +97,22 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet } = {}) {
   return {
     topId: TOP_ID,
 
-    owns: () => false,
+    // A press on an item reaches the plugin; the item layer is the only one
+    // that has presses (a repository key opens its layer).
+    owns: (parent) => itemsKey !== null && parent === repoId(itemsKey),
 
     reset() {
       sent.clear();
       shown = [];
       known = false;
+      itemsKey = null;
+      itemIds = [];
+      itemData = new Map();
     },
 
     target: () => null,
 
-    plan({ unseen: rows, active, path, fed }) {
+    plan({ unseen: rows, active, path, fed, now = Date.now() }) {
       // The repositories are not known before the first answer.
       if (!fed) return [];
       const out = [];
@@ -96,32 +125,42 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet } = {}) {
       // The highest rank of the sessions of each repository, and of all.
       const ranks = new Map();
       let top = 0;
-      let waiting = 0;
       for (const row of rows) {
         const r = rank(row);
         top = Math.max(top, r);
-        if (r === 3) waiting++;
         const key = sessionRepo(row.channel);
         ranks.set(key, Math.max(ranks.get(key) ?? 0, r));
       }
 
       // Every repository of the feed, in the order of the ledger, once each.
       const wanted = [];
+      const repoByKey = new Map();
       for (const repo of orderRepos(fed.repos ?? [], fed.scores)) {
         if (wanted.includes(repo.key)) continue;
         wanted.push(repo.key);
         names.set(repo.key, repo.name);
+        repoByKey.set(repo.key, repo);
       }
       if (wanted.length > REPO_MAX_CHILDREN && !cutLogged) {
         cutLogged = true;
         log(`the feed has ${wanted.length} repositories; the pad shows the first ${REPO_MAX_CHILDREN}`);
       }
 
-      const key = { id: TOP_ID, status: PAD_STATUS[top] ?? '', count: waiting, iconRef: TOP_ICON };
-      if (slot !== undefined) key.slot = slot;
-      set(out, TOP_ID, key);
-
       const open = path ? path[0] === TOP_ID : active === TOP_ID;
+
+      // The repository whose layer is open.
+      const wantKey = path?.[0] === TOP_ID && path[1]?.startsWith(REPO_PREFIX) ? path[1].slice(REPO_PREFIX.length) : null;
+      // Leaving a repository layer: its items go, before its key can.
+      if (itemsKey !== null && itemsKey !== wantKey) {
+        for (const id of itemIds) {
+          sent.delete(itemNodeKey(itemsKey, id));
+          out.push(removeLayerKeyMessage(id, [TOP_ID, repoId(itemsKey)]));
+        }
+        itemsKey = null;
+        itemIds = [];
+        itemData = new Map();
+      }
+
       if (open) {
         // Nothing a person sees moves: a new repository goes last.
         shown = nextShown({ shown, wanted, open: true, max: REPO_MAX_CHILDREN });
@@ -136,18 +175,83 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet } = {}) {
         shown = next;
       }
 
-      for (const k of shown) {
-        const id = repoId(k);
+      // Its items go to the pad only when the pad shows its key.
+      const openKey = wantKey !== null && shown.includes(wantKey) ? wantKey : null;
+
+      // Which repositories have items: a yellow count, an open PR, or an
+      // active session. The layer that is open keeps `opens`, so it stays
+      // open if its last item goes.
+      let yellow = {};
+      let pulls = {};
+      if (store) {
+        try {
+          yellow = store.yellowCounts(now);
+          pulls = store.pullCounts();
+          readLogged = false;
+        } catch (e) {
+          if (!readLogged) log(`cannot read the items of the repositories: ${e.message}`);
+          readLogged = true;
+        }
+      }
+      const owner = fed.owner ?? '';
+      const hasItems = (k) => {
         const name = names.get(k) ?? k;
-        set(out, id, {
-          id,
-          parent: TOP_ID,
-          opens: true,
-          status: PAD_STATUS[ranks.get(k) ?? 0] ?? '',
-          count: 0,
-          iconText: clip(name, MAX_CAPTION),
-          iconEmoji: [emojiFor(componentInput(k), emojiSet).iconRef],
-        });
+        return (
+          (yellow[name] ?? 0) > 0 ||
+          (pulls[k] ?? 0) > 0 ||
+          activeSessions(rows, { owner, name, now }).length > 0
+        );
+      };
+
+      // The top key shows the totals of the repository keys (task 0092) and
+      // the worst status of all sessions, also of one whose repository the
+      // pad does not show. It goes first: a child needs its parent.
+      const nodes = shown.map((k) => {
+        const name = names.get(k) ?? k;
+        const repo = repoByKey.get(k);
+        return {
+          key: k,
+          name,
+          issues: repo?.issues ?? 0,
+          prs: repo?.prs ?? 0,
+          yellow: yellow[name] ?? 0,
+          status: RANK_STATUS[ranks.get(k) ?? 0],
+        };
+      });
+      const topFields = topKey(nodes, [RANK_STATUS[top]]);
+      if (slot !== undefined) topFields.slot = slot;
+      set(out, TOP_ID, topFields);
+
+      for (const node of nodes) {
+        const k = node.key;
+        const id = repoId(k);
+        const fields = repoNode(node, emojiSet);
+        if (hasItems(k) || (k === openKey && sent.get(id)?.includes('"opens":true'))) fields.opens = true;
+        set(out, id, fields);
+      }
+
+      // The items of the open repository: a new one goes last, a known one
+      // changes in place, and none moves or goes while the layer is open.
+      if (openKey !== null && store) {
+        if (itemsKey === null) itemsKey = openKey;
+        try {
+          const { items } = itemsOf({ name: names.get(openKey) ?? openKey, owner, store, rows, now });
+          for (const item of items) {
+            if (!itemData.has(item.id) && itemIds.length >= MAX_ITEMS) continue;
+            if (!itemData.has(item.id)) itemIds.push(item.id);
+            itemData.set(item.id, item);
+          }
+        } catch (e) {
+          if (!readLogged) log(`cannot read the items of ${names.get(openKey) ?? openKey}: ${e.message}`);
+          readLogged = true;
+        }
+        for (const id of itemIds) {
+          set(out, itemNodeKey(openKey, id), {
+            id,
+            path: [TOP_ID, repoId(openKey)],
+            ...itemKey(itemData.get(id), { repo: openKey, set: emojiSet }),
+          });
+        }
       }
       return out;
     },
@@ -163,12 +267,19 @@ export default {
 (\$INBOX_REPOS_OWNER, default kgheacock), the ones you worked on first. A
 Claude Code session colours the key of its repository: waiting (yellow),
 running (blue), done (green). The top key shows the highest status of all
-sessions, and its pip counts the sessions that wait. A session stays on
-for an hour after its last message.`,
+sessions, and its badges total the open issues (red), the open PRs (green)
+and the yellow items of its repositories. A session stays on
+for an hour after its last message. A press on a repository key opens its
+items: the yellow items of $INBOX_REPOS_YELLOW_CMD, its open PRs, and its
+Claude sessions, one key for one piece of work. A press on an item opens its
+PR, else its yellow item, else its session's tab.`,
   rules: {
     id: TOP_ID,
     activeMs: ACTIVE_MS,
   },
-  createRenderer: ({ slot, log }) => createReposRenderer({ slot, log }),
-  feed,
+  createRenderer: ({ slot, log, store }) => createReposRenderer({ slot, log, store }),
+  press,
+  // The GitHub feed first: it sets what the renderer reads. The yellow
+  // provider (task 0093) and the PR feed (task 0095) write to the store only.
+  feed: [feed, yellowFeed, pullsFeed],
 };

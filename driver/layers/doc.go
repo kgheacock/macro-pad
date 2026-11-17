@@ -80,6 +80,10 @@ type Node struct {
 	// side on the round; a key in a child layer shows a hero and a sticker
 	// over a strip of the key color (task 0082). It excludes IconRef.
 	IconEmoji []string `json:"iconEmoji,omitempty"`
+	// IconLines is one or two lines of identifier on a key in a child layer,
+	// with or without IconEmoji (task 0094). It excludes IconText and IconRef,
+	// and a top-level key has none.
+	IconLines []string `json:"iconLines,omitempty"`
 	// Opens makes a press open this node's layer even when it has no
 	// children yet, so a plugin fills the layer after the press (task 0088).
 	Opens    bool   `json:"opens,omitempty"`
@@ -89,7 +93,7 @@ type Node struct {
 // hasContent reports whether n shows anything. A key with no content is a
 // reserved slot: the controller does not draw it.
 func (n *Node) hasContent() bool {
-	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.CountGreen != 0 || n.CountYellow != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || n.Opens || len(n.Children) > 0
+	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.CountGreen != 0 || n.CountYellow != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || len(n.IconLines) > 0 || n.Opens || len(n.Children) > 0
 }
 
 // Doc is the whole layers.json object.
@@ -258,6 +262,9 @@ func (d *Doc) Validate() error {
 		if err := k.validate(); err != nil {
 			return fmt.Errorf("layers: %s: %w", where, err)
 		}
+		if len(k.IconLines) > 0 {
+			return fmt.Errorf("layers: %s: a top-level key has no iconLines", where)
+		}
 		if seen[k.ID] {
 			return fmt.Errorf("layers: %s: duplicate id %q", where, k.ID)
 		}
@@ -353,7 +360,17 @@ func (n *Node) validate() error {
 	if err := ValidateIconEmoji(n.IconEmoji); err != nil {
 		return err
 	}
-	if len(n.IconEmoji) > 0 {
+	if err := ValidateIconLines(n.IconLines); err != nil {
+		return err
+	}
+	if len(n.IconLines) > 0 {
+		if n.IconRef != "" {
+			return errors.New("iconRef and iconLines are exclusive")
+		}
+		if n.IconText != "" {
+			return errors.New("iconText and iconLines are exclusive")
+		}
+	} else if len(n.IconEmoji) > 0 {
 		if n.IconRef != "" {
 			return errors.New("iconRef and iconEmoji are exclusive")
 		}

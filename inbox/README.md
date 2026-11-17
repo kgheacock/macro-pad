@@ -222,10 +222,12 @@ CREATE TABLE channel_here (  -- added in schema 3, keyed by plugin in schema 4
 );
 ```
 
-`PRAGMA user_version` is the schema version (now 7; version 2 added `status`,
+`PRAGMA user_version` is the schema version (now 10; version 2 added `status`,
 version 3 added `here` and `channel_here`, version 4 added `plugin`, version 5
 added `messages.session` and `branch_sessions`, version 6 added `repos`, see
-"Repositories", version 7 added `activity`, see "Activity"). An older
+"Repositories", version 7 added `activity`, see "Activity", version 8 moved
+the `ai` rows to `repos`, version 9 added `yellow_answers`, see "Yellow
+criteria", version 10 added `repo_pulls`, see "Repo layer"). An older
 file is migrated in one transaction; its rows belong to `basic`. A newer file
 is refused and left unchanged.
 
@@ -258,6 +260,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_DEBUG` | `1` adds a stack to an internal error. | unset |
 | `INBOX_GH` | The `gh` program the repos feed runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
 | `INBOX_REPOS_OWNER` | The GitHub user or organisation whose repositories the repos feed lists (see "Repositories"). `install.sh --repos-owner OWNER` sets it in the wrapper. | `kgheacock` |
+| `INBOX_REPOS_YELLOW_CMD` | The program that gives the yellow items of a repository (see "Yellow criteria"). `install.sh --yellow-cmd PATH` sets it in the wrapper. Also `INBOX_REPOS_YELLOW_EVERY` (seconds, default 300) and `INBOX_REPOS_YELLOW_TIMEOUT` (seconds, default 20). | unset |
 | `INBOX_REPOS_ARCHIVED` | `1` keeps archived repositories in the repos feed. | unset (archived ones stay out) |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
 | `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
@@ -384,8 +387,8 @@ inbox daemon
 ### Install at login
 
 ```
-inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--github-query Q]
-                         [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
+inbox/scripts/install.sh [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--repos-owner OWNER]
+                         [--yellow-cmd PATH] [--apps-root DIR] [--apps-count N] [--apps-run NAME=CMD]...
                          [--no-completions] [--dry-run]
 inbox/scripts/uninstall.sh [--purge] [--dry-run]
 ```
@@ -487,8 +490,7 @@ One top key, `repos`, with one child per repository of the repos feed (see
 child has the id `repo.KEY` (`KEY` is the repository key: the name in lower
 case, a dot becoming `-`, so `keithheacock.com` is `repo.keithheacock-com`),
 the repository's name as its caption, and the emoji of `repo:KEY`. A press
-opens the key's layer (`opens`), which has no keys yet (task 0095 fills it).
-Every repository of the feed shows, also one with no activity, up to
+on a key that has items opens its layer (see "Repo layer"). Every repository of the feed shows, also one with no activity, up to
 macropadd's 128 children; a longer feed is cut, and the daemon logs one line.
 
 Claude Code sessions report to this plugin through the hooks (see "Claude
@@ -505,9 +507,10 @@ draws no key, but it counts for the top key.
 - **A repository key** shows the highest status of the unseen messages of its
   sessions: waiting, then running, then done. A repository with no unseen
   message has no color. A stored status outside the three counts as `done`.
-- **The `repos` key** shows the highest status of all sessions, and its pip
-  counts the sessions that wait. A session stays in the rows for an hour after
-  its last message. The key has no color when every message is seen.
+- **The `repos` key** shows the highest status of all sessions, and the totals
+  of the counts of its repository keys (see "Repo keys"). A session stays in
+  the rows for an hour after its last message. The key has no color when every
+  message is seen.
 - **While the repos layer is open** no repository key moves or goes; a new
   repository goes last. When the layer is closed the keys follow the order.
 - **On every connect** the daemon removes the keys `ai-inbox`,
@@ -647,6 +650,184 @@ ledger keeps the kind, so a change needs no migration.
 is open, `nextShown` keeps the keys where they are and puts a new name at the
 end, so no key moves under your finger; when it is closed, the keys follow the
 order. The order moves within one feed run (60 s) of a write.
+
+### Yellow criteria
+
+The yellow items of a repository (task 0093) come from a program that you
+write, because only you know your criteria: for example the open JIRA tickets of
+the repository. The count on the repository key (task 0092) and the items under it
+(task 0095) read what this feed stores. Green stays "open PRs".
+
+**The contract.** Point `INBOX_REPOS_YELLOW_CMD` at an executable file (`install.sh
+--yellow-cmd PATH` writes the path into the wrapper). The repos feed runs it
+once per repository, without a shell, with the repository name (as GitHub
+spells it) as `argv[1]` and as `$INBOX_REPO`. It must print a JSON array on
+standard output and exit 0:
+
+```
+[{ "id": "PROJ-12", "title": "Fix the login", "url": "https://example.test/browse/PROJ-12" }]
+```
+
+The yellow count of the repository is the length of the list. The feed drops an
+item whose `id` is not `[A-Za-z0-9][A-Za-z0-9._-]{0,39}` or whose `url` is not
+`https://`, drops a repeated `id`, keeps the first 200 items, and cuts a title
+to 200 characters. Output that is not a JSON array, an exit other than 0, or
+more than 1 MiB of output fails the run. Without `INBOX_REPOS_YELLOW_CMD` the
+feed does nothing and logs nothing, and every count is 0.
+
+**Settings.**
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `INBOX_REPOS_YELLOW_CMD` | The program to run. | unset (no yellow items) |
+| `INBOX_REPOS_YELLOW_EVERY` | Seconds between two runs for one repository; at least 30. | `300` |
+| `INBOX_REPOS_YELLOW_TIMEOUT` | Seconds before a run is killed. | `20` |
+
+**Failure.** A slow or broken program never blanks a count: a failed run (exit
+1, a timeout, bad JSON) keeps the stored items, stores the error, and the
+repository waits one interval. The log gets one line per distinct error, for
+example `inbox: cannot read the yellow items of macro-pad: ... did not answer
+within 20 s`, not one per run. An answer older than 24 hours counts 0 and lists
+nothing. The feed runs apart from the GitHub feed, so a failure of one does not
+stop the other. Four runs go at once, and the daemon never waits for the program
+longer than its timeout. A script that starts other programs should `exec` the
+last one, so the kill reaches it.
+
+**Cost.** The program starts once per repository per interval: 100 repositories
+at 300 s make one start every 3 s. A script that must make fewer JIRA calls caches
+them in a file of its own.
+
+**Where credentials live.** Not in the repository, not in the wrapper (it has
+mode 755), and not in the store. The program reads its own from the macOS
+Keychain (`security find-generic-password -s NAME -w`), or from a file of mode
+600. `install.sh` has no option for a credential. The store keeps the first line
+of the standard error of a failed run, cut to 120 characters, and the log
+shows it: a program must not print a credential to standard error.
+`examples/yellow-jira.sh` is a complete example for JIRA, with the credential
+in the Keychain; the repository ships no JIRA client.
+
+The store keeps the answer in `yellow_answers(repo, items, checked_at, tried_at,
+error)` (schema 9), one row per repository name; `items` is the JSON list.
+`yellowCounts(now)` gives `{ repo: count }` and `yellowItems(repo, now)` the
+list, both ignoring an answer older than 24 hours.
+
+### Repo keys
+
+A repository key (task 0092) shows the emoji of `repo:KEY` as one picture, the
+repository name as the caption, and up to three count badges (task 0091).
+`src/repo-key.js` makes the fields; the renderer of the repos plugin reads the
+tables each time it plans, so the badges always show the tables as they are.
+
+- **Caption.** The repository name, at most 16 runes. A longer name is cut to
+  15 runes and "…".
+- **Red badge.** The open issues of the repository (`repos.issues`, task 0089),
+  in the field `count`.
+- **Green badge.** The open PRs (`repos.prs`), in `countGreen`.
+- **Yellow badge.** The items of the criteria provider (`yellowCounts`, task
+  0093; see "Yellow criteria"), in `countYellow`. The count is by repository
+  name, and an answer older than 24 hours counts 0.
+- **A count of 0** sets no field. Each message is a full upsert, so the driver
+  draws no badge for a field that is missing.
+- **A count above 99** draws as "99+". The inbox sends at most 100, so a
+  change from 150 to 160 sends no message.
+- **Strip.** The strip under the picture shows the worst session status of the
+  repository: `waiting` is `WARN`, `running` is `RUNNING`, `done` is `DONE`, and
+  none is no color.
+- **The `repos` key** keeps its picture (`github.png`), shows the sum of each
+  of the three counts over the repository keys on the pad (also capped at
+  100), and the worst status of all sessions.
+
+### Repo layer
+
+A press on a repository key (task 0095) opens the layer `repos` / `repo.KEY`.
+It holds one key for each piece of work in that repository: the yellow items of
+the criteria provider (see "Yellow criteria"), the open PRs, and the active
+Claude sessions. One piece of work is one key, because a ticket, the PR whose
+title names it, and the session on the PR's branch are one thing.
+
+**The merge.**
+
+1. Each yellow item is an item, with the id `y:ID`.
+2. Each open PR whose title holds a yellow id joins the first yellow item that has no PR yet.
+   The id must stand between characters that are not letters or digits, in any
+   letter case: `PROJ-123` is in `proj-123: fix login` and `fix (PROJ-123)`,
+   and not in `PROJ-1234` or `XPROJ-123`. A second PR for the same id, and a PR
+   that names no yellow id, is its own item, `pr:N`. The joined item takes the
+   PR's url and checks.
+3. A Claude session joins the item whose PR is on the session's branch
+   (`branch_sessions`, task 0081), or else the first yellow item whose id is in one of
+   the session's branches (for example `keith/PROJ-12-login`). One item holds one session;
+   any other session is its own item, `s:SID`.
+
+An item has `{ id, yellow, green, session, title, url }` and also `ci`
+(`failing`, `pending`, `passing`, `none`, or null) and `agent` (`waiting`,
+`running`, `done`, or null). Task 0096 draws them (see "Item keys").
+
+**Item keys.** `itemKey(item, { repo, set })` in `src/plugins/repos-item-key.js`
+gives the picture of one item key. The repo layer sends it as `status`,
+`count` (always 0), `iconLines`, and `iconEmoji`. It never sends `iconText`:
+the driver takes `iconLines` for a child key (task 0094).
+
+- *Caption.* Line 1 is the yellow id, for example `PROJ-123`. Line 2 is the
+  green id, for example `#42`. An item with one id shows that id alone. An
+  item with neither shows the 8-hex session id. An item with no id and no
+  session is a bug, and `itemKey` throws.
+- *Long ids.* A line is cut to 16 runes and keeps its end, because the number
+  tells ids apart: 9 head runes, `…`, 6 tail runes. `PLATFORM-INFRA-12345`
+  shows as `PLATFORM-…-12345`.
+- *Emoji.* An item with a yellow or a green id shows one emoji: the emoji of
+  its repository, the same as on the repository key. It never shows the
+  session emoji, also when the item has a session. An item with neither id
+  shows one emoji: the emoji of `session:<8hex>`.
+- *Strip colour.* The worst of the checks and the agent wins, in the order
+  `ERROR`, `WARN`, `RUNNING`, `DONE`, none.
+
+| Source | Value | Strip |
+|---|---|---|
+| PR checks (`ci`) | failing | `ERROR` (red) |
+| PR checks | pending | `RUNNING` (blue) |
+| PR checks | passing | `DONE` (green) |
+| PR checks | none, or no PR | none |
+| Claude session (`agent`) | waiting | `WARN` (yellow) |
+| Claude session | running | `RUNNING` (blue) |
+| Claude session | done | `DONE` (green) |
+| Yellow item alone | no machine state | none |
+
+A PR that passes, with a session that waits, shows `WARN`. A key with two
+lines is a frame on the board: each distinct caption, emoji, and colour takes
+one frame slot, and one layer holds at most 20 keys.
+
+**Active session.** A session is in a repository when its folder channel holds
+`.OWNER.NAME` with a segment edge on both sides, so `github.com.me.app.driver`
+is in `app` and `github.com.me.app-x` is not. It is active when its newest
+message is younger than one hour, and it has an unseen message (`end`
+marks the rows seen, so a closed session has none). A press never marks a session
+seen.
+
+**Order and size.** Yellow items first, then PRs, then sessions. Inside a group:
+failing checks, a waiting agent, pending checks, a running agent, the rest, then
+by id. At most 20 items show; macropadd pages them (task 0078).
+
+**When items exist.** A repository key has `opens` only when it has at least
+one item, so a press on a repository with nothing does nothing. No item node
+exists while the layer is shut. When the layer opens, the daemon sends the items,
+so the layer shows only its up key for one round trip. While it is open, no item
+moves or goes: a changed item updates in place, and a new one goes last (at most
+20 in all). A PR that joins a yellow item after its own key was drawn can show
+twice until you leave. When the layer closes, the items go. Item nodes exist
+for one repository at a time.
+
+**A press on an item** opens, once, the PR (`url:`), else the yellow item
+(`url:`), else the tab of the session (`iterm2:`). A target that is not a
+valid "here" is logged and nothing runs.
+
+**The PR feed.** Every 60 s the daemon asks `gh api graphql` for
+`is:pr is:open user:OWNER archived:false` (`INBOX_REPOS_OWNER`), the first 50
+PRs. It stores them in `repo_pulls(repo, number, title, url, ci, head_repo,
+branch, synced_at)` (schema 10, `repo` is a repository key). A search of more
+than 50 PRs is cut: the feed logs it once, keeps the rows it has, and deletes
+none. `listPulls(key)` gives the PRs of one repository, newest number first.
+The feed runs apart from the other two, so one that fails does not stop them.
 
 ### The apps plugin
 

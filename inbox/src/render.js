@@ -55,8 +55,10 @@ export function channelIcon(channel, { sessions = false, set = loadEmojiSet() } 
 //   sessions         true when a channel may be PROJECT.SID (see channelIcon)
 //   shows(row)       optional; a row it returns false for is left out of the
 //                    top key and the children
-//   icon(channel, set, row) optional; { iconText, iconEmoji } instead of
-//                    channelIcon. row may be undefined; its `session` is
+//   icon(channel, set, row) optional; { iconText, iconEmoji } or, for two
+//                    lines of identifier, { iconLines, iconEmoji } (task
+//                    0094), instead of channelIcon; any field passes
+//                    through to the key unchanged. row may be undefined; its `session` is
 //                    the session of the newest message (task 0081)
 // `emojiSet` is the emoji set, for a test; by default assets/emoji/set.txt.
 export function createRenderer({ slot, rules, emojiSet }) {

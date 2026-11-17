@@ -298,7 +298,7 @@ test('TestReposMigration', (t) => {
   const { db } = scratch(t);
   openStore(db).close();
   const raw = new DatabaseSync(db);
-  raw.exec('DROP TABLE activity; DROP TABLE repos; PRAGMA user_version = 5');
+  raw.exec('DROP TABLE yellow_answers; DROP TABLE activity; DROP TABLE repos; PRAGMA user_version = 5');
   raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
   raw.close();
   const store = openStore(db);
@@ -307,7 +307,7 @@ test('TestReposMigration', (t) => {
   assert.deepEqual(store.listRepos('kgheacock'), []);
   const check = new DatabaseSync(db);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(SCHEMA_VERSION, 9);
   check.close();
 });
 
@@ -360,7 +360,7 @@ test('TestActivityMigration', (t) => {
   first.replaceRepos('kgheacock', [repo('macro-pad', 1, 2)]);
   first.close();
   const raw = new DatabaseSync(db);
-  raw.exec('DROP TABLE activity; PRAGMA user_version = 6');
+  raw.exec('DROP TABLE yellow_answers; DROP TABLE activity; PRAGMA user_version = 6');
   raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
   raw.close();
   const store = openStore(db);
@@ -390,6 +390,7 @@ test('schema 8 renames ai rows to repos and drops github rows', (t) => {
       ('ai', 'macro-pad.3f2a91c0', 'iterm2:AAAA'),
       ('github', 'kgheacock.macro-pad.97', 'url:https://x.test');
     INSERT INTO branch_sessions (repo, branch, session, at) VALUES ('macro-pad', 'fix-x', '3f2a91c0', 5);
+    DROP TABLE yellow_answers;
     PRAGMA user_version = 7`);
   raw.close();
 
@@ -405,6 +406,32 @@ test('schema 8 renames ai rows to repos and drops github rows', (t) => {
   assert.equal(repos.forPlugin('basic').list().length, 1);
   assert.equal(repos.forPlugin('apps').list().length, 1);
   const check = new DatabaseSync(db);
-  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 8);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  check.close();
+});
+
+test('TestStoreMigratesToYellow', (t) => {
+  // Task 0093: a schema 8 file gains yellow_answers and keeps its rows.
+  const { db } = scratch(t);
+  openStore(db).close();
+  const raw = new DatabaseSync(db);
+  raw.exec('DROP TABLE yellow_answers; PRAGMA user_version = 8');
+  raw.exec("INSERT INTO messages (channel, body, created_at, cwd) VALUES ('a', 'old', 1, '/x')");
+  raw.close();
+  const store = openStore(db);
+  t.after(() => store.close());
+  assert.deepEqual(store.list().map((m) => m.body), ['old']);
+  assert.deepEqual(store.yellowCounts(), {});
+  store.putYellow('macro-pad', { items: [{ id: 'A-1', title: 't', url: 'https://x.test/1' }], now: 5 });
+  assert.deepEqual(store.yellowCounts(5), { 'macro-pad': 1 });
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.deepEqual(check.prepare('PRAGMA table_info(yellow_answers)').all().map((c) => c.name), [
+    'repo',
+    'items',
+    'checked_at',
+    'tried_at',
+    'error',
+  ]);
   check.close();
 });

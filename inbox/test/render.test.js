@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import basic from '../src/plugins/basic.js';
 import { emojiFor } from '../src/emoji.js';
-import ai from '../src/plugins/ai.js';
+import { createReposRenderer } from '../src/plugins/repos.js';
 import { MAX_CHILDREN, channelIcon, createRenderer } from '../src/render.js';
 
 const row = (channel, count, newestId) => ({ channel, count, newestId, createdAt: newestId });
@@ -189,28 +189,30 @@ test('TestChannelIcon', () => {
   assert.equal(channelIcon(`x.${'n'.repeat(40)}`).iconText, `${'n'.repeat(15)}…`);
 });
 
-test('TestBasicAndAiShareTheFolderEmoji', () => {
-  // A folder sent to the basic inbox and a session in it on the ai inbox show
-  // the same folder emoji.
+test('TestBasicAndReposShareTheFolderEmoji', () => {
+  // A folder sent to the basic inbox and the key of its repository on the
+  // repos inbox show the same folder emoji and caption.
   const basicChild = renderer().plan({ unseen: [row('macro-pad.driver', 1, 1)], active: null })[1].setLayerKey;
-  const aiChild = createRenderer({ rules: ai.rules })
-    .plan({ unseen: [{ ...row('macro-pad.driver.3f2a91c0', 1, 1), byStatus: { waiting: 1 } }], active: null })[1]
-    .setLayerKey;
-  assert.equal(aiChild.iconEmoji[0], basicChild.iconEmoji[0]);
-  assert.equal(aiChild.iconText, basicChild.iconText);
-  assert.equal(aiChild.iconEmoji.length, 2);
+  const reposChild = createReposRenderer()
+    .plan({ unseen: [], active: null, fed: { repos: [{ name: 'macro-pad', key: 'macro-pad' }] } })
+    .find((m) => m.setLayerKey?.id === 'repo.macro-pad').setLayerKey;
+  assert.equal(reposChild.iconEmoji[0], basicChild.iconEmoji[0]);
+  assert.equal(reposChild.iconText, 'macro-pad');
+  assert.equal(reposChild.iconEmoji.length, 1);
 });
 
 test('TestOneRepositoryOneEmoji', () => {
-  // Task 0081: a subfolder, a folder under HOST/OWNER, and a session in it
-  // all show the repository's emoji first.
-  const first = (rules, channel) =>
-    createRenderer({ rules }).plan({ unseen: [{ ...row(channel, 1, 1), byStatus: { done: 1 } }], active: null })[1]
-      .setLayerKey.iconEmoji[0];
+  // Task 0081: a subfolder and a folder under HOST/OWNER, and the repos key
+  // of the repository, all show the repository's emoji first.
+  const first = (channel) =>
+    renderer().plan({ unseen: [row(channel, 1, 1)], active: null })[1].setLayerKey.iconEmoji[0];
   const want = emojiFor('repo:docreviewonpremnodeweb').iconRef;
-  assert.equal(first(basic.rules, 'docreviewonpremnodeweb'), want);
-  assert.equal(first(basic.rules, 'docreviewonpremnodeweb.src'), want);
-  assert.equal(first(ai.rules, 'github.com.OnePayPal.docreviewonpremnodeweb.08709453'), want);
+  assert.equal(first('docreviewonpremnodeweb'), want);
+  assert.equal(first('docreviewonpremnodeweb.src'), want);
+  const key = createReposRenderer()
+    .plan({ unseen: [], active: null, fed: { repos: [{ name: 'docreviewonpremnodeweb', key: 'docreviewonpremnodeweb' }] } })
+    .find((m) => m.setLayerKey?.id === 'repo.docreviewonpremnodeweb').setLayerKey;
+  assert.equal(key.iconEmoji[0], want);
 });
 
 test('TestPlanSendsEmojiNotAPicture', () => {

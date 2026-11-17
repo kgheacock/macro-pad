@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from './errors.js';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 export const DEFAULT_STATUS = 'info';
 // The plugin of a store opened without one, and of every row older than schema 4.
 export const DEFAULT_PLUGIN = 'basic';
@@ -74,6 +74,13 @@ const MIGRATIONS = [
      PRIMARY KEY (repo, kind, ref)
    );
    CREATE INDEX activity_at ON activity (at);`,
+  // Task 0087: the repos plugin replaces ai and github. The session rows of
+  // ai become rows of repos; the PR rows of github go. branch_sessions has
+  // no plugin and stays.
+  `UPDATE messages SET plugin = 'repos' WHERE plugin = 'ai';
+   UPDATE OR REPLACE channel_here SET plugin = 'repos' WHERE plugin = 'ai';
+   DELETE FROM messages WHERE plugin = 'github';
+   DELETE FROM channel_here WHERE plugin = 'github';`,
 ];
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -200,7 +207,7 @@ export class Store {
   }
 
   // A Store of another plugin on the same handle, so the apps plugin can
-  // read the ai plugin's sessions (task 0085). Do not close it: closing
+  // read the repos plugin's sessions (task 0085). Do not close it: closing
   // closes this one too.
   forPlugin(plugin) {
     return new Store(this.#db, this.#file, this.#limit, plugin);

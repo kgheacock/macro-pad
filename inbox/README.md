@@ -5,8 +5,8 @@ Scripts, builds, and agents send; a person (or the daemon, see "Daemon")
 reads. No process must run for a message to be saved.
 
 A plugin decides what the messages mean and how they show on the pad. The
-default, `basic`, counts unseen messages; `ai` shows the state of AI agents;
-`github` shows your open pull requests, coloured by their checks; `apps`
+default, `basic`, counts unseen messages; `repos` shows one key per
+repository, coloured by your Claude sessions; `apps`
 opens the apps you work on today, each with five actions. Pick one with `--plugin NAME` on any command (see "Plugins").
 
 It is a Node package with no npm dependencies. It uses Node's built-in
@@ -57,7 +57,7 @@ tail -f build.log | inbox pipe build
 ### Status
 
 Every message has a status. In the `basic` plugin it is letters, digits, `-`
-and `_`, and the default is `info`; the `ai` plugin takes three (see
+and `_`, and the default is `info`; the `repos` plugin takes three (see
 "Plugins"). `--status S` on `send` and `pipe` sets it, and `list` shows it as
 a column (and as `status` in `--json`).
 
@@ -159,7 +159,7 @@ brought forward.
 
 ### A tab that already shows the URL
 
-A press on an `https:` "here", such as a PR key of the `github` plugin, first
+A press on an `https:` "here", such as a link to a PR, first
 looks for a browser tab that already shows that URL (task 0079). A tab counts
 when its URL is the URL, or the URL followed by `/`, `?`, or `#`, so a PR on
 its `/files` page counts. The first one found is selected, its window raised,
@@ -245,7 +245,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 - `recent(since)` returns the same fields, plus `byStatus`, per channel with
   a row created at or after `since` (ms), seen or not. `newestId`,
   `createdAt`, and `here` are those of the newest row of any kind; `count` is
-  the unseen count and can be 0. The `ai` daemon reads this.
+  the unseen count and can be 0. The `repos` daemon reads this.
 
 ## Environment
 
@@ -256,9 +256,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `XDG_DATA_HOME` | Data directory base. | `~/.local/share` |
 | `INBOX_BUSY_TIMEOUT_MS` | Busy timeout. Tests lower it. | `5000` |
 | `INBOX_DEBUG` | `1` adds a stack to an internal error. | unset |
-| `INBOX_GH` | The `gh` program the `github` plugin runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
-| `INBOX_GITHUB_QUERY` | The GitHub search of the `github` plugin. `install.sh --github-query Q` sets it in the wrapper. | `is:pr is:open author:@me archived:false` |
-| `INBOX_GITHUB_WATCHED` | `0` leaves the PRs you watch out of the `github` plugin. | unset (watched PRs show) |
+| `INBOX_GH` | The `gh` program the repos feed runs. `install.sh` sets it in the wrapper. | `gh` on the `PATH` |
 | `INBOX_REPOS_OWNER` | The GitHub user or organisation whose repositories the repos feed lists (see "Repositories"). `install.sh --repos-owner OWNER` sets it in the wrapper. | `kgheacock` |
 | `INBOX_REPOS_ARCHIVED` | `1` keeps archived repositories in the repos feed. | unset (archived ones stay out) |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
@@ -283,7 +281,7 @@ error adds `run 'inbox COMMAND -h' for help`.
 plugin on the macro pad, each on its own key, in one process (task 0075).
 `--plugin NAME`, once or more, shows only those plugins. This section
 describes the `basic` plugin; "Plugins" says
-what the `ai` plugin shows instead. It is a client of `macropadd`: it sends `setLayerKey` messages over the
+what the `repos` plugin shows instead. It is a client of `macropadd`: it sends `setLayerKey` messages over the
 plugin WebSocket (see `driver/README.md` "Protocol"), and reads `layerChanged`,
 `childPressed`, and `event` from it. It draws one `inbox` key with the total unseen count,
 and one child key per channel with unseen messages. A press on a child key
@@ -295,7 +293,7 @@ inbox daemon [--plugin NAME]... [--db PATH] [--port 8765] [--slot [NAME=]N]... [
 
 | Flag | Meaning |
 |---|---|
-| `--plugin NAME` | Show this plugin. Give it once per plugin, or as `--plugin basic,ai`. Default: every plugin `inbox plugins` lists. |
+| `--plugin NAME` | Show this plugin. Give it once per plugin, or as `--plugin basic,repos`. Default: every plugin `inbox plugins` lists. |
 | `--port N` | `macropadd`'s port on 127.0.0.1. Default 8765. |
 | `--assets-dir DIR` | Unused. The daemon sends icon text, not picture files, so it needs no assets directory. The flag is still accepted, with one line on standard error, so a service that passes it starts. |
 | `--slot NAME=N` | Put the key of plugin `NAME` in slot N, 0 to 5, once per plugin. With one plugin, `--slot N` is enough; with more, a bare `--slot N` exits 2, and so do two plugins on one slot. Default: the first free slot. |
@@ -339,7 +337,7 @@ The keys:
   the kind, and the mark stands.
 - `macropadd` draws the icon. The daemon sends each channel as the last segment
   of its folder in `iconText`, over the folder's emoji in `iconEmoji`, and for
-  a Claude Code session of the ai plugin the session's emoji beside it (see
+  a Claude Code session of the repos plugin the session's emoji beside it (see
   "Emoji"). It writes no file. A name of more than 16 characters is cut with
   `…`. Older versions wrote pictures to `<assets-dir>/.generated/inbox/`;
   those files are no longer used, and you can delete that directory.
@@ -457,30 +455,46 @@ A plugin holds only what one kind of inbox does differently: the statuses
 the key and the channel keys show, the order of the channel keys, and a
 paragraph of help. The store, the commands, "here", the daemon, and the
 install are shared. A plugin may also have a feed, which the daemon runs to
-write the plugin's own messages (`github` asks GitHub). The plugins live in
+write the plugin's own messages (`repos` asks GitHub). The plugins live in
 `src/plugins/`; to add one, write `src/plugins/NAME.js` and list it in
 `src/plugins/index.js`.
 
 ```
 inbox plugins
-inbox --plugin ai send --status waiting macro-pad.driver "needs a decision"
-inbox --plugin ai send --status running macro-pad.driver "running the tests"
-inbox send --plugin ai macro-pad.driver "tests passed"        # status done
-inbox --plugin ai seen macro-pad.driver
+inbox --plugin repos send --status waiting macro-pad.driver "needs a decision"
+inbox --plugin repos send --status running macro-pad.driver "running the tests"
+inbox send --plugin repos macro-pad.driver "tests passed"     # status done
+inbox --plugin repos seen macro-pad.driver
 ```
 
-| | `basic` (default) | `ai` | `github` |
+| | `basic` (default) | `repos` | `apps` |
 |---|---|---|---|
-| `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. | `failing`, `pending`, `passing`, `none`, or `closed`; default `none` |
-| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `ai-inbox`, `assets/ai.png` | `github-inbox`, `assets/github.png` |
-| Colors | yellow when a message is unseen | blue, green, or yellow, by status | red, blue, or green, by the newest message |
-| Pip | the unseen messages | the channels that wait | the failing PRs |
-| Channels shown | those with an unseen message | those with a message in the last hour, seen or not | the open PRs |
-| Channel order | newest unseen message first | newest message first | failing, pending, passing, none |
+| `--status` | any word; default `info` | `waiting`, `running`, or `done`; default `done`. Any other value exits with code 2 and saves nothing. | `pinned`, `running`, `stopped`, and others (see "The apps plugin"); default `stopped` |
+| Key on the pad | `inbox`, a Gmail envelope (`assets/gmail.png`) | `repos`, `assets/github.png` | `apps`, `assets/vscode.png` |
+| Colors | yellow when a message is unseen | blue, green, or yellow, by status | by the state of a run or a pull |
+| Pip | the unseen messages | the sessions that wait | none |
+| Keys shown | the channels with an unseen message | one per repository of the feed | the apps of today |
+| Key order | newest unseen message first | the activity ledger (see "Activity") | pins, then newest activity |
 
-### The ai plugin
+The names `ai` and `github` are gone (task 0087). `--plugin ai` still works as
+an alias of `repos`, so an old hook keeps reporting; the `github` plugin and
+its PR keys have no replacement.
 
-The inbox for AI agents. Agents send; a person looks at the pad.
+### The repos plugin
+
+One top key, `repos`, with one child per repository of the repos feed (see
+"Repositories"), in the order of the activity ledger (see "Activity"). A
+child has the id `repo.KEY` (`KEY` is the repository key: the name in lower
+case, a dot becoming `-`, so `keithheacock.com` is `repo.keithheacock-com`),
+the repository's name as its caption, and the emoji of `repo:KEY`. A press
+opens the key's layer (`opens`), which has no keys yet (task 0095 fills it).
+Every repository of the feed shows, also one with no activity, up to
+macropadd's 128 children; a longer feed is cut, and the daemon logs one line.
+
+Claude Code sessions report to this plugin through the hooks (see "Claude
+Code"). A session is a channel `PROJECT.SID`, and its repository is the name
+of its folder (see "Emoji"). A session of a repository that the feed lacks
+draws no key, but it counts for the top key.
 
 | Status | Color | Pad status | Meaning |
 |---|---|---|---|
@@ -488,37 +502,33 @@ The inbox for AI agents. Agents send; a person looks at the pad.
 | `running` | blue | `RUNNING` | The agent works. |
 | `done` | green | `DONE` | The agent finished. |
 
-A seen message does not count for the colors and the pip. The daemon reads the
-store on every change, so they are calculated again each time a message is
-seen. Which channels show does not depend on what is seen. A message with a stored status outside the three counts as `done`.
+- **A repository key** shows the highest status of the unseen messages of its
+  sessions: waiting, then running, then done. A repository with no unseen
+  message has no color. A stored status outside the three counts as `done`.
+- **The `repos` key** shows the highest status of all sessions, and its pip
+  counts the sessions that wait. A session stays in the rows for an hour after
+  its last message. The key has no color when every message is seen.
+- **While the repos layer is open** no repository key moves or goes; a new
+  repository goes last. When the layer is closed the keys follow the order.
+- **On every connect** the daemon removes the keys `ai-inbox`,
+  `github-inbox`, and `repos`, so a key of the retired plugins does not stay
+  in the pad's `layers.json`, and draws `repos` again.
+- **No key** is drawn before the first answer of the feed. A start without a
+  network draws the stored repositories.
+- **An old `waiting`** keeps its repository yellow until it is seen. The hook
+  sees it on the next state change, or run `inbox --plugin repos seen CHANNEL`.
 
-- **A channel** shows the highest status of its unseen messages, in the order
-  `waiting`, then `running`, then `done`. A channel with no unseen message has
-  no color, but it stays on the pad while its newest message is less than an
-  hour old, and leaves within about 30 s after that hour ends.
-- **The `ai-inbox` key** shows the highest status of the channels on the pad.
-  A channel with no message in the last hour does not count. The key has no
-  color when every message is seen, and it stays on the pad.
-- **The pip** on the `ai-inbox` key is the number of channels that have an
-  unseen `waiting` message. The pip on a channel key is the number of its
-  unseen `waiting` messages. A count of 0 draws no pip.
-- **A press** on the `ai-inbox` key opens the list of channels with a message
-  in the last hour, also when there is no pip. At most 20 show, on pages past
-  five, the channel with the newest message first, whatever its status. A
-  channel past the 20th counts in the key's status and pip.
-- **A press on a channel key** marks the messages it showed seen, then goes
-  to the "here" of its newest message (seen or not), as for `basic`. The keys do not move while the layer is
-  open; a seen channel keeps its place, with no color, until you leave.
+Schema 8 (task 0087) renames the `ai` rows to `repos` and deletes the
+`github` rows. A checkout older than this change refuses a file of schema 8.
+An installed service from before this task, with `--plugin ai` or `--slot
+ai=N` in its arguments, still starts: run `install.sh` again to rewrite it.
 
-An old `waiting` message keeps the key yellow until it is seen, also after the
-agent went on. Press the channel, or run `inbox --plugin ai seen CHANNEL`.
-
-`inbox daemon` and `install.sh` show it beside `basic`, in one process. Give
-the two keys fixed places with `--slot basic=N --slot ai=M`; otherwise each
-takes the first free slot. To show only the ai inbox:
+`inbox daemon` and `install.sh` show it beside `basic` and `apps`, in one
+process. Give the keys fixed places with `--slot basic=N --slot repos=M`;
+otherwise each takes the first free slot. To show only the repos plugin:
 
 ```
-inbox daemon --plugin ai [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
+inbox daemon --plugin repos [--db PATH] [--port 8765] [--slot N] [--poll 500ms]
 ```
 
 ### Emoji
@@ -528,20 +538,19 @@ Each channel key shows its folder's name over one or two emoji from
 Code session, the session's on the right. The same repository or session
 always gets the same emoji, on every machine.
 
-- The folder of a channel is the channel itself. For the ai plugin, a channel
+- The folder of a channel is the channel itself. For the repos plugin, a channel
   `PROJECT.SID` from the Claude Code hooks, whose last segment is 8 hex digits,
   is the folder `PROJECT` and the session `SID`.
 - Every key of one repository shows the same first emoji, on every plugin
   (task 0081). It hashes `repo:` and the repository's name in lower case. The
   name is the fourth segment of `HOST.TLD.OWNER.REPO...` (from
   `~/source/github.com/OWNER/REPO`), else the first segment (from
-  `~/source/REPO/...`); for a PR, the `REPO` of `OWNER.REPO.NUMBER`. So
-  `macro-pad`, `macro-pad.driver`, `github.com.kgheacock.macro-pad.3f2a91c0`,
-  and the PR `kgheacock.macro-pad.97` all match.
+  `~/source/REPO/...`). So `macro-pad`, `macro-pad.driver`, and
+  `github.com.kgheacock.macro-pad.3f2a91c0` all match, and so does the key
+  `repo.macro-pad`.
 - A session hashes `session:` and the first 8 hex digits of its id, in lower
-  case. The hooks send the session's git branch (`send --branch`), and the
-  github plugin shows that session's emoji on a PR whose head is that branch,
-  so a PR a Claude session made matches the session's key in full.
+  case. The hooks send the session's git branch (`send --branch`); the store
+  keeps it for the keys of task 0096.
 - Every emoji of `assets/emoji/set.txt` gets a score, the first 8 bytes of
   SHA-256 of the input, a line break, and the emoji's code points; the highest
   wins (rendezvous hashing). Adding an emoji to the set moves only the inputs
@@ -558,67 +567,15 @@ inbox emoji macro-pad.driver --format name      # char, name, ref, or json
 ### Claude Code
 
 `inbox/claude-code/` holds the hooks that report each Claude Code session to
-the ai plugin: running while it works, waiting when it needs you, done when the
+the repos plugin: running while it works, waiting when it needs you, done when the
 turn ends. See `inbox/claude-code/README.md` for the events, the install
 steps, and the limits.
-
-### The github plugin
-
-One key per open pull request, coloured by the checks of its last commit
-(task 0076). Nobody sends to it: the daemon asks GitHub once a minute, through
-`gh api graphql`, for the PRs of `$INBOX_GITHUB_QUERY` (default
-`is:pr is:open author:@me archived:false`, at most 50), and writes a message
-only when a PR's state changes. `gh` holds the login; run `gh auth login` once.
-
-It also shows the open PRs you watch: GitHub search cannot ask for those, so
-it reads your 50 newest notification threads (`gh api notifications`), read
-or not, keeps the PRs whose reason is `subscribed` (you watch the
-repository) or `manual` (you subscribed to the PR), and asks GitHub for
-their checks in one more query. A watched PR shows while it has a
-notification among those 50; one that drops out leaves the pad as if it
-closed. Set `INBOX_GITHUB_WATCHED=0` to leave watched PRs out.
-
-To change the search for the daemon, run
-`install.sh --github-query 'is:pr is:open involves:@me archived:false'`: it
-writes the query into the `inbox` wrapper the service runs. `involves:@me`
-adds the PRs you are assigned to, mentioned in, or commented on. Running
-`install.sh` again without it goes back to the default.
-
-| Status | Check roll-up | Color | Pad status |
-|---|---|---|---|
-| `failing` | `FAILURE`, `ERROR` | red | `ERROR` |
-| `pending` | `PENDING`, `EXPECTED` | blue | `RUNNING` |
-| `passing` | `SUCCESS` | green | `DONE` |
-| `none` | no checks | none | none |
-| `closed` | the PR is no longer open | the key goes | |
-
-- **A channel** is `OWNER.REPO.NUMBER` (a dot in a name becomes `-`), such as
-  `kgheacock.macro-pad.97`. Its key shows `REPO #NUMBER` over the emoji of
-  `OWNER.REPO`, so the PRs of one repository share an emoji. The body is the
-  PR title, and the "here" is the PR's URL.
-- **The colour** is the status of the newest message, seen or not. The pip on
-  a PR's key counts its unseen changes; a press marks them seen and opens the
-  PR in the browser.
-- **The `github-inbox` key** shows the worst status of the open PRs, and its
-  pip counts the failing ones.
-- **A PR that is no longer open** gets a seen `closed` message and leaves the
-  pad. When the search has more than 50 PRs, nothing is closed.
-- **A failure** (no `gh`, not logged in, no network) changes nothing and logs
-  one line, `inbox: [github] cannot read GitHub: WHY`, until a read succeeds.
-  `launchd` and `systemd` do not see the shell's `PATH`, so `install.sh` writes
-  the `gh` it finds into the wrapper as `INBOX_GH`. To leave the key out, run
-  `install.sh --plugin basic --plugin ai`.
-
-```
-inbox --plugin github list --all-channels
-INBOX_GITHUB_QUERY='is:pr is:open review-requested:@me' inbox daemon --plugin github
-```
 
 ### Repositories
 
 The repos feed (task 0089) lists every repository of one owner, with its open
 issue count (pull requests not counted) and its open PR count. It is the
-data for the `repos` plugin (task 0087); no key draws it yet. The daemon asks
+data for the `repos` plugin (task 0087). The daemon asks
 GitHub once a minute with one call,
 `gh repo list OWNER --limit 1000 --no-archived --json ...`, and `gh` pages
 by itself, so an owner with more than 100 repositories is complete. The owner
@@ -645,7 +602,7 @@ adds and updates rows but deletes none.
 
 The activity ledger (task 0090) records your own events per repository, and a
 score of them sorts the repository keys, newest work first. The `repos`
-plugin (task 0087) draws the keys; this part gives them their order. The
+plugin (task 0087) draws the keys in this order. The
 store keeps one row per event in `activity(repo, kind, ref, at)` (schema 7),
 with `(repo, kind, ref)` as the key, so a second read of one event changes
 nothing but may move `at` forward. `repo` is the repository key (the name in
@@ -704,7 +661,7 @@ inbox/scripts/install.sh --apps-root ~/source/github.com/acme
 
 Every 30 s the daemon reads, for each app, the times of `.git/logs/HEAD` (a
 checkout or commit) and `.git/index` (staging), and the newest Claude session
-of today in its folder (the `ai` plugin's channels). An app whose newest time
+of today in its folder (the `repos` plugin's channels). An app whose newest time
 is today is active. The keys show the pinned apps first, oldest pin first,
 then the active apps, newest first, at most `$INBOX_APPS_COUNT` (default 5,
 one page). While the apps layer is open, no app moves or goes, and a new

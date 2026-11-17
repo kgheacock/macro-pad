@@ -17,19 +17,24 @@
 //                  key (see daemon.js; apps, task 0085)
 //   press          optional; acts on a press on a child of those keys
 //
-// To add one, write plugins/NAME.js and list it here.
+// To add one, write plugins/NAME.js and list it here. A retired plugin's
+// name may stay as an alias of the plugin that replaced it (ALIASES).
 
 import { UsageError } from '../errors.js';
 import { DEFAULT_PLUGIN } from '../store.js';
-import ai from './ai.js';
 import apps from './apps.js';
 import basic from './basic.js';
-import github from './github.js';
+import repos from './repos.js';
 
 export { DEFAULT_PLUGIN };
-export const PLUGINS = { basic, ai, github, apps };
+export const PLUGINS = { basic, repos, apps };
+
+// Names that an older install still sends (task 0087): the hook says
+// `--plugin ai`, and the service file may say `--plugin ai` or `--slot ai=2`.
+export const ALIASES = { ai: 'repos' };
 
 export function getPlugin(name = DEFAULT_PLUGIN) {
+  if (Object.hasOwn(ALIASES, name)) name = ALIASES[name];
   if (Object.hasOwn(PLUGINS, name)) return PLUGINS[name];
   throw new UsageError(`unknown plugin "${name}"; use one of: ${Object.keys(PLUGINS).join(', ')}`, {
     help: false,

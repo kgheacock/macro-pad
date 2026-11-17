@@ -1,14 +1,14 @@
 ---
 id: "0096"
 title: "An item key shows the yellow id, the green id, and a session emoji only when both are absent"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0096-item-key-display-identifiers-and-session-emoji"
 related: ["0073", "0081", "0082", "0085", "0092", "0093", "0094", "0095"]
 tags: ["inbox", "repos", "emoji", "layers", "ui"]
 ---

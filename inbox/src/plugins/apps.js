@@ -5,7 +5,7 @@
 // Pull, Term.
 //
 // The feed scans the root every 30 s. An app's activity is the newest of its
-// .git/logs/HEAD and .git/index mtimes and of an ai-plugin session today in
+// .git/logs/HEAD and .git/index mtimes and of a repos-plugin session today in
 // its folder. The apps show the pinned apps, then the apps active today,
 // newest first, at most $INBOX_APPS_COUNT. The store holds pins (NAME.pin),
 // runs (NAME.run) and pulls (NAME.pull); the newest message of each is its
@@ -105,7 +105,7 @@ export function listApps(root) {
   return apps.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// The channel prefix of a folder under the root, as the ai hook names it
+// The channel prefix of a folder under the root, as the Claude hook names it
 // (task 0072): ~/source/github.com/acme -> github.com.acme. null when the
 // root is not under the source root.
 function rootChannel(root, env) {
@@ -134,11 +134,11 @@ export function sessionMatcher(apps, root, env = process.env) {
   };
 }
 
-// The newest ai session today of each app: Map name -> row.
+// The newest Claude session today of each app: Map name -> row.
 export function sessionsToday(store, apps, root, { env = process.env, now = Date.now() } = {}) {
   const match = sessionMatcher(apps, root, env);
   const newest = new Map();
-  for (const row of store.forPlugin('ai').recent(startOfDay(now))) {
+  for (const row of store.forPlugin('repos').recent(startOfDay(now))) {
     const app = match(row);
     if (!app) continue;
     const had = newest.get(app.name);

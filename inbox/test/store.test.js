@@ -307,7 +307,7 @@ test('TestReposMigration', (t) => {
   assert.deepEqual(store.listRepos('kgheacock'), []);
   const check = new DatabaseSync(db);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 7);
+  assert.equal(SCHEMA_VERSION, 8);
   check.close();
 });
 
@@ -349,7 +349,7 @@ test('TestReplaceRepos', (t) => {
   assert.deepEqual(store.listRepos('acme').map((r) => r.name), ['x']);
 
   // Every plugin reads the same table.
-  const other = store.forPlugin('github');
+  const other = store.forPlugin('apps');
   assert.deepEqual(other.listRepos('kgheacock').map((r) => r.name), ['a', 'c']);
 });
 
@@ -372,5 +372,39 @@ test('TestActivityMigration', (t) => {
   assert.equal(store.activityRows(0).length, 1);
   const check = new DatabaseSync(db);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  check.close();
+});
+
+test('schema 8 renames ai rows to repos and drops github rows', (t) => {
+  // Task 0087: a schema 7 file with ai and github rows. The ai rows become
+  // repos rows, with their fallbacks; the github rows go; others stay.
+  const { db } = scratch(t);
+  openStore(db).close();
+  const raw = new DatabaseSync(db);
+  raw.exec(`INSERT INTO messages (plugin, channel, body, created_at, cwd, status) VALUES
+      ('ai', 'macro-pad.3f2a91c0', 'running', 1, '/x', 'running'),
+      ('github', 'kgheacock.macro-pad.97', 'a PR', 2, '/x', 'failing'),
+      ('basic', 'b', 'mail', 3, '/x', 'info'),
+      ('apps', 'web.pin', 'pin', 4, '/x', 'pinned');
+    INSERT INTO channel_here (plugin, channel, here) VALUES
+      ('ai', 'macro-pad.3f2a91c0', 'iterm2:AAAA'),
+      ('github', 'kgheacock.macro-pad.97', 'url:https://x.test');
+    INSERT INTO branch_sessions (repo, branch, session, at) VALUES ('macro-pad', 'fix-x', '3f2a91c0', 5);
+    PRAGMA user_version = 7`);
+  raw.close();
+
+  const repos = openStore(db, undefined, { plugin: 'repos' });
+  t.after(() => repos.close());
+  assert.deepEqual(repos.list({ includeSeen: true }).map((m) => [m.channel, m.status]), [['macro-pad.3f2a91c0', 'running']]);
+  assert.equal(repos.channelHere('macro-pad.3f2a91c0'), 'iterm2:AAAA');
+  assert.equal(repos.branchSession('macro-pad', 'fix-x'), '3f2a91c0');
+  for (const plugin of ['ai', 'github']) {
+    assert.deepEqual(repos.forPlugin(plugin).list({ includeSeen: true }), [], plugin);
+    assert.equal(repos.forPlugin(plugin).channelHere('macro-pad.3f2a91c0'), null, plugin);
+  }
+  assert.equal(repos.forPlugin('basic').list().length, 1);
+  assert.equal(repos.forPlugin('apps').list().length, 1);
+  const check = new DatabaseSync(db);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 8);
   check.close();
 });

@@ -13,7 +13,7 @@ import { componentInput, componentOf, emojiFor, sessionInput, splitSessionChanne
 import { DaemonRunningError, StoreError, UsageError } from './errors.js';
 import { detectHere, resolveHere, validateHere } from './here.js';
 import { appName, appsRoot, listApps } from './plugins/apps.js';
-import { DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
+import { ALIASES, DEFAULT_PLUGIN, PLUGINS, getPlugin } from './plugins/index.js';
 import { defaultDbPath, openStore } from './store.js';
 
 const MAX_LINE_BYTES = 64 * 1024;
@@ -64,7 +64,7 @@ Examples:
   inbox send debug "build done"
   my_cmd 2>&1 | inbox pipe debug
   echo "hello" | inbox                 (same as: inbox pipe)
-  inbox --plugin ai send --status waiting macro-pad "needs a decision"
+  inbox --plugin repos send --status waiting macro-pad "needs a decision"
 
 Run 'inbox COMMAND -h' for the details of one command.
 Exit codes: 0 success, 1 store error, 2 usage error, 3 a daemon already runs.`,
@@ -291,7 +291,7 @@ ${DEFAULT_PLUGIN}. One store holds every plugin, and each command reads and
 writes only the messages of its plugin.
 
 Example:
-  inbox --plugin ai channels`,
+  inbox --plugin repos channels`,
 
   daemon: `Usage: inbox daemon [--plugin NAME]... [--port N] [--slot [NAME=]N]... [--poll DURATION]
 
@@ -319,8 +319,8 @@ To run it at login, use inbox/scripts/install.sh.
 
 Examples:
   inbox daemon
-  inbox daemon --slot basic=0 --slot ai=1
-  inbox daemon --plugin ai --slot 2`,
+  inbox daemon --slot basic=0 --slot repos=1
+  inbox daemon --plugin repos --slot 2`,
 };
 
 // One line per plugin: its name, its summary, and the default marked.
@@ -871,6 +871,8 @@ function parseSlots(texts = [], plugins) {
       name = names[0];
     } else {
       name = text.slice(0, eq);
+      // A service file of an older install says --slot ai=N (task 0087).
+      if (Object.hasOwn(ALIASES, name)) name = ALIASES[name];
       value = text.slice(eq + 1);
       if (!names.includes(name)) {
         throw new UsageError(`--slot ${text}: the daemon does not run plugin "${name}"; it runs ${names.join(', ')}`, {
@@ -1225,7 +1227,8 @@ function takePlugins(argv) {
 // The daemon runs every plugin it is given, and every plugin when given none.
 // Every other command runs one plugin, the default when given none.
 function choosePlugins({ names, argv }) {
-  const plugins = names.map((name) => getPlugin(name));
+  // An alias and its plugin, such as ai and repos, name one plugin.
+  const plugins = [...new Set(names.map((name) => getPlugin(name)))];
   if (argv[0] === 'daemon') return plugins.length ? plugins : Object.values(PLUGINS);
   if (plugins.length > 1) {
     throw new UsageError(`give --plugin once; got ${names[0]} and ${names[1]}`, { help: false });

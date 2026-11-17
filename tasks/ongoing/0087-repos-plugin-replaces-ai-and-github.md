@@ -98,18 +98,18 @@ Files to change:
 
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — `inbox plugins` lists `basic`, `repos`, `apps` and no other. The four deleted files are gone. **Proof:** `cd inbox && node --test test/cli.test.js --test-name-pattern 'plugins lists'`, then `ls src/plugins`
-- [ ] **DoD-2** — For a feed of three repos, `plan` sends the top key `repos` and children `repo.NAME` with `parent: 'repos'`, `opens: true`, the name as `iconText`, and the emoji of `repo:name`, in feed order. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'one repo child per fed repo'`
-- [ ] **DoD-3** — A feed of 100 repos with no session draws 100 children. A feed of 130 draws 128 and logs one line. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'every repo|cuts a feed'`
-- [ ] **DoD-4** — A waiting session sets `WARN` on its repo key and the top key. A session of a repo not in the feed draws no key. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'waiting session|unknown repo'`
-- [ ] **DoD-5** — The first `plan` after a connect removes `ai-inbox`, `github-inbox`, and `repos` once. A second `plan` does not. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'stale keys'`
-- [ ] **DoD-6** — While the `repos` layer is open, no repo key moves or goes, and a new repo goes last. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'layer is open'`
-- [ ] **DoD-7** — Opening a version 7 store with `ai` and `github` rows gives `repos` rows for the first, no row for the second, and `user_version` 8. **Proof:** `cd inbox && node --test test/store.test.js --test-name-pattern 'schema 8'`
-- [ ] **DoD-8** — The hook has no `--plugin ai`. An old hook that sends `--plugin ai` writes a `repos` row. **Proof:** `grep -c -- '--plugin ai' inbox/claude-code/claude-ai-inbox.sh` prints `0`, and `cd inbox && node --test test/cli.test.js --test-name-pattern 'alias'`
-- [ ] **DoD-9** — `apps` counts a session row of `repos` as activity today. **Proof:** `cd inbox && node --test test/apps.test.js`
-- [ ] **DoD-10** — `sh inbox/scripts/install.sh --dry-run --github-query x` exits 2 and prints `unknown option`. **Proof:** run it, then `echo $?`
-- [ ] **DoD-11** — `inbox/README.md` has a section "The repos plugin" and no section "The ai plugin" or "The github plugin". **Proof:** `grep -n '^### The' inbox/README.md`
-- [ ] **DoD-12** — The suite passes, and the PR in the `pr` field links to this spec. **Proof:** `cd inbox && npm test`, and the PR body
+- [x] **DoD-1** — `inbox plugins` lists `basic`, `repos`, `apps` and no other. The four deleted files are gone. **Proof:** `cd inbox && node --test test/cli.test.js --test-name-pattern 'plugins lists'`, then `ls src/plugins`
+- [x] **DoD-2** — For a feed of three repos, `plan` sends the top key `repos` and children `repo.NAME` with `parent: 'repos'`, `opens: true`, the name as `iconText`, and the emoji of `repo:name`, in feed order. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'one repo child per fed repo'`
+- [x] **DoD-3** — A feed of 100 repos with no session draws 100 children. A feed of 130 draws 128 and logs one line. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'every repo|cuts a feed'`
+- [x] **DoD-4** — A waiting session sets `WARN` on its repo key and the top key. A session of a repo not in the feed draws no key. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'waiting session|unknown repo'`
+- [x] **DoD-5** — The first `plan` after a connect removes `ai-inbox`, `github-inbox`, and `repos` once. A second `plan` does not. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'stale keys'`
+- [x] **DoD-6** — While the `repos` layer is open, no repo key moves or goes, and a new repo goes last. **Proof:** `cd inbox && node --test test/repos.test.js --test-name-pattern 'layer is open'`
+- [x] **DoD-7** — Opening a version 7 store with `ai` and `github` rows gives `repos` rows for the first, no row for the second, and `user_version` 8. **Proof:** `cd inbox && node --test test/store.test.js --test-name-pattern 'schema 8'`
+- [x] **DoD-8** — The hook has no `--plugin ai`. An old hook that sends `--plugin ai` writes a `repos` row. **Proof:** `grep -c -- '--plugin ai' inbox/claude-code/claude-ai-inbox.sh` prints `0`, and `cd inbox && node --test test/cli.test.js --test-name-pattern 'alias'`
+- [x] **DoD-9** — `apps` counts a session row of `repos` as activity today. **Proof:** `cd inbox && node --test test/apps.test.js`
+- [x] **DoD-10** — `sh inbox/scripts/install.sh --dry-run --github-query x` exits 2 and prints `unknown option`. **Proof:** run it, then `echo $?`
+- [x] **DoD-11** — `inbox/README.md` has a section "The repos plugin" and no section "The ai plugin" or "The github plugin". **Proof:** `grep -n '^### The' inbox/README.md`
+- [x] **DoD-12** — The suite passes, and the PR in the `pr` field links to this spec. **Proof:** `cd inbox && npm test`, and the PR body
 
 ## Risks
 

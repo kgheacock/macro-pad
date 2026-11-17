@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reports this Claude Code session's state to the ai plugin of inbox
-# (`inbox --plugin ai`), which shows it on the macro pad: running (blue), waiting for you (yellow), done (green).
+# Reports this Claude Code session's state to the repos plugin of inbox
+# (`inbox --plugin repos`), which shows it on the macro pad: running (blue), waiting for you (yellow), done (green).
 # Replaces claude-iterm-badge.sh. Wired from ~/.claude/settings.json hooks.
 #
 #   $1 = prompt    UserPromptSubmit  you sent a prompt            -> running
@@ -17,7 +17,7 @@
 # Each send also names the git branch checked out in the project folder
 # (--branch), so a PR from that branch shows this session's emoji (task 0081).
 #
-# The ai plugin shows the highest status of the UNSEEN messages (waiting > running >
+# The repos plugin shows the highest status of the UNSEEN messages (waiting > running >
 # done), so a state change marks the channel seen first. Otherwise a `waiting`
 # from a permission prompt would keep the key yellow after you approved it, and
 # `running` would hide `done`. A tool hook sends nothing while the state is
@@ -65,8 +65,8 @@ mkdir -p "$cache" 2>/dev/null
 file="$cache/${session:-$channel}"
 last="$(cat "$file" 2>/dev/null)"
 
-seen() { "$inbox" --plugin ai seen "$channel" >/dev/null 2>&1; }
-send() { "$inbox" --plugin ai send --status "$1" ${branch:+--branch "$branch"} -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
+seen() { "$inbox" --plugin repos seen "$channel" >/dev/null 2>&1; }
+send() { "$inbox" --plugin repos send --status "$1" ${branch:+--branch "$branch"} -- "$channel" "$2" >/dev/null 2>&1 && printf '%s' "$1" >"$file" 2>/dev/null; }
 
 case "$state" in
   prompt)

@@ -11,6 +11,7 @@ import { componentInput, componentOf, emojiFor, splitSessionChannel } from '../e
 import { orderRepos, nextShown } from '../activity.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from '../protocol.js';
 import { feed } from '../repolist.js';
+import { yellowFeed } from './repos-yellow.js';
 import { MAX_CAPTION, REPO_MAX_CHILDREN, clip } from '../render.js';
 
 export const REPOS_STATUSES = ['waiting', 'running', 'done'];
@@ -170,5 +171,7 @@ for an hour after its last message.`,
     activeMs: ACTIVE_MS,
   },
   createRenderer: ({ slot, log }) => createReposRenderer({ slot, log }),
-  feed,
+  // The GitHub feed first: it sets what the renderer reads. The yellow
+  // provider (task 0093) writes to the store only.
+  feed: [feed, yellowFeed],
 };

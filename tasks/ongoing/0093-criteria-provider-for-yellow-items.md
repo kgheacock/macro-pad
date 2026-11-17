@@ -117,32 +117,32 @@ Files to change:
 An outside reviewer verifies each item without help from the implementer. Each item names its proof. The task
 moves to `complete/` only when every box is ticked.
 
-- [ ] **DoD-1** — With three repos and a stub `execFile`, the command runs once per repo with the repo name as
+- [x] **DoD-1** — With three repos and a stub `execFile`, the command runs once per repo with the repo name as
   `argv[1]`. A repo with two items has count 2.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowRunsCommandPerRepo test/yellow.test.js`
-- [ ] **DoD-2** — Output that is not an array fails the run. Items with a bad `id`, an `http://` url or a repeated
+- [x] **DoD-2** — Output that is not an array fails the run. Items with a bad `id`, an `http://` url or a repeated
   `id` are dropped, and 201 items give 200.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowRejectsBadItems test/yellow.test.js`
-- [ ] **DoD-3** — After exit 1, a timeout, and bad JSON, the stored `items` stay and `error` is set. The log gets
+- [x] **DoD-3** — After exit 1, a timeout, and bad JSON, the stored `items` stay and `error` is set. The log gets
   one line per distinct error, not one per run.
   **Proof:** `cd inbox && node --test --test-name-pattern='TestYellowKeepsLastGoodOnFailure|TestYellowLogsOncePerError' test/yellow.test.js`
-- [ ] **DoD-4** — A real script that sleeps 5 s, run with a 100 ms timeout, fails with "did not answer within".
+- [x] **DoD-4** — A real script that sleeps 5 s, run with a 100 ms timeout, fails with "did not answer within".
   The default timeout is 20 s.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowTimeoutKills test/yellow.test.js`
-- [ ] **DoD-5** — A repo tried 100 s ago is skipped at a 300 s interval. One tried 300 s ago, or one that failed 300
+- [x] **DoD-5** — A repo tried 100 s ago is skipped at a 300 s interval. One tried 300 s ago, or one that failed 300
   s ago, runs. **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowSkipsFreshRepos test/yellow.test.js`
-- [ ] **DoD-6** — An answer 23 h old counts, and one 25 h old counts 0 and lists nothing.
+- [x] **DoD-6** — An answer 23 h old counts, and one 25 h old counts 0 and lists nothing.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowStaleAnswerCountsZero test/yellow.test.js`
-- [ ] **DoD-7** — With `INBOX_REPOS_YELLOW_CMD` unset, no process runs, no line is logged, and every count is 0.
+- [x] **DoD-7** — With `INBOX_REPOS_YELLOW_CMD` unset, no process runs, no line is logged, and every count is 0.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestYellowNoCommandRunsNothing test/yellow.test.js`
-- [ ] **DoD-8** — A daemon with two feeds runs both. When one rejects, the other still runs and draws.
+- [x] **DoD-8** — A daemon with two feeds runs both. When one rejects, the other still runs and draws.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestDaemonRunsEveryFeed test/daemon.test.js`
-- [ ] **DoD-9** — A store file at schema 8 migrates to 9 and gets `yellow_answers`.
+- [x] **DoD-9** — A store file at schema 8 migrates to 9 and gets `yellow_answers`.
   **Proof:** `cd inbox && node --test --test-name-pattern=TestStoreMigratesToYellow test/store.test.js`
-- [ ] **DoD-10** — The installer takes `--yellow-cmd PATH` and has no option for a token. **Proof:**
+- [x] **DoD-10** — The installer takes `--yellow-cmd PATH` and has no option for a token. **Proof:**
   `sh inbox/scripts/install.sh --dry-run --yellow-cmd /bin/true | grep -c INBOX_REPOS_YELLOW_CMD` prints 1, and
   `sh inbox/scripts/install.sh -h | grep -ci token` prints 0.
-- [ ] **DoD-11** — `inbox/README.md` records the contract, the three env vars, and where tokens live.
+- [x] **DoD-11** — `inbox/README.md` records the contract, the three env vars, and where tokens live.
   `inbox/examples/yellow-jira.sh` reads its token from the Keychain. **Proof:**
   `grep -n "Yellow criteria" inbox/README.md` and `grep -c "security find-generic-password" inbox/examples/yellow-jira.sh`
 - [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body

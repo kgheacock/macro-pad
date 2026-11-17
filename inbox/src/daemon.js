@@ -99,12 +99,15 @@ export function acquirePidFile(
 //
 // A plugin may have a feed, which writes the plugin's own messages (task
 // 0076): { source, everyMs, fetch({ env }) -> Promise<answer>,
-// sync(store, answer) -> how many messages it wrote }. The daemon runs it at
-// start and every everyMs, one run at a time, and draws what it wrote. fetch
-// also gets the store, and the renderer gets the newest answer as `fed`.
+// sync(store, answer, { log }) -> how many rows it wrote }. The daemon runs
+// it at start and every everyMs, one run at a time, and draws what it wrote.
+// fetch also gets the store and log, and the renderer gets the newest answer
+// as `fed`. `feed` may be a list (task 0093): each feed runs apart, with its
+// own timer and failure text, and only the first sets `fed`.
 // A feed may have cold({ env, store, error }) -> answer: when the first
 // fetch fails, the daemon draws that answer once (task 0089), so a restart
-// without a network still shows the rows of the store.
+// without a network still shows the rows of the store. cold counts for the
+// first feed only.
 //
 // A plugin may draw its own keys (task 0085): createRenderer({ slot, env, log })
 // returns a renderer like render.js's, with owns(parent), which says whether
@@ -214,42 +217,49 @@ export function startDaemon({
     }
   };
 
-  // Runs the plugin's feed. A failure is logged once until a run succeeds.
-  const { feed } = plugin;
-  let feeding = false;
-  let feedFailure = null;
-  let coldTried = false;
-  const runFeed = async () => {
-    if (stopped || feeding) return;
-    feeding = true;
-    try {
-      const answer = await feed.fetch({ env, store: db, log });
-      if (stopped) return;
-      const wrote = feed.sync(db, answer);
-      if (feedFailure !== null) log(`${feed.source} read again`);
-      feedFailure = null;
-      fed = answer;
-      if (wrote > 0) reread();
-      else push();
-    } catch (e) {
-      if (stopped) return;
-      const text = `cannot read ${feed.source}: ${e.message}`;
-      if (text !== feedFailure) log(text);
-      feedFailure = text;
-      // The first read failed: draw what the store holds (task 0089).
-      if (fed === null && feed.cold && !coldTried) {
-        coldTried = true;
-        try {
-          fed = feed.cold({ env, store: db, error: e });
-          push();
-        } catch (c) {
-          log(`cannot draw ${feed.source} from the store: ${c.message}`);
+  // Runs one feed of the plugin. A failure is logged once until a run
+  // succeeds. Each feed has its own running flag, timer and failure text, so
+  // one feed that fails or hangs does not stop the others (task 0093). Only
+  // the first feed of a list sets `fed`, the answer the renderer reads; the
+  // others write to the store, and the renderer reads that.
+  const feeds = plugin.feed ? [plugin.feed].flat() : [];
+  const runner = (feed, primary) => {
+    let feeding = false;
+    let failure = null;
+    let coldTried = false;
+    return async () => {
+      if (stopped || feeding) return;
+      feeding = true;
+      try {
+        const answer = await feed.fetch({ env, store: db, log });
+        if (stopped) return;
+        const wrote = feed.sync(db, answer, { log });
+        if (failure !== null) log(`${feed.source} read again`);
+        failure = null;
+        if (primary) fed = answer;
+        if (wrote > 0) reread();
+        else push();
+      } catch (e) {
+        if (stopped) return;
+        const text = `cannot read ${feed.source}: ${e.message}`;
+        if (text !== failure) log(text);
+        failure = text;
+        // The first read failed: draw what the store holds (task 0089).
+        if (primary && fed === null && feed.cold && !coldTried) {
+          coldTried = true;
+          try {
+            fed = feed.cold({ env, store: db, error: e });
+            push();
+          } catch (c) {
+            log(`cannot draw ${feed.source} from the store: ${c.message}`);
+          }
         }
+      } finally {
+        feeding = false;
       }
-    } finally {
-      feeding = false;
-    }
+    };
   };
+  const runs = feeds.map((feed, i) => runner(feed, i === 0));
 
   // Goes to the "here" of a pressed key. A failure is logged and changes
   // nothing else; the mark has already happened.
@@ -384,17 +394,17 @@ export function startDaemon({
     }
   };
   const pollTimer = setInterval(poll, pollMs);
-  const feedTimer = feed ? setInterval(runFeed, feedMs ?? feed.everyMs) : null;
+  const feedTimers = feeds.map((feed, i) => setInterval(runs[i], feedMs ?? feed.everyMs));
 
   connect();
-  if (feed) runFeed();
+  for (const run of runs) run();
 
   return {
     stop() {
       if (stopped) return Promise.resolve();
       stopped = true;
       clearInterval(pollTimer);
-      clearInterval(feedTimer);
+      for (const timer of feedTimers) clearInterval(timer);
       clearTimeout(layerTimer);
       clearTimeout(reconnectTimer);
       const sock = socket;

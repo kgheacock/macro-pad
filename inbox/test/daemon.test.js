@@ -409,7 +409,7 @@ function fedRepos(answers) {
   const plugin = {
     ...repos,
     feed: {
-      ...repos.feed,
+      ...repos.feed[0],
       fetch: async () => {
         const next = answers[Math.min(runs, answers.length - 1)];
         runs++;
@@ -533,4 +533,70 @@ test('TestReposColdStart', async (t) => {
   // The next good read replaces it.
   await waitFor(() => fed.seen.some((answer) => answer && answer.offline === null), 2000, 'the live answer');
   assert.deepEqual(writer.listRepos('kgheacock').map((r) => [r.name, r.issues, r.prs]), [['macro-pad', 0, 5]]);
+});
+
+test('TestDaemonRunsEveryFeed', async (t) => {
+  // The first feed draws; the second rejects every run.
+  {
+    const sc = scratch(t);
+    const server = await serve(t);
+    let bad = 0;
+    const plugin = {
+      ...repos,
+      feed: [
+        { ...reposFeed, fetch: async () => oneRepo(), sync: () => 0 },
+        {
+          source: 'second feed',
+          everyMs: 20,
+          fetch: async () => {
+            bad++;
+            throw new Error('down');
+          },
+          sync: () => 0,
+        },
+      ],
+    };
+    const { logs } = launch(t, sc, server, { plugin, feedMs: 20 });
+    await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
+    await waitFor(() => bad >= 3, 1000, 'three failed runs');
+    // One line for three equal failures, and the first feed was not logged.
+    assert.deepEqual(logs.filter((line) => line.startsWith('cannot read')), ['cannot read second feed: down']);
+  }
+
+  // The first feed rejects; the second still runs and its rows draw.
+  {
+    const sc = scratch(t);
+    const server = await serve(t);
+    let first = 0;
+    const plugin = {
+      name: 'basic',
+      rules: { id: 'inbox', icon: 'gmail.png' },
+      feed: [
+        {
+          source: 'first feed',
+          everyMs: 20,
+          fetch: async () => {
+            first++;
+            throw new Error('down');
+          },
+          sync: () => 0,
+        },
+        {
+          source: 'second feed',
+          everyMs: 20,
+          fetch: async ({ store }) => store,
+          sync: (store) => {
+            if (store.count('news') === 0) store.insert('news', 'from the second feed', sc.root);
+            return 1;
+          },
+        },
+      ],
+    };
+    const real = await import('../src/plugins/basic.js');
+    plugin.rules = real.default.rules;
+    plugin.createRenderer = real.default.createRenderer;
+    launch(t, sc, server, { plugin: { ...real.default, feed: plugin.feed }, feedMs: 20 });
+    await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'news'), 1000, 'the key of the second feed');
+    assert.ok(first >= 1);
+  }
 });

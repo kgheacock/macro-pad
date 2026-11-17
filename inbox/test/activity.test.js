@@ -245,6 +245,30 @@ test('TestEventsFailureKeepsLedger', async (t) => {
   assert.equal(logs.length, 1);
 });
 
+test('TestFeedAsksLoginOnce', async (t) => {
+  // Task 0090: the feed asks gh for the login once, not every run, and asks
+  // again after an events read fails.
+  const { db } = scratch(t);
+  const store = openStore(db);
+  t.after(() => store.close());
+  let failEvents = false;
+  const { calls, execFile } = stubGh((args) => {
+    if (args[0] === 'repo') return { stdout: repoList(['web']) };
+    if (args[1] === 'user') return { stdout: 'kgheacock\n' };
+    if (failEvents) return { error: Object.assign(new Error('x'), { code: 1 }), stderr: 'gh: HTTP 401\n' };
+    return { stdout: '[]' };
+  });
+  const userCalls = () => calls.filter((c) => c.args[0] === 'api' && c.args[1] === 'user').length;
+  await fetchFeed({ env: {}, store, execFile });
+  await fetchFeed({ env: {}, store, execFile });
+  assert.equal(userCalls(), 1);
+  failEvents = true;
+  await fetchFeed({ env: {}, store, execFile, log: () => {} });
+  failEvents = false;
+  await fetchFeed({ env: {}, store, execFile });
+  assert.equal(userCalls(), 2);
+});
+
 test('TestFeedWritesEventsAndGitLog', async (t) => {
   const sc = scratch(t);
   const store = openStore(sc.db);

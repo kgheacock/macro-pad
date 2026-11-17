@@ -668,8 +668,8 @@ time the repos feed runs. The weights, the half-life, and the retention are
 constants in `src/activity.js` (`WEIGHTS`, `HALF_LIFE_MS`, `KEEP_MS`); the
 ledger keeps the kind, so a change needs no migration.
 
-- **Your events on GitHub.** The repos feed runs `gh api user --jq .login`,
-  then `gh api "users/LOGIN/events?per_page=100"`: GitHub shows the private
+- **Your events on GitHub.** The repos feed runs `gh api user --jq .login`
+  once (again only after an events read fails), then `gh api "users/LOGIN/events?per_page=100"`: GitHub shows the private
   events of a user only to that user, so it asks for the signed-in login, not
   for `INBOX_REPOS_OWNER`. The first run, with no such event in the ledger,
   reads 3 pages; later runs read one. Events of repositories outside

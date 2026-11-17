@@ -1006,7 +1006,7 @@ test('plugins lists basic, repos, apps and no other', () => {
   assert.equal(r.status, 0);
   assert.deepEqual(r.stdout.trimEnd().split('\n').map((line) => line.split(' ')[0]), ['basic', 'repos', 'apps']);
   const files = readdirSync(path.join(import.meta.dirname, '..', 'src', 'plugins')).sort();
-  assert.deepEqual(files, ['apps.js', 'basic.js', 'index.js', 'repos-yellow.js', 'repos.js']);
+  assert.deepEqual(files, ['apps.js', 'basic.js', 'index.js', 'repos-items.js', 'repos-pulls.js', 'repos-yellow.js', 'repos.js']);
   assert.equal(run(['--plugin', 'github', 'list'], { sc }).status, 2);
 });
 

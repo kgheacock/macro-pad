@@ -1,13 +1,13 @@
 ---
 id: "0093"
 title: "A client writes its own yellow criteria as a command that the feed runs per repo"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/118"
 branch: "0093-criteria-provider-for-yellow-items"
 related: ["0064", "0075", "0076", "0087", "0089", "0090", "0091", "0092", "0095"]
 tags: ["inbox", "repos", "provider", "jira", "secrets"]
@@ -145,7 +145,7 @@ moves to `complete/` only when every box is ticked.
 - [x] **DoD-11** — `inbox/README.md` records the contract, the three env vars, and where tokens live.
   `inbox/examples/yellow-jira.sh` reads its token from the Keychain. **Proof:**
   `grep -n "Yellow criteria" inbox/README.md` and `grep -c "security find-generic-password" inbox/examples/yellow-jira.sh`
-- [ ] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-12** — The PR in the `pr` field links to this spec. **Proof:** PR body
 
 ## Risks
 

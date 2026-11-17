@@ -22,7 +22,7 @@ export const EVENT_PAGE_SIZE = 100;
 export const FIRST_RUN_PAGES = 3;
 
 // The key of a repository name, as a channel segment: lower case, a dot
-// becoming -, as the github plugin writes the repository of a PR's head.
+// becoming -, as the hook and the feed name a repository.
 // repolist.js re-exports it.
 export const repoKey = (name) => String(name).replace(/\./g, '-').toLowerCase();
 

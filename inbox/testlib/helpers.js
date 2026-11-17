@@ -22,7 +22,7 @@ export function envFor({ db, root }, extra = {}) {
     HOME: process.env.HOME,
     INBOX_DB: db,
     INBOX_SOURCE_ROOT: root,
-    // No test asks GitHub: the github plugin's feed finds no gh (task 0076).
+    // No test asks GitHub: the repos feed finds no gh (task 0089).
     INBOX_GH: '/nonexistent/gh',
     ...extra,
   };
@@ -39,9 +39,9 @@ export function run(args, { sc, cwd = sc.root, input, env = {} } = {}) {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-// Runs the CLI with the ai plugin to the end.
-export function runAi(args, options = {}) {
-  return run(['--plugin', 'ai', ...args], options);
+// Runs the CLI with the repos plugin to the end.
+export function runRepos(args, options = {}) {
+  return run(['--plugin', 'repos', ...args], options);
 }
 
 // Starts the CLI and returns the child plus a promise for its exit.

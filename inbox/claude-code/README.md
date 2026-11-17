@@ -1,7 +1,8 @@
-# Claude Code hooks for the ai plugin
+# Claude Code hooks for the repos plugin
 
 Reference copy of the Claude Code setup that reports each session to
-`inbox --plugin ai` (see "The ai plugin" in `../README.md`). The live files are
+`inbox --plugin repos` (see "The repos plugin" in `../README.md`; an old
+copy that sends `--plugin ai` still works, as an alias). The live files are
 `~/.claude/hooks/claude-ai-inbox.sh` and the `hooks` key of
 `~/.claude/settings.json`. Task 0070 put them there, in place of the iTerm
 badge hooks (`claude-iterm-badge.sh`, `claude-iterm-reset.sh`).
@@ -24,10 +25,9 @@ the short id, so two sessions in one project get two keys, and one session's
 `done` cannot hide another that waits. Without a session id the channel is
 `PROJECT`. `SessionEnd` marks the channel seen, so the key of a closed session
 goes away. The script marks the channel seen on a state change, because
-the ai plugin shows the highest status of the *unseen* messages: without it, a
+the repos plugin shows the highest status of the sessions of a repository. It shows the highest status of the *unseen* messages: without it, a
 `waiting` from a permission prompt would stay yellow after you approve, and a
-`running` would hide the `done`. A press on the channel key goes back to the
-iTerm session that sent the message (the "here").
+`running` would hide the `done`. The key shows the session's repository, so a press opens the repository's layer.
 
 ## Activity ledger
 
@@ -54,7 +54,7 @@ jq --slurpfile h inbox/claude-code/settings-hooks.json '.hooks = $h[0].hooks' \
 
 This replaces every hook in `settings.json`. Needs `jq` and `inbox` in
 `~/.local/bin` (set `INBOX_BIN` for another path), and the inbox daemon,
-which shows the ai plugin (`inbox/scripts/install.sh`).
+which shows the repos plugin (`inbox/scripts/install.sh`).
 
 ## Limits
 

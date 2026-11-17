@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA_VERSION, openStore } from '../src/store.js';
 import { fileURLToPath } from 'node:url';
-import { BIN, envFor, run, runAi, scratch, start } from '../testlib/helpers.js';
+import { BIN, envFor, run, runRepos, scratch, start } from '../testlib/helpers.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
 
 // Every row of the store, of every plugin, oldest first.
@@ -554,15 +554,15 @@ test('TestInstallRemovesPerPluginServices', (t) => {
   assert.ok(r.stdout.includes(`would write: ${one} (runs: inbox daemon --port 8765)\n`), r.stdout);
   assert.ok(existsSync(old), 'a dry run removed a file');
 
-  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--plugin', 'ai', '--slot', '2'], { env, encoding: 'utf8' });
+  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--plugin', 'repos', '--slot', '2'], { env, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --plugin ai --slot 2)'), r.stdout);
-  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--slot', 'basic=0', '--slot', 'ai=1'], { env, encoding: 'utf8' });
+  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --plugin repos --slot 2)'), r.stdout);
+  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--slot', 'basic=0', '--slot', 'repos=1'], { env, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --slot basic=0 --slot ai=1)'), r.stdout);
-  r = spawnSync('sh', [script, '--dry-run', '--slot', 'ai=9'], { env, encoding: 'utf8' });
+  assert.ok(r.stdout.includes('(runs: inbox daemon --port 8765 --slot basic=0 --slot repos=1)'), r.stdout);
+  r = spawnSync('sh', [script, '--dry-run', '--slot', 'repos=9'], { env, encoding: 'utf8' });
   assert.equal(r.status, 1);
-  assert.equal(r.stderr, 'install.sh: --slot ai=9 is out of range; use 0 to 5\n');
+  assert.equal(r.stderr, 'install.sh: --slot repos=9 is out of range; use 0 to 5\n');
   r = spawnSync('sh', [script, '--dry-run', '--slot', '2'], { env, encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.equal(r.stderr, 'install.sh: --slot 2 names no plugin, and the daemon shows more than one; use --slot NAME=N\n');
@@ -570,14 +570,10 @@ test('TestInstallRemovesPerPluginServices', (t) => {
   assert.equal(r.status, 2);
   assert.ok(r.stderr.includes('unknown plugin "nope"'), r.stderr);
 
-  // The github plugin's search goes in the wrapper; a quote cannot.
-  const query = 'is:pr is:open involves:@me archived:false';
-  r = spawnSync('sh', [script, '--dry-run', '--no-completions', '--github-query', query], { env, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.includes(`INBOX_GITHUB_QUERY=${query})`), r.stdout);
-  r = spawnSync('sh', [script, '--dry-run', '--github-query', "it's"], { env, encoding: 'utf8' });
+  // The github plugin is gone (task 0087), and so is its search flag.
+  r = spawnSync('sh', [script, '--dry-run', '--github-query', 'x'], { env, encoding: 'utf8' });
   assert.equal(r.status, 2);
-  assert.ok(r.stderr.includes('--github-query may not hold a quote'), r.stderr);
+  assert.ok(r.stderr.includes('unknown option'), r.stderr);
 });
 
 test('TestUninstallRemovesEveryService', (t) => {
@@ -643,7 +639,7 @@ test('TestDaemonBadFlags', () => {
   const sc = scratch();
   const cases = [
     [['--plugin', 'basic', '--slot', '7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
-    [['--slot', 'ai=7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
+    [['--slot', 'repos=7'], 'inbox: --slot 7 is out of range; use 0 to 5\n'],
     [['--port', 'x'], 'inbox: --port x is out of range; use 1 to 65535\n'],
     [['--poll', '5'], 'inbox: --poll 5 is not a duration; use a number and a unit, such as 500ms or 2s\n'],
   ];
@@ -679,15 +675,11 @@ test('TestOneDaemonEveryPlugin', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
   const d = daemon(t, sc, ['--port', String(server.port)]);
-  await stderrHas(d.child, 'ai daemon started');
+  await stderrHas(d.child, 'repos daemon started');
   // One process, one connection per plugin, and a top key for each; apps
   // has none without INBOX_APPS_ROOT.
-  await waitFor(
-    () => keysOf(server, 'inbox').length && keysOf(server, 'ai-inbox').length && keysOf(server, 'github-inbox').length,
-    3000,
-    'every top key',
-  );
-  assert.equal(server.connections, 4);
+  await waitFor(() => keysOf(server, 'inbox').length && keysOf(server, 'repos').length, 3000, 'every top key');
+  assert.equal(server.connections, 3);
 
   // A message of either plugin reaches the pad within 1 s.
   let sent = Date.now();
@@ -695,28 +687,29 @@ test('TestOneDaemonEveryPlugin', async (t) => {
   await waitFor(() => keysOf(server, 'inbox').some((k) => k.count === 1), 1000, 'the basic count');
   assert.ok(Date.now() - sent < 1000);
   sent = Date.now();
-  assert.equal(runAi(['send', '--status', 'waiting', 'two', 'needs you'], { sc }).status, 0);
-  await waitFor(() => keysOf(server, 'ai-inbox').some((k) => k.status === 'WARN'), 1000, 'the ai status');
+  assert.equal(runRepos(['send', '--status', 'waiting', 'two', 'needs you'], { sc }).status, 0);
+  await waitFor(() => keysOf(server, 'repos').some((k) => k.status === 'WARN'), 1000, 'the repos status');
   assert.ok(Date.now() - sent < 1000);
-  // Each channel goes under its own plugin's key.
+  // A basic channel goes under its key; a session has no key of its own, and
+  // its folder is not in the feed here.
   assert.equal(keysOf(server, 'one')[0].parent, 'inbox');
-  assert.equal(keysOf(server, 'two')[0].parent, 'ai-inbox');
+  assert.deepEqual(keysOf(server, 'two'), []);
 
   d.child.kill('SIGTERM');
   const { status, stderr } = await d.exited;
   assert.equal(status, 0);
   assert.ok(stderr.includes(`inbox: basic daemon started for ${sc.db} (pid ${d.child.pid})\n`), stderr);
-  for (const plugin of ['basic', 'ai', 'github', 'apps']) assert.equal(existsSync(`${sc.db}.${plugin}.daemon.pid`), false, plugin);
-  // The github loop finds no gh in a test, and says so once.
-  assert.equal(stderr.split('\n').filter((line) => line.startsWith('inbox: [github] cannot read GitHub')).length, 1, stderr);
+  for (const plugin of ['basic', 'repos', 'apps']) assert.equal(existsSync(`${sc.db}.${plugin}.daemon.pid`), false, plugin);
+  // The repos loop finds no gh in a test, and says so once.
+  assert.equal(stderr.split('\n').filter((line) => line.startsWith('inbox: [repos] cannot read GitHub repositories')).length, 1, stderr);
 });
 
 test('TestDaemonOnePlugin', async (t) => {
   const sc = scratch(t);
   const server = await serve(t);
-  const d = daemon(t, sc, ['--plugin', 'ai', '--port', String(server.port)]);
-  await stderrHas(d.child, 'ai daemon started');
-  await waitFor(() => keysOf(server, 'ai-inbox').length, 3000, 'the ai key');
+  const d = daemon(t, sc, ['--plugin', 'repos', '--port', String(server.port)]);
+  await stderrHas(d.child, 'repos daemon started');
+  await waitFor(() => keysOf(server, 'repos').length, 3000, 'the repos key');
   assert.equal(run(['send', 'one', 'hello'], { sc }).status, 0);
   await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(keysOf(server, 'inbox'), []);
@@ -726,30 +719,30 @@ test('TestDaemonOnePlugin', async (t) => {
   const { status, stderr } = await d.exited;
   assert.equal(status, 0);
   // With one plugin, the lines have no [plugin] prefix, as before task 0075.
-  assert.ok(!stderr.includes('[ai]'), stderr);
+  assert.ok(!stderr.includes('[repos]'), stderr);
 });
 
 test('TestMergedDaemonRefused', async (t) => {
   const sc = scratch(t);
-  const ai = daemon(t, sc, ['--plugin', 'ai', '--port', '1']);
-  await stderrHas(ai.child, 'daemon started');
+  const repos = daemon(t, sc, ['--plugin', 'repos', '--port', '1']);
+  await stderrHas(repos.child, 'daemon started');
   const merged = run(['daemon', '--port', '1'], { sc });
   assert.equal(merged.status, 3);
-  assert.equal(merged.stderr, `inbox: a ai daemon already runs for ${sc.db} (pid ${ai.child.pid})\n`);
+  assert.equal(merged.stderr, `inbox: a repos daemon already runs for ${sc.db} (pid ${repos.child.pid})\n`);
   // It took the basic pid file first, and gave it back.
   assert.equal(existsSync(`${sc.db}.basic.daemon.pid`), false);
-  ai.child.kill('SIGTERM');
-  assert.equal((await ai.exited).status, 0);
+  repos.child.kill('SIGTERM');
+  assert.equal((await repos.exited).status, 0);
 });
 
 test('TestDaemonSlots', async (t) => {
   const sc = scratch(t);
   const usage = [
-    [['--slot', '1'], 'inbox: --slot 1 names no plugin, and the daemon runs basic, ai, github, apps; use --slot NAME=N, such as --slot basic=1\n'],
-    [['--slot', 'basic=1', '--slot', 'ai=1'], 'inbox: --slot 1 is given to both basic and ai; give each its own slot\n'],
+    [['--slot', '1'], 'inbox: --slot 1 names no plugin, and the daemon runs basic, repos, apps; use --slot NAME=N, such as --slot basic=1\n'],
+    [['--slot', 'basic=1', '--slot', 'repos=1'], 'inbox: --slot 1 is given to both basic and repos; give each its own slot\n'],
     [['--slot', 'basic=1', '--slot', 'basic=2'], 'inbox: give --slot once for basic\n'],
-    [['--plugin', 'ai', '--slot', 'basic=1'], 'inbox: --slot basic=1: the daemon does not run plugin "basic"; it runs ai\n'],
-    [['--slot', 'nope=1'], 'inbox: --slot nope=1: the daemon does not run plugin "nope"; it runs basic, ai, github, apps\n'],
+    [['--plugin', 'repos', '--slot', 'basic=1'], 'inbox: --slot basic=1: the daemon does not run plugin "basic"; it runs repos\n'],
+    [['--slot', 'nope=1'], 'inbox: --slot nope=1: the daemon does not run plugin "nope"; it runs basic, repos, apps\n'],
   ];
   for (const [flags, message] of usage) {
     const r = run(['daemon', '--port', '1', ...flags], { sc });
@@ -758,28 +751,47 @@ test('TestDaemonSlots', async (t) => {
   }
 
   const server = await serve(t);
-  const d = daemon(t, sc, ['--port', String(server.port), '--slot', 'basic=1', '--slot', 'ai=4']);
-  await waitFor(() => keysOf(server, 'inbox').length && keysOf(server, 'ai-inbox').length, 3000, 'both top keys');
+  const d = daemon(t, sc, ['--port', String(server.port), '--slot', 'basic=1', '--slot', 'repos=4']);
+  await waitFor(() => keysOf(server, 'inbox').length && keysOf(server, 'repos').length, 3000, 'both top keys');
   assert.equal(keysOf(server, 'inbox')[0].slot, 1);
-  assert.equal(keysOf(server, 'ai-inbox')[0].slot, 4);
+  assert.equal(keysOf(server, 'repos')[0].slot, 4);
   d.child.kill('SIGTERM');
   assert.equal((await d.exited).status, 0);
 
   // With one plugin, a bare --slot N still works.
-  const one = daemon(t, sc, ['--plugin', 'ai', '--port', String(server.port), '--slot', '2']);
-  await waitFor(() => keysOf(server, 'ai-inbox').some((k) => k.slot === 2), 3000, 'the ai key in slot 2');
+  const one = daemon(t, sc, ['--plugin', 'repos', '--port', String(server.port), '--slot', '2']);
+  await waitFor(() => keysOf(server, 'repos').some((k) => k.slot === 2), 3000, 'the repos key in slot 2');
   one.child.kill('SIGTERM');
   assert.equal((await one.exited).status, 0);
 });
 
+// Task 0087: the name `ai` is an alias of `repos`, so an installed hook and
+// an old service file keep working.
+test('the name ai is an alias of repos', async (t) => {
+  const sc = scratch(t);
+  assert.equal(run(['--plugin', 'ai', 'send', '--status', 'waiting', 'macro-pad.3f2a91c0', 'x'], { sc }).status, 0);
+  assert.deepEqual(rows(sc).map((m) => [m.plugin, m.channel, m.status]), [['repos', 'macro-pad.3f2a91c0', 'waiting']]);
+  assert.equal(run(['--plugin', 'repos', 'count'], { sc }).stdout, '1\n');
+  assert.equal(run(['--plugin', 'ai', 'count'], { sc }).stdout, '1\n');
+
+  // An old service file: --plugin ai --slot ai=2.
+  const server = await serve(t);
+  const d = daemon(t, sc, ['--plugin', 'ai', '--port', String(server.port), '--slot', 'ai=2']);
+  await stderrHas(d.child, 'repos daemon started');
+  await waitFor(() => keysOf(server, 'repos').some((k) => k.slot === 2), 3000, 'the repos key in slot 2');
+  d.child.kill('SIGTERM');
+  assert.equal((await d.exited).status, 0);
+  assert.equal(existsSync(`${sc.db}.repos.daemon.pid`), false);
+});
+
 test('TestPluginListOnlyForDaemon', () => {
   const sc = scratch();
-  const r = run(['--plugin', 'basic,ai', 'list'], { sc });
+  const r = run(['--plugin', 'basic,repos', 'list'], { sc });
   assert.equal(r.status, 2);
-  assert.ok(r.stderr.includes('give --plugin once; got basic and ai'), r.stderr);
+  assert.ok(r.stderr.includes('give --plugin once; got basic and repos'), r.stderr);
   const bad = run(['daemon', '--plugin', 'basic,nope'], { sc });
   assert.equal(bad.status, 2);
-  assert.equal(bad.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github, apps\n');
+  assert.equal(bad.stderr, 'inbox: unknown plugin "nope"; use one of: basic, repos, apps\n');
 });
 
 const SESSION = '0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9';
@@ -933,22 +945,22 @@ test('TestListSurvivesAClosedStdout', async (t) => {
 
 test('TestPluginsShareOneStore', (t) => {
   const sc = scratch(t);
-  assert.equal(runAi(['send', 'agent', 'needs input', '--status', 'waiting'], { sc }).status, 0);
+  assert.equal(runRepos(['send', 'agent', 'needs input', '--status', 'waiting'], { sc }).status, 0);
   assert.equal(run(['send', 'mine', 'hello'], { sc }).status, 0);
 
   // One file holds both, each row with its plugin.
   assert.deepEqual(rows(sc).map((m) => [m.plugin, m.channel, m.status]), [
-    ['ai', 'agent', 'waiting'],
+    ['repos', 'agent', 'waiting'],
     ['basic', 'mine', 'info'],
   ]);
   // Each plugin reads only its own.
   assert.equal(run(['list', '--all-channels'], { sc }).stdout.includes('needs input'), false);
-  assert.equal(runAi(['list', '--all-channels'], { sc }).stdout.includes('hello'), false);
-  assert.equal(runAi(['count', '--all-channels'], { sc }).stdout, '1\n');
-  assert.equal(runAi(['channels'], { sc }).stdout.startsWith('agent '), true);
+  assert.equal(runRepos(['list', '--all-channels'], { sc }).stdout.includes('hello'), false);
+  assert.equal(runRepos(['count', '--all-channels'], { sc }).stdout, '1\n');
+  assert.equal(runRepos(['channels'], { sc }).stdout.startsWith('agent '), true);
 
-  // Seen in ai does not touch basic.
-  assert.equal(runAi(['seen', 'agent'], { sc }).stdout, '1\n');
+  // Seen in repos does not touch basic.
+  assert.equal(runRepos(['seen', 'agent'], { sc }).stdout, '1\n');
   assert.equal(run(['count', '--all-channels'], { sc }).stdout, '1\n');
 });
 
@@ -959,18 +971,18 @@ test('TestPluginFlag', (t) => {
   assert.equal(run(['send', '--plugin', 'ai', 'a', 'two'], { sc }).status, 0);
   assert.equal(run(['send', 'a', 'three', '--plugin=ai'], { sc }).status, 0);
   assert.equal(run(['--plugin', 'basic', 'send', 'a', 'four'], { sc }).status, 0);
-  assert.equal(runAi(['count', 'a'], { sc }).stdout, '3\n');
+  assert.equal(runRepos(['count', 'a'], { sc }).stdout, '3\n');
   assert.equal(run(['count', 'a'], { sc }).stdout, '1\n');
   // A pipe with no command word.
   assert.equal(run(['--plugin', 'ai', '--channel', 'a'], { sc, input: 'five\n' }).status, 0);
-  assert.equal(runAi(['list', '--all-channels', '--json'], { sc }).stdout.includes('five'), true);
+  assert.equal(runRepos(['list', '--all-channels', '--json'], { sc }).stdout.includes('five'), true);
   // After --, the words are the message.
   assert.equal(run(['send', '--', 'b', '--plugin'], { sc }).status, 0);
   assert.equal(run(['list', 'b'], { sc }).stdout.includes('--plugin'), true);
 
   let r = run(['--plugin', 'nope', 'list'], { sc });
   assert.equal(r.status, 2);
-  assert.equal(r.stderr, 'inbox: unknown plugin "nope"; use one of: basic, ai, github, apps\n');
+  assert.equal(r.stderr, 'inbox: unknown plugin "nope"; use one of: basic, repos, apps\n');
   r = run(['list', '--plugin'], { sc });
   assert.equal(r.status, 2);
   assert.ok(r.stderr.includes('--plugin needs a NAME'), r.stderr);
@@ -981,65 +993,63 @@ test('TestPluginFlag', (t) => {
   r = run(['plugins'], { sc });
   assert.equal(r.status, 0);
   const lines = r.stdout.trimEnd().split('\n');
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, 3);
   assert.ok(lines[0].startsWith('basic ') && lines[0].endsWith('(default)'), lines[0]);
-  assert.ok(lines[1].startsWith('ai ') && !lines[1].endsWith('(default)'), lines[1]);
-  assert.ok(lines[2].startsWith('github ') && !lines[2].endsWith('(default)'), lines[2]);
-  assert.ok(lines[3].startsWith('apps ') && !lines[3].endsWith('(default)'), lines[3]);
+  assert.ok(lines[1].startsWith('repos ') && !lines[1].endsWith('(default)'), lines[1]);
+  assert.ok(lines[2].startsWith('apps ') && !lines[2].endsWith('(default)'), lines[2]);
 });
 
-test('TestAiStatus', (t) => {
+test('plugins lists basic, repos, apps and no other', () => {
+  // Task 0087: ai and github are gone from the code, not only from the list.
+  const sc = scratch();
+  const r = run(['plugins'], { sc });
+  assert.equal(r.status, 0);
+  assert.deepEqual(r.stdout.trimEnd().split('\n').map((line) => line.split(' ')[0]), ['basic', 'repos', 'apps']);
+  const files = readdirSync(path.join(import.meta.dirname, '..', 'src', 'plugins')).sort();
+  assert.deepEqual(files, ['apps.js', 'basic.js', 'index.js', 'repos.js']);
+  assert.equal(run(['--plugin', 'github', 'list'], { sc }).status, 2);
+});
+
+test('TestReposStatus', (t) => {
   const sc = scratch(t);
-  let r = runAi(['send', '--status', 'error', 'x', 'y'], { sc });
+  let r = runRepos(['send', '--status', 'error', 'x', 'y'], { sc });
   assert.equal(r.status, 2);
   for (const word of ['waiting', 'running', 'done']) assert.ok(r.stderr.includes(word), r.stderr);
   assert.ok(r.stderr.startsWith('inbox: '), r.stderr);
-  r = runAi(['pipe', '--status', 'info', 'x'], { sc, input: 'a\n' });
+  r = runRepos(['pipe', '--status', 'info', 'x'], { sc, input: 'a\n' });
   assert.equal(r.status, 2);
   assert.equal(existsSync(sc.db), false, 'a rejected send must not create the store');
 
   // No status: done. The three names are accepted.
-  assert.equal(runAi(['send', 'x', 'plain'], { sc }).status, 0);
+  assert.equal(runRepos(['send', 'x', 'plain'], { sc }).status, 0);
   for (const status of ['waiting', 'running', 'done']) {
-    assert.equal(runAi(['send', '--status', status, 'x', status], { sc }).status, 0);
+    assert.equal(runRepos(['send', '--status', status, 'x', status], { sc }).status, 0);
   }
   // basic still takes any status, and defaults to info.
   assert.equal(run(['send', '--status', 'error', 'x', 'y'], { sc }).status, 0);
   assert.equal(run(['send', 'x', 'z'], { sc }).status, 0);
   assert.deepEqual(rows(sc).map((m) => [m.plugin, m.status]), [
-    ['ai', 'done'], ['ai', 'waiting'], ['ai', 'running'], ['ai', 'done'], ['basic', 'error'], ['basic', 'info'],
+    ['repos', 'done'], ['repos', 'waiting'], ['repos', 'running'], ['repos', 'done'], ['basic', 'error'], ['basic', 'info'],
   ]);
-});
-
-test('TestGithubStatus', (t) => {
-  const sc = scratch(t);
-  let r = run(['--plugin', 'github', 'send', '--status', 'red', 'x', 'y'], { sc });
-  assert.equal(r.status, 2);
-  for (const word of ['failing', 'pending', 'passing', 'none', 'closed']) assert.ok(r.stderr.includes(word), r.stderr);
-  assert.equal(existsSync(sc.db), false, 'a rejected send must not create the store');
-  assert.equal(run(['--plugin', 'github', 'send', 'x', 'y'], { sc }).status, 0);
-  assert.deepEqual(rows(sc).map((m) => [m.plugin, m.status]), [['github', 'none']]);
-  r = run(['--plugin', 'github', 'send', '-h'], { sc });
-  assert.ok(r.stdout.includes('counts the failing PRs'), r.stdout);
 });
 
 test('TestPluginHelp', (t) => {
   const sc = scratch(t);
-  const top = runAi(['-h'], { sc });
+  const top = runRepos(['-h'], { sc });
   assert.equal(top.status, 0);
   assert.ok(top.stdout.startsWith('inbox - '), top.stdout);
   assert.ok(top.stdout.includes('waiting, running, done'));
-  const send = runAi(['send', '-h'], { sc }).stdout;
+  const send = runRepos(['send', '-h'], { sc }).stdout;
   assert.ok(send.includes('Usage: inbox send'), send);
   assert.ok(send.includes('waiting | running | done (default: done)'), send);
-  assert.ok(send.includes('counts the channels that wait'), send);
+  assert.ok(send.includes('counts the sessions that wait'), send);
 
   const basicTop = run(['-h'], { sc }).stdout;
-  for (const word of ['--plugin NAME', 'basic', 'ai ', 'plugins']) assert.ok(basicTop.includes(word), word);
-  assert.ok(!basicTop.includes('counts the channels that wait'));
+  for (const word of ['--plugin NAME', 'basic', 'repos ', 'plugins']) assert.ok(basicTop.includes(word), word);
+  assert.ok(!basicTop.includes('counts the sessions that wait'));
   assert.ok(run(['send', '-h'], { sc }).stdout.includes('letters, digits, - and _ (default: info)'));
-  assert.ok(runAi(['bogus'], { sc }).stderr.includes("Run 'inbox -h'"));
-  for (const r of [top, runAi(['send', '-h'], { sc }), runAi(['bogus'], { sc }), run(['plugins', '-h'], { sc })]) {
+  assert.ok(runRepos(['bogus'], { sc }).stderr.includes("Run 'inbox -h'"));
+  for (const r of [top, runRepos(['send', '-h'], { sc }), runRepos(['bogus'], { sc }), run(['plugins', '-h'], { sc })]) {
     assert.ok(!`${r.stdout}${r.stderr}`.includes('ai-inbox'), r.stdout + r.stderr);
   }
 });
@@ -1047,20 +1057,22 @@ test('TestPluginHelp', (t) => {
 test('TestSendBranch', (t) => {
   // Task 0081: --branch links the branch of a session's repository to it.
   const sc = scratch(t);
-  let r = runAi(['send', '--branch', 'fix-x', 'github.com.OnePayPal.docreviewonpremnodeweb.08709453', 'working'], { sc });
+  let r = runRepos(['send', '--branch', 'fix-x', 'github.com.OnePayPal.docreviewonpremnodeweb.08709453', 'working'], { sc });
   assert.equal(r.status, 0, r.stderr);
   const store = openStore(sc.db);
   t.after(() => store.close());
   assert.equal(store.branchSession('docreviewonpremnodeweb', 'fix-x'), '08709453');
   // A channel without a session has nothing to link.
-  r = runAi(['send', '--branch', 'fix-x', 'macro-pad', 'working'], { sc });
+  r = runRepos(['send', '--branch', 'fix-x', 'macro-pad', 'working'], { sc });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--branch needs a session channel/);
   assert.match(run(['send', '-h'], { sc }).stdout, /--branch B/);
 });
 
 test('TestHookSendsBranch', (t) => {
-  // The Claude Code hook names the branch of the session's folder.
+  // The Claude Code hook names the branch of the session's folder. It reports
+  // to repos, and sends no --plugin ai (task 0087).
+  assert.equal(readFileSync(fileURLToPath(new URL('../claude-code/claude-ai-inbox.sh', import.meta.url)), 'utf8').includes('--plugin ai'), false);
   const sc = scratch(t);
   const repo = path.join(sc.root, 'macro-pad');
   mkdirSync(repo);
@@ -1074,7 +1086,7 @@ test('TestHookSendsBranch', (t) => {
   });
   if (r.error) return t.skip('no bash');
   assert.equal(r.status, 0, r.stderr);
-  const store = openStore(sc.db, undefined, { plugin: 'ai' });
+  const store = openStore(sc.db, undefined, { plugin: 'repos' });
   t.after(() => store.close());
   assert.deepEqual(store.list().map((m) => [m.channel, m.status]), [['macro-pad.3f2a91c0', 'running']]);
   assert.equal(store.branchSession('macro-pad', 'claude/fix-x'), '3f2a91c0');

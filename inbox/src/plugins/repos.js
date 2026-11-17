@@ -10,14 +10,15 @@
 // the repository, merged so that one piece of work is one key (see
 // repos-items.js). The items exist only while that layer is open.
 
-import { componentInput, componentOf, emojiFor, splitSessionChannel } from '../emoji.js';
+import { componentOf, splitSessionChannel } from '../emoji.js';
 import { orderRepos, nextShown } from '../activity.js';
 import { removeLayerKeyMessage, setLayerKeyMessage } from '../protocol.js';
 import { feed } from '../repolist.js';
 import { yellowFeed } from './repos-yellow.js';
 import { pullsFeed } from './repos-pulls.js';
-import { MAX_ITEMS, activeSessions, itemStatus, itemsOf, press } from './repos-items.js';
-import { MAX_CAPTION, REPO_MAX_CHILDREN, clip } from '../render.js';
+import { MAX_ITEMS, activeSessions, itemsOf, press } from './repos-items.js';
+import { itemKey } from './repos-item-key.js';
+import { REPO_MAX_CHILDREN } from '../render.js';
 import { PAD_STATUS, RANK_STATUS, TOP_ICON, repoNode, topKey } from '../repo-key.js';
 
 export const REPOS_STATUSES = ['waiting', 'running', 'done'];
@@ -244,17 +245,11 @@ export function createReposRenderer({ slot, log = () => {}, emojiSet, store = nu
           if (!readLogged) log(`cannot read the items of ${names.get(openKey) ?? openKey}: ${e.message}`);
           readLogged = true;
         }
-        const emoji = emojiFor(componentInput(openKey), emojiSet).iconRef;
         for (const id of itemIds) {
-          const item = itemData.get(id);
-          const label = item.yellow ?? (item.green !== null ? `#${item.green}` : item.session);
           set(out, itemNodeKey(openKey, id), {
             id,
             path: [TOP_ID, repoId(openKey)],
-            status: itemStatus(item),
-            count: 0,
-            iconText: clip(String(label), MAX_CAPTION),
-            iconEmoji: item.session ? [emoji, emojiFor(`session:${item.session}`, emojiSet).iconRef] : [emoji],
+            ...itemKey(itemData.get(id), { repo: openKey, set: emojiSet }),
           });
         }
       }

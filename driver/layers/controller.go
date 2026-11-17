@@ -81,6 +81,9 @@ type Update struct {
 	IconText string
 	// IconEmoji is one or two pictures under assets/emoji/ (task 0073).
 	IconEmoji []string
+	// IconLines is one or two lines of identifier on a key in a child layer
+	// (task 0094).
+	IconLines []string
 	// Opens opens the node's layer on a press while it has no children
 	// (task 0088).
 	Opens bool
@@ -115,6 +118,8 @@ type view struct {
 	// iconEmoji is the emoji refs joined by line breaks, so view stays
 	// comparable (task 0073).
 	iconEmoji string
+	// iconLines is the lines of identifier joined by line breaks (task 0094).
+	iconLines string
 	// round draws iconEmoji on the white round of task 0073, as a top-level
 	// key does; a key in a child layer draws it as a hero, a sticker, and a
 	// strip (task 0082).
@@ -323,7 +328,7 @@ func (c *Controller) SetKey(u Update) error {
 }
 
 func applyUpdate(d *Doc, u Update) error {
-	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, CountGreen: u.CountGreen, CountYellow: u.CountYellow, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji, Opens: u.Opens}
+	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, CountGreen: u.CountGreen, CountYellow: u.CountYellow, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji, IconLines: slices.Clone(u.IconLines), Opens: u.Opens}
 	if u.ID == "" {
 		return errors.New("layers: update has no id")
 	}
@@ -573,7 +578,7 @@ func desired(d Doc) [KeyCount]view {
 }
 
 func nodeView(n *Node) view {
-	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, iconText: n.IconText, iconEmoji: joinEmoji(n.IconEmoji), count: n.Count, countGreen: n.CountGreen, countYellow: n.CountYellow}
+	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, iconText: n.IconText, iconEmoji: joinEmoji(n.IconEmoji), iconLines: joinEmoji(n.IconLines), count: n.Count, countGreen: n.CountGreen, countYellow: n.CountYellow}
 }
 
 // keyDraw is one key to send: its key state, and the glyph that goes before
@@ -648,10 +653,10 @@ func (c *Controller) prepare(key byte, w view) keyDraw {
 		d.state.Color, d.state.EmojiID = 0, 0
 		return d
 	}
-	if w.iconRef != "" || w.iconText != "" || w.iconEmoji != "" || w.badges().Any() {
-		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconEmoji, w.round, w.badges(), w.color)
+	if w.iconRef != "" || w.iconText != "" || w.iconLines != "" || w.iconEmoji != "" || w.badges().Any() {
+		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconLines, w.iconEmoji, w.round, w.badges(), w.color)
 		if err != nil {
-			c.logf("layers: key %d: draw %q: %v", key, w.iconRef+w.iconText+w.iconEmoji, err)
+			c.logf("layers: key %d: draw %q: %v", key, w.iconRef+w.iconText+w.iconLines+w.iconEmoji, err)
 		} else {
 			d.png = png
 			d.state.EmojiID = transport.CustomGlyphSentinelEmojiID

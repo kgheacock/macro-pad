@@ -42,6 +42,7 @@ type frameKey struct {
 	ref   string
 	text  string
 	emoji string
+	lines string
 	round bool
 	color uint16
 }
@@ -51,6 +52,11 @@ type frameKey struct {
 func frameKeyOf(w view) frameKey {
 	if w.kind == kindBlank || w.kind == kindUnknown {
 		return frameKey{}
+	}
+	if w.iconLines != "" {
+		// The strip of an id tile shows the key color, so the color is part of
+		// the frame (task 0094).
+		return frameKey{lines: w.iconLines, emoji: w.iconEmoji, color: w.color}
 	}
 	if w.iconEmoji != "" {
 		// The strip, or the round, shows the key color, so the color is part
@@ -70,17 +76,22 @@ func frameKeyOf(w view) frameKey {
 // color in the strip, and its badges sit on white, so it is stored over ColorNone, as a text
 // icon is (task 0082). On the round, its pip sits on the key color.
 func (k frameKey) storeColor() uint16 {
-	if k.emoji != "" && !k.round {
+	if k.lines != "" || (k.emoji != "" && !k.round) {
 		return ColorNone
 	}
 	return k.color
 }
 
 // hasGlyph reports whether the frame has a picture over its color.
-func (k frameKey) hasGlyph() bool { return k.ref != "" || k.text != "" || k.emoji != "" }
+func (k frameKey) hasGlyph() bool {
+	return k.ref != "" || k.text != "" || k.lines != "" || k.emoji != ""
+}
 
 // label names the picture of the frame in a log line.
 func (k frameKey) label() string {
+	if k.lines != "" {
+		return strings.TrimSpace(strings.ReplaceAll(k.lines, "\n", " ") + " " + strings.ReplaceAll(k.emoji, "\n", " "))
+	}
 	if k.emoji != "" {
 		return strings.TrimSpace(k.text + " " + strings.ReplaceAll(k.emoji, "\n", " "))
 	}
@@ -187,7 +198,7 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	var png []byte
 	if k.hasGlyph() {
 		var err error
-		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.emoji, k.round, Badges{}, k.color)
+		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.lines, k.emoji, k.round, Badges{}, k.color)
 		if err != nil {
 			// A glyph that cannot be drawn leaves the color alone, rather than
 			// nothing.

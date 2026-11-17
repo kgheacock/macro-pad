@@ -13,26 +13,22 @@
 //   ci       failing, pending, passing, none, or null (no PR)
 //   agent    waiting, running, done, or null (no session)
 //   here     the "here" of the session, or null
-// Task 0096 draws them; this file only decides which items exist.
+// Task 0096 draws them (repos-item-key.js); this file only decides which
+// items exist.
 
 import { repoKey } from '../activity.js';
 import { componentOf, splitSessionChannel } from '../emoji.js';
 import { focus as focusHere, parseHere } from '../here.js';
 import { ACTIVE_MS, SESSION_PLUGIN, rank, repoId } from './repos.js';
+import { statusOf } from './repos-item-key.js';
 
 // At most this many items show; the driver pages them (task 0078).
 export const MAX_ITEMS = 20;
 
 const AGENTS = [null, 'done', 'running', 'waiting'];
 
-// Pad status names (driver/layers/doc.go) of an item.
-export function itemStatus(item) {
-  if (item.ci === 'failing') return 'ERROR';
-  if (item.agent === 'waiting') return 'WARN';
-  if (item.ci === 'pending' || item.agent === 'running') return 'RUNNING';
-  if (item.ci === 'passing' || item.agent === 'done') return 'DONE';
-  return '';
-}
+// Pad status names (driver/layers/doc.go) of an item; task 0096 owns the rule.
+export const itemStatus = statusOf;
 
 // Whether `text` holds `id` between characters that are not letters or
 // digits, in any letter case: PROJ-123 is in "PROJ-123: fix" and in

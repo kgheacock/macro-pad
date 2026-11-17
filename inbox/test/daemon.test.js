@@ -434,7 +434,7 @@ test('TestDaemonFeed', async (t) => {
   const server = await serve(t);
   const writer = openStore(sc.db, undefined, { plugin: 'repos' });
   t.after(() => writer.close());
-  writer.insert('macro-pad.3f2a91c0', 'needs input', sc.root, { status: 'waiting' });
+  writer.insert('github.com.kgheacock.macro-pad.3f2a91c0', 'needs input', sc.root, { status: 'waiting' });
   const { plugin } = fedRepos([oneRepo()]);
   // A slow poll and a slow feed: only the first run, at start, can draw it.
   const started = Date.now();
@@ -444,6 +444,7 @@ test('TestDaemonFeed', async (t) => {
   const top = server.received.findLast((m) => m.setLayerKey?.id === 'repos').setLayerKey;
   assert.deepEqual([top.status, top.count], ['WARN', 1]);
   const key = server.received.findLast((m) => m.setLayerKey?.id === 'repo.macro-pad').setLayerKey;
+  // The session is in the layer, so the key opens (task 0095).
   assert.deepEqual([key.parent, key.opens, key.status, key.iconText], ['repos', true, 'WARN', 'macro-pad']);
   // The first connect removes the keys of the retired plugins.
   const removed = server.received.filter((m) => m.kind === 'removeLayerKey').map((m) => m.removeLayerKey.id);
@@ -452,7 +453,7 @@ test('TestDaemonFeed', async (t) => {
   server.layerChanged('repos');
   pressChild(server, 'repos', 'repo.macro-pad');
   await pause(150);
-  assert.deepEqual(counts(writer), { 'macro-pad.3f2a91c0': 1 });
+  assert.deepEqual(counts(writer), { 'github.com.kgheacock.macro-pad.3f2a91c0': 1 });
 });
 
 test('TestDaemonFeedFails', async (t) => {

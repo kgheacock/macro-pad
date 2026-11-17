@@ -401,10 +401,10 @@ test('TestErrorMessages', async (t) => {
     new RegExp(`^inbox: inbox at ${sc.db} is busy \\(another writer held it for 0\\.3 s\\); try again$`));
 
   const raw = new DatabaseSync(sc.db);
-  raw.exec('PRAGMA user_version = 9');
+  raw.exec('PRAGMA user_version = 99');
   raw.close();
   expect(run(['count', '--all-channels'], { sc }), 1,
-    new RegExp(`^inbox: inbox at ${sc.db} has schema 9; this inbox reads up to ${SCHEMA_VERSION}\\. Update the inbox checkout\\.$`));
+    new RegExp(`^inbox: inbox at ${sc.db} has schema 99; this inbox reads up to ${SCHEMA_VERSION}\\. Update the inbox checkout\\.$`));
 });
 
 test('TestSymlinkedWorkingDirectory', (t) => {
@@ -1006,7 +1006,7 @@ test('plugins lists basic, repos, apps and no other', () => {
   assert.equal(r.status, 0);
   assert.deepEqual(r.stdout.trimEnd().split('\n').map((line) => line.split(' ')[0]), ['basic', 'repos', 'apps']);
   const files = readdirSync(path.join(import.meta.dirname, '..', 'src', 'plugins')).sort();
-  assert.deepEqual(files, ['apps.js', 'basic.js', 'index.js', 'repos.js']);
+  assert.deepEqual(files, ['apps.js', 'basic.js', 'index.js', 'repos-yellow.js', 'repos.js']);
   assert.equal(run(['--plugin', 'github', 'list'], { sc }).status, 2);
 });
 

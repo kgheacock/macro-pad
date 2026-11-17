@@ -74,67 +74,140 @@ func onGray(img image.Image) *image.NRGBA {
 	return out
 }
 
-// TestPipSheet is task 0062's DoD-1: the sheet has five discs and 13 character
-// cells, and it is exactly the size of a glyph.
-func TestPipSheet(t *testing.T) {
-	sheet, err := BuildPipSheet()
+// isInk reports whether a pixel of a cell of fill is at least half way from the
+// fill to the ink.
+func isInk(px color.NRGBA, fill Fill) bool {
+	dist := func(a, b color.NRGBA) int {
+		abs := func(x int) int {
+			if x < 0 {
+				return -x
+			}
+			return x
+		}
+		return abs(int(a.R)-int(b.R)) + abs(int(a.G)-int(b.G)) + abs(int(a.B)-int(b.B))
+	}
+	return 2*dist(px, badgeFills[fill]) >= dist(badgeInk[fill], badgeFills[fill])
+}
+
+// TestBadgeSheet is task 0091's DoD-1: the sheet is 76,800 bytes, it has a disc
+// of each of the three fills on each of five key colors, and a cell of each
+// character of each fill, and the cells are opaque with ink in them.
+func TestBadgeSheet(t *testing.T) {
+	sheet, err := BuildBadgeSheet()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(sheet.Pixels); got != transport.CustomGlyphPixelsSize {
-		t.Fatalf("the sheet is %d bytes, want %d", got, transport.CustomGlyphPixelsSize)
+	if got := len(sheet.Pixels); got != 76800 {
+		t.Fatalf("the sheet is %d bytes, want 76,800", got)
+	}
+	if sheet.Image.Bounds().Dx() != 256 || sheet.Image.Bounds().Dy() != 150 {
+		t.Fatalf("the sheet is %v, want 256 by 150", sheet.Image.Bounds())
 	}
 	if len(sheet.Colors) != 5 {
-		t.Fatalf("the sheet has %d discs, want 5", len(sheet.Colors))
+		t.Fatalf("the sheet has %d columns of discs, want 5", len(sheet.Colors))
 	}
-	for i := range sheet.Colors {
-		disc := image.Rect(pipDisc*i, 0, pipDisc*(i+1), pipDisc)
-		centre := sheet.Image.NRGBAAt(disc.Min.X+pipDisc/2, pipDisc/2)
-		if centre != pipRed {
-			t.Errorf("disc %d: centre is %v, want the red %v", i, centre, pipRed)
+	for fill := FillRed; fill < fillCount; fill++ {
+		for i := range sheet.Colors {
+			disc := badgeDiscSprite(i, fill)
+			if !disc.In(image.Rect(0, 0, 238, 102)) {
+				t.Fatalf("disc %d of fill %d at %v is outside the disc rows", i, fill, disc)
+			}
+			centre := sheet.Image.NRGBAAt(disc.Min.X+badgeDisc/2, disc.Min.Y+badgeDisc/2)
+			if centre != badgeFills[fill] {
+				t.Errorf("fill %d disc %d: centre is %v, want %v", fill, i, centre, badgeFills[fill])
+			}
+			if a := sheet.Image.NRGBAAt(disc.Min.X, disc.Min.Y).A; a != 0 {
+				t.Errorf("fill %d disc %d: the corner has alpha %d, want a transparent corner", fill, i, a)
+			}
+			if ring := sheet.Image.NRGBAAt(disc.Min.X+badgeDisc/2, disc.Min.Y); ring.A == 0 {
+				t.Errorf("fill %d disc %d: no ring at the top", fill, i)
+			}
 		}
-		if a := sheet.Image.NRGBAAt(disc.Min.X, 0).A; a != 0 {
-			t.Errorf("disc %d: the corner has alpha %d, want a transparent corner", i, a)
-		}
-	}
-	cells := []struct {
-		r     rune
-		small bool
-	}{{'0', false}, {'1', false}, {'2', false}, {'3', false}, {'4', false}, {'5', false}, {'6', false}, {'7', false}, {'8', false}, {'9', false}, {'+', false}, {'9', true}, {'+', true}}
-	for _, c := range cells {
-		rect := pipSpriteRect(c.r, c.small)
-		white := 0
-		for y := rect.Min.Y; y < rect.Max.Y; y++ {
-			for x := rect.Min.X; x < rect.Max.X; x++ {
-				px := sheet.Image.NRGBAAt(x, y)
-				if px.A != 0xFF {
-					t.Fatalf("cell %q small=%v is not opaque at (%d, %d)", c.r, c.small, x, y)
+		for _, c := range []struct {
+			r     rune
+			small bool
+		}{{'0', false}, {'1', false}, {'2', false}, {'3', false}, {'4', false}, {'5', false}, {'6', false}, {'7', false}, {'8', false}, {'9', false}, {'+', false}, {'9', true}, {'+', true}} {
+			rect := badgeSpriteRect(fill, c.r, c.small)
+			if !rect.In(image.Rect(0, badgeCellY[fill], BadgeSheetWidth, badgeCellY[fill]+16)) {
+				t.Fatalf("cell %q small=%v of fill %d is at %v, outside its set", c.r, c.small, fill, rect)
+			}
+			ink := 0
+			for y := rect.Min.Y; y < rect.Max.Y; y++ {
+				for x := rect.Min.X; x < rect.Max.X; x++ {
+					px := sheet.Image.NRGBAAt(x, y)
+					if px.A != 0xFF {
+						t.Fatalf("cell %q small=%v of fill %d is not opaque at (%d, %d)", c.r, c.small, fill, x, y)
+					}
+					if isInk(px, fill) {
+						ink++
+					}
 				}
-				if px.R > 0xE0 && px.G > 0xE0 && px.B > 0xE0 {
-					white++
+			}
+			if ink < 4 {
+				t.Errorf("cell %q small=%v of fill %d has %d ink pixels, want a drawn character", c.r, c.small, fill, ink)
+			}
+		}
+	}
+	checkGoldenNear(t, "badge-sheet.png", onGray(sheet.Image))
+}
+
+// TestBadgeDigitsAreLegible is task 0091's goal of digits at least 13 px high.
+func TestBadgeDigitsAreLegible(t *testing.T) {
+	sheet, err := BuildBadgeSheet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for fill := FillRed; fill < fillCount; fill++ {
+		for _, r := range "0123456789" {
+			rect := badgeSpriteRect(fill, r, false)
+			top, bottom := rect.Max.Y, rect.Min.Y
+			for y := rect.Min.Y; y < rect.Max.Y; y++ {
+				for x := rect.Min.X; x < rect.Max.X; x++ {
+					if isInk(sheet.Image.NRGBAAt(x, y), fill) {
+						top, bottom = min(top, y), max(bottom, y+1)
+					}
+				}
+			}
+			if h := bottom - top; h < 13 {
+				t.Errorf("digit %q of fill %d is %d px high, want at least 13", r, fill, h)
+			}
+		}
+	}
+}
+
+// TestBadgeDigitsFitDisc is task 0091's DoD-1: every digit cell, of every count
+// on every fill, lies inside the inside of the disc, which is inside the ring.
+func TestBadgeDigitsFitDisc(t *testing.T) {
+	inner := float64(badgeDisc)/2 - badgeRing
+	for fill := FillRed; fill < fillCount; fill++ {
+		disc := badgeDiscRect(fill)
+		centre := image.Pt(disc.Min.X+badgeDisc/2, disc.Min.Y+badgeDisc/2)
+		for count := 1; count <= MaxBadgeCount+1; count++ {
+			for _, c := range badgeCells(fill, count) {
+				rect := image.Rectangle{Min: c.dst, Max: c.dst.Add(c.src.Size())}
+				for _, corner := range []image.Point{rect.Min, {rect.Max.X, rect.Min.Y}, {rect.Min.X, rect.Max.Y}, rect.Max} {
+					if d := math.Hypot(float64(corner.X-centre.X), float64(corner.Y-centre.Y)); d > inner {
+						t.Fatalf("count %d on fill %d: a cell corner %v is %.1f px from the centre, past the %.0f px inside of the disc", count, fill, corner, d, inner)
+					}
 				}
 			}
 		}
-		if white < 4 {
-			t.Errorf("cell %q small=%v has %d white pixels, want a drawn character", c.r, c.small, white)
-		}
 	}
-	checkGolden(t, "pip-sheet.png", onGray(sheet.Image))
 }
 
-// TestPipSheetCrossesTheWire sends the sheet through the emulator, and the
+// TestBadgeSheetCrossesTheWire sends the sheet through the emulator, and the
 // emulator's board receives it whole.
-func TestPipSheetCrossesTheWire(t *testing.T) {
-	sheet, err := BuildPipSheet()
+func TestBadgeSheetCrossesTheWire(t *testing.T) {
+	sheet, err := BuildBadgeSheet()
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := transport.NewEmulator()
 	t.Cleanup(func() { e.Close() })
-	go e.StorePipSheet(sheet.Colors, sheet.Pixels)
+	go e.StoreBadgeSheet(sheet.Colors, sheet.Pixels)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if got, ok := e.PipSheet(); ok {
+		if got, ok := e.BadgeSheet(); ok {
 			if !bytes.Equal(got.Pixels, sheet.Pixels) || len(got.Colors) != len(sheet.Colors) {
 				t.Fatal("the board received another sheet")
 			}
@@ -149,49 +222,136 @@ func blankCanvas() *image.NRGBA {
 	return image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
 }
 
-// TestPip is task 0062's DoD for the host drawing: a count of 0 draws no pip,
-// and a count above 99 draws "99+".
-func TestPip(t *testing.T) {
+// changedBounds returns the smallest rectangle that holds every pixel of img
+// that differs from a blank canvas.
+func changedBounds(img *image.NRGBA) image.Rectangle {
+	var out image.Rectangle
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			if img.NRGBAAt(x, y) != (color.NRGBA{}) {
+				out = out.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	return out
+}
+
+// TestBadges is task 0091's DoD-2: a count of 0 draws nothing, each count draws
+// only in its own rectangle, and a count above 99 draws "99+".
+func TestBadges(t *testing.T) {
 	zero := blankCanvas()
-	if err := DrawPip(zero, ColorDone, 0); err != nil {
+	if err := DrawBadges(zero, ColorDone, Badges{}); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(zero.Pix, blankCanvas().Pix) {
-		t.Error("a count of 0 drew a pip")
+		t.Error("counts of 0 drew a badge")
 	}
 
-	// The firmware lands the sprite at the same place (PIP_MARGIN, task 0069).
-	if got, want := pipDiscRect(), image.Rect(79, 79, 123, 123); got != want {
-		t.Errorf("the pip sprite is at %v, want %v", got, want)
+	// The firmware lands the sprites at the same places (BADGE_MARGIN).
+	for fill, want := range map[Fill]image.Rectangle{FillRed: image.Rect(89, 89, 123, 123), FillGreen: image.Rect(52, 89, 86, 123), FillYellow: image.Rect(15, 89, 49, 123)} {
+		if got := badgeDiscRect(fill); got != want {
+			t.Errorf("the disc of fill %d is at %v, want %v", fill, got, want)
+		}
 	}
 
-	draw99 := func(count int) *image.NRGBA {
+	only := func(fill Fill, count byte) Badges {
+		var b Badges
+		switch fill {
+		case FillRed:
+			b.Red = count
+		case FillGreen:
+			b.Green = count
+		case FillYellow:
+			b.Yellow = count
+		}
+		return b
+	}
+	for fill := FillRed; fill < fillCount; fill++ {
+		for _, count := range []byte{1, 9, 10, 99, 100, 255} {
+			img := blankCanvas()
+			if err := DrawBadges(img, ColorDone, only(fill, count)); err != nil {
+				t.Fatal(err)
+			}
+			if got := changedBounds(img); got.Empty() || !got.In(badgeDiscRect(fill)) {
+				t.Errorf("fill %d count %d changed %v, want pixels only in %v", fill, count, got, badgeDiscRect(fill))
+			}
+		}
+	}
+
+	// The three together change nothing outside their rectangles, and each one
+	// draws what it draws alone.
+	all := blankCanvas()
+	if err := DrawBadges(all, ColorDone, Badges{Red: 7, Green: 8, Yellow: 9}); err != nil {
+		t.Fatal(err)
+	}
+	for fill := FillRed; fill < fillCount; fill++ {
+		alone := blankCanvas()
+		if err := DrawBadges(alone, ColorDone, only(fill, byte(7+int(fill)))); err != nil {
+			t.Fatal(err)
+		}
+		r := badgeDiscRect(fill)
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			for x := r.Min.X; x < r.Max.X; x++ {
+				if all.NRGBAAt(x, y) != alone.NRGBAAt(x, y) {
+					t.Fatalf("fill %d differs at (%d, %d) when the others are drawn", fill, x, y)
+				}
+			}
+		}
+	}
+
+	draw99 := func(count byte) *image.NRGBA {
 		img := blankCanvas()
-		if err := DrawPip(img, ColorDone, count); err != nil {
+		if err := DrawBadges(img, ColorDone, Badges{Red: count}); err != nil {
 			t.Fatal(err)
 		}
 		return img
 	}
-	a, b, c := draw99(99), draw99(100), draw99(5000)
+	a, b, c := draw99(99), draw99(100), draw99(255)
 	if bytes.Equal(a.Pix, b.Pix) {
-		t.Error("100 draws the same pip as 99")
+		t.Error("100 draws the same badge as 99")
 	}
 	if !bytes.Equal(b.Pix, c.Pix) {
-		t.Error("100 and 5000 do not both draw 99+")
+		t.Error("100 and 255 do not both draw 99+")
 	}
-	if cells := pipCells(100); len(cells) != 3 || cells[2].src != pipSpriteRect('+', true) {
+	if cells := badgeCells(FillRed, 100); len(cells) != 3 || cells[2].src != badgeSpriteRect(FillRed, '+', true) || cells[0].src != badgeSpriteRect(FillRed, '9', true) {
 		t.Errorf("100 has cells %v, want the small 9, 9, and +", cells)
 	}
-	if cells := pipCells(7); len(cells) != 1 || cells[0].src != pipSpriteRect('7', false) {
-		t.Errorf("7 has cells %v, want one big 7", cells)
+	if cells := badgeCells(FillGreen, 7); len(cells) != 1 || cells[0].src != badgeSpriteRect(FillGreen, '7', false) {
+		t.Errorf("7 has cells %v, want one big 7 of the green set", cells)
 	}
+
+	// The golden file: the counts of 0 to three discs over a red key, a white
+	// key, and an icon.
+	sets := []Badges{{Red: 1}, {Green: 9}, {Yellow: 10}, {Red: 3, Green: 12}, {Red: 42, Green: 7, Yellow: 99}, {Red: 100, Green: 100, Yellow: 100}}
+	rows := []struct {
+		key uint16
+		ref string
+	}{{ColorError, ""}, {ColorNone, ""}, {ColorRunning, "github.png"}, {ColorWarn, ""}, {ColorDone, ""}}
+	size := transport.CustomGlyphWidth
+	sheet := image.NewNRGBA(image.Rect(0, 0, size*len(sets), size*len(rows)))
+	for r, row := range rows {
+		for c, counts := range sets {
+			data, err := renderGlyph(assetsDir, row.ref, counts, row.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := png.Decode(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cell := image.Rect(c*size, r*size, (c+1)*size, (r+1)*size)
+			draw.Draw(sheet, cell, image.NewUniform(rgb565ToNRGBA(row.key)), image.Point{}, draw.Src)
+			draw.Draw(sheet, cell, img, image.Point{}, draw.Over)
+		}
+	}
+	checkGoldenNear(t, "icon-badges.png", sheet)
 }
 
-// TestPipOpaque is DoD for the 1-bit transparency of task 0041: over an icon
-// with a transparent background, no pixel of the pip's disc is transparent.
-func TestPipOpaque(t *testing.T) {
-	for _, key := range PipColors {
-		data, err := renderGlyph(assetsDir, "build.png", 42, key)
+// TestBadgesOpaque is DoD for the 1-bit transparency of task 0041: over an icon
+// with a transparent background, no pixel of a disc is transparent.
+func TestBadgesOpaque(t *testing.T) {
+	for _, key := range BadgeColors {
+		data, err := renderGlyph(assetsDir, "build.png", Badges{Red: 42, Green: 7, Yellow: 1}, key)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,16 +359,18 @@ func TestPipOpaque(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		disc := pipDiscRect()
-		centre := image.Pt(disc.Min.X+pipDisc/2, disc.Min.Y+pipDisc/2)
-		for y := disc.Min.Y; y < disc.Max.Y; y++ {
-			for x := disc.Min.X; x < disc.Max.X; x++ {
-				if math.Hypot(float64(x-centre.X), float64(y-centre.Y)) > pipDisc/2-1 {
-					continue
-				}
-				i := (y*transport.CustomGlyphWidth + x) * 2
-				if pixels[i] == 0 && pixels[i+1] == 0 {
-					t.Fatalf("key %#04x: pixel (%d, %d) of the disc is transparent", key, x, y)
+		for fill := FillRed; fill < fillCount; fill++ {
+			disc := badgeDiscRect(fill)
+			centre := image.Pt(disc.Min.X+badgeDisc/2, disc.Min.Y+badgeDisc/2)
+			for y := disc.Min.Y; y < disc.Max.Y; y++ {
+				for x := disc.Min.X; x < disc.Max.X; x++ {
+					if math.Hypot(float64(x-centre.X), float64(y-centre.Y)) > badgeDisc/2-1 {
+						continue
+					}
+					i := (y*transport.CustomGlyphWidth + x) * 2
+					if pixels[i] == 0 && pixels[i+1] == 0 {
+						t.Fatalf("key %#04x: pixel (%d, %d) of disc %d is transparent", key, x, y, fill)
+					}
 				}
 			}
 		}
@@ -258,7 +420,7 @@ func TestIconRound(t *testing.T) {
 		if (ref == "github.png" || ref == "create.png") && reach > iconRoundRadius-3 {
 			t.Errorf("%s: its dark disc reaches %.1f px, want at most %d to leave 3 px of white round", ref, reach, iconRoundRadius-3)
 		}
-		data, err := renderGlyph(assetsDir, ref, 0, ColorError)
+		data, err := renderGlyph(assetsDir, ref, Badges{}, ColorError)
 		if err != nil {
 			t.Fatalf("%s: %v", ref, err)
 		}
@@ -277,7 +439,7 @@ func TestIconRound(t *testing.T) {
 				if _, _, _, ia := icon.At(x, y).RGBA(); ia != 0 {
 					continue
 				}
-				if c := color.NRGBAModel.Convert(got.At(x, y)).(color.NRGBA); c != pipWhite {
+				if c := color.NRGBAModel.Convert(got.At(x, y)).(color.NRGBA); c != badgeWhite {
 					t.Fatalf("%s: (%d, %d) is %v where the icon is transparent, want white", ref, x, y, c)
 				}
 			}
@@ -294,10 +456,10 @@ func TestIconRound(t *testing.T) {
 		}
 	}
 
-	// The golden file: one icon on each status color, and one with a pip.
+	// The golden file: one icon on each status color, and one with badges.
 	var tiles []image.Image
-	for _, key := range append(append([]uint16(nil), PipColors...), ColorUp) {
-		data, err := renderGlyph(assetsDir, "github.png", 12, key)
+	for _, key := range append(append([]uint16(nil), BadgeColors...), ColorUp) {
+		data, err := renderGlyph(assetsDir, "github.png", Badges{Red: 12, Green: 3, Yellow: 99}, key)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -315,32 +477,4 @@ func TestIconRound(t *testing.T) {
 		draw.Draw(sheet, image.Rect(i*transport.CustomGlyphWidth, 0, (i+1)*transport.CustomGlyphWidth, transport.CustomGlyphHeight), tile, image.Point{}, draw.Src)
 	}
 	checkGolden(t, "icon-round.png", sheet)
-}
-
-// TestPipGolden is the golden file of the pip: the counts 1, 9, 10, 42, 99, and
-// 100 over a red key, a white key, and an icon.
-func TestPipGolden(t *testing.T) {
-	counts := []int{1, 9, 10, 42, 99, 100}
-	rows := []struct {
-		key uint16
-		ref string
-	}{{ColorError, ""}, {ColorNone, ""}, {ColorRunning, "github.png"}}
-	size := transport.CustomGlyphWidth
-	sheet := image.NewNRGBA(image.Rect(0, 0, size*len(counts), size*len(rows)))
-	for r, row := range rows {
-		for c, count := range counts {
-			data, err := renderGlyph(assetsDir, row.ref, count, row.key)
-			if err != nil {
-				t.Fatal(err)
-			}
-			img, err := png.Decode(bytes.NewReader(data))
-			if err != nil {
-				t.Fatal(err)
-			}
-			cell := image.Rect(c*size, r*size, (c+1)*size, (r+1)*size)
-			draw.Draw(sheet, cell, image.NewUniform(rgb565ToNRGBA(row.key)), image.Point{}, draw.Src)
-			draw.Draw(sheet, cell, img, image.Point{}, draw.Over)
-		}
-	}
-	checkGolden(t, "pips.png", sheet)
 }

@@ -61,6 +61,20 @@ PIP_SHEET_MAX_COLORS = 8
 # Show frames with pips: two bytes for each key, a slot or SLOT_UNCHANGED, and a
 # count (task 0062).
 MESSAGE_TYPE_SHOW_FRAMES_PIPS = 14
+# The driver no longer sends types 13 and 14 (task 0091); a later task removes
+# them from the board.
+# Store badge sheet: the sprites of the three count badges (task 0091). Payload:
+# the number of background colors n (1 to 5), their key colors (2 each,
+# little-endian), then a zlib stream that inflates to BADGE_SHEET_PIXELS_SIZE
+# bytes, a 256x150 image.
+MESSAGE_TYPE_STORE_BADGE_SHEET = 15
+BADGE_SHEET_MAX_COLORS = 5
+BADGE_SHEET_WIDTH = 256
+BADGE_SHEET_HEIGHT = 150
+BADGE_SHEET_PIXELS_SIZE = BADGE_SHEET_WIDTH * BADGE_SHEET_HEIGHT * 2
+# Show frames with badges: four bytes for each key, a slot or SLOT_UNCHANGED, the
+# red count, the green count, and the yellow count (task 0091).
+MESSAGE_TYPE_SHOW_FRAMES_BADGES = 16
 
 # How long one `CustomGlyphReader.feed` call can keep reading while a frame is
 # in progress. The loop does not scan the switches meanwhile. 8 ms drained a
@@ -256,6 +270,35 @@ class ShowFramesPips:
         self.counts = counts
 
 
+class BadgeSheet:
+    """One decoded Store badge sheet message: `colors[i]` is the key color that
+    column `i` of discs is blended against, and `pixels` is the sheet, 256x150
+    big-endian RGB565. See "Store badge sheet" in docs/wire-protocol.md.
+    """
+
+    def __init__(self, colors, pixels):
+        self.colors = colors
+        self.pixels = pixels
+
+
+class ShowFramesBadges:
+    """One decoded Show frames with badges message: `slots[k]` is the slot key
+    `k` shows, or `SLOT_UNCHANGED`, and `red[k]`, `green[k]`, and `yellow[k]` are
+    the counts of its three badges. See "Show frames with badges" in
+    docs/wire-protocol.md.
+    """
+
+    def __init__(self, slots, red, green, yellow):
+        self.slots = slots
+        self.red = red
+        self.green = green
+        self.yellow = yellow
+
+    def badges(self, key):
+        """The (red, green, yellow) counts of key `key`."""
+        return self.red[key], self.green[key], self.yellow[key]
+
+
 class ShowFrames:
     """One decoded Show frames message: `slots[k]` is the slot key `k` shows,
     or `SLOT_UNCHANGED`. See "Show frames" in docs/wire-protocol.md.
@@ -281,11 +324,12 @@ def encode_batch_incomplete(glyph_mask, state_mask):
     return bytes((glyph_mask & 0xFF, state_mask & 0xFF))
 
 
-def _inflate_glyph(stream):
+def _inflate_glyph(stream, size=CUSTOM_GLYPH_PIXELS_SIZE):
     """Inflate a type 6 zlib stream to a glyph's pixel buffer.
 
     Raises `ValueError` for a stream that does not inflate, or does not
-    inflate to exactly `CUSTOM_GLYPH_PIXELS_SIZE` bytes. CircuitPython's
+    inflate to exactly `size` bytes, a glyph's `CUSTOM_GLYPH_PIXELS_SIZE` unless
+    the caller says another. CircuitPython's
     `zlib` raises a different exception for each kind of bad stream, so any
     failure of `decompress` counts as one.
     """
@@ -293,10 +337,10 @@ def _inflate_glyph(stream):
         pixels = zlib.decompress(stream)
     except Exception:
         raise ValueError("compressed custom glyph does not inflate")
-    if len(pixels) != CUSTOM_GLYPH_PIXELS_SIZE:
+    if len(pixels) != size:
         raise ValueError(
             "compressed custom glyph inflated to {} bytes, want {}".format(
-                len(pixels), CUSTOM_GLYPH_PIXELS_SIZE
+                len(pixels), size
             )
         )
     return pixels
@@ -450,7 +494,20 @@ class CustomGlyphReader:
                 self._frame_type = frame_type
                 self._total = FRAME_HEADER_SIZE + length
                 return False
+            if (
+                frame_type == MESSAGE_TYPE_STORE_BADGE_SHEET
+                and 4 <= length <= CUSTOM_GLYPH_PAYLOAD_SIZE
+            ) or (
+                frame_type == MESSAGE_TYPE_SHOW_FRAMES_BADGES
+                and 4 <= length <= 4 * SHOW_FRAMES_MAX_KEYS
+                and length % 4 == 0
+            ):
+                self._frame_type = frame_type
+                self._total = FRAME_HEADER_SIZE + length
+                return False
             self._bad_length = frame_type in (
+                MESSAGE_TYPE_STORE_BADGE_SHEET,
+                MESSAGE_TYPE_SHOW_FRAMES_BADGES,
                 MESSAGE_TYPE_STORE_PIP_SHEET,
                 MESSAGE_TYPE_SHOW_FRAMES_PIPS,
                 MESSAGE_TYPE_SET_CUSTOM_GLYPH,
@@ -520,6 +577,24 @@ class CustomGlyphReader:
                 slots.append(self._frame[i])
                 counts.append(self._frame[i + 1])
             return ShowFramesPips(slots=bytes(slots), counts=bytes(counts))
+        if self._frame_type == MESSAGE_TYPE_SHOW_FRAMES_BADGES:
+            slots = bytearray()
+            red = bytearray()
+            green = bytearray()
+            yellow = bytearray()
+            for i in range(base, total, 4):
+                slots.append(self._frame[i])
+                red.append(self._frame[i + 1])
+                green.append(self._frame[i + 2])
+                yellow.append(self._frame[i + 3])
+            return ShowFramesBadges(
+                slots=bytes(slots),
+                red=bytes(red),
+                green=bytes(green),
+                yellow=bytes(yellow),
+            )
+        if self._frame_type == MESSAGE_TYPE_STORE_BADGE_SHEET:
+            return self._badge_sheet(base, total)
         if self._frame_type == MESSAGE_TYPE_STORE_PIP_SHEET:
             return self._pip_sheet(base, total)
         if self._frame_type == MESSAGE_TYPE_KEY_STATE:
@@ -557,6 +632,23 @@ class CustomGlyphReader:
         ]
         pixels = _inflate_glyph(bytes(self._view[stream_at:total]))
         return PipSheet(colors=colors, pixels=pixels)
+
+    def _badge_sheet(self, base, total):
+        """Decode the Store badge sheet in `_frame`. Like the pip sheet, it comes
+        once, so it inflates on core 0. Raises `ValueError` for a payload that
+        does not parse, or a stream that does not inflate to
+        `BADGE_SHEET_PIXELS_SIZE` bytes.
+        """
+        count = self._frame[base]
+        stream_at = base + 1 + 2 * count
+        if not 1 <= count <= BADGE_SHEET_MAX_COLORS or stream_at >= total:
+            raise ValueError("badge sheet names {} colors in {} bytes".format(count, total - base))
+        colors = [
+            self._frame[base + 1 + 2 * i] | (self._frame[base + 2 + 2 * i] << 8)
+            for i in range(count)
+        ]
+        pixels = _inflate_glyph(bytes(self._view[stream_at:total]), BADGE_SHEET_PIXELS_SIZE)
+        return BadgeSheet(colors=colors, pixels=pixels)
 
     def _inflate(self, kind, info, buffer, stream):
         """Inflate `stream`: on core 1 when it takes the job, else here."""

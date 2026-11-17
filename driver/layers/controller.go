@@ -67,11 +67,15 @@ type Update struct {
 	// Slot is the key position (0 to 5) a top-level key must take. Nil
 	// leaves a known key where it is, and puts a new one in the first
 	// free slot. A child has no slot.
-	Slot    *int
-	Icon    byte
-	Status  string
-	Count   int
-	IconRef string
+	Slot   *int
+	Icon   byte
+	Status string
+	// Count is the red count, CountGreen the green, and CountYellow the yellow
+	// (task 0091). 0 draws no disc.
+	Count       int
+	CountGreen  int
+	CountYellow int
+	IconRef     string
 	// IconText is words drawn as the icon instead of IconRef (task 0069), or
 	// the caption over IconEmoji.
 	IconText string
@@ -115,8 +119,20 @@ type view struct {
 	// key does; a key in a child layer draws it as a hero, a sticker, and a
 	// strip (task 0082).
 	round bool
-	count int
+	// count, countGreen, and countYellow are the three badges of the key
+	// (task 0091).
+	count       int
+	countGreen  int
+	countYellow int
 }
+
+// badges returns the three counts of the view as the board takes them: a count
+// above 255 is 255, and the board draws any count above 99 as "99+".
+func (v view) badges() Badges {
+	return Badges{Red: clampCount(v.count), Green: clampCount(v.countGreen), Yellow: clampCount(v.countYellow)}
+}
+
+func clampCount(n int) byte { return byte(max(0, min(n, 255))) }
 
 // Controller owns the object, draws it, and saves it.
 type Controller struct {
@@ -192,7 +208,7 @@ func Open(opts Options) (*Controller, error) {
 
 	c.sendMu.Lock()
 	if c.frameOut != nil {
-		c.storePipSheet()
+		c.storeBadgeSheet()
 	}
 	c.mu.Lock()
 	want := desired(c.doc)
@@ -307,7 +323,7 @@ func (c *Controller) SetKey(u Update) error {
 }
 
 func applyUpdate(d *Doc, u Update) error {
-	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji, Opens: u.Opens}
+	node := Node{ID: u.ID, Icon: u.Icon, Status: u.Status, Count: u.Count, CountGreen: u.CountGreen, CountYellow: u.CountYellow, IconRef: u.IconRef, IconText: u.IconText, IconEmoji: u.IconEmoji, Opens: u.Opens}
 	if u.ID == "" {
 		return errors.New("layers: update has no id")
 	}
@@ -557,7 +573,7 @@ func desired(d Doc) [KeyCount]view {
 }
 
 func nodeView(n *Node) view {
-	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, iconText: n.IconText, iconEmoji: joinEmoji(n.IconEmoji), count: n.Count}
+	return view{kind: kindKey, color: StatusColor(n.Status), icon: n.Icon, iconRef: n.IconRef, iconText: n.IconText, iconEmoji: joinEmoji(n.IconEmoji), count: n.Count, countGreen: n.CountGreen, countYellow: n.CountYellow}
 }
 
 // keyDraw is one key to send: its key state, and the glyph that goes before
@@ -632,8 +648,8 @@ func (c *Controller) prepare(key byte, w view) keyDraw {
 		d.state.Color, d.state.EmojiID = 0, 0
 		return d
 	}
-	if w.iconRef != "" || w.iconText != "" || w.iconEmoji != "" || w.count > 0 {
-		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconEmoji, w.round, w.count, w.color)
+	if w.iconRef != "" || w.iconText != "" || w.iconEmoji != "" || w.badges().Any() {
+		png, err := renderIcon(c.assetsDir, w.iconRef, w.iconText, w.iconEmoji, w.round, w.badges(), w.color)
 		if err != nil {
 			c.logf("layers: key %d: draw %q: %v", key, w.iconRef+w.iconText+w.iconEmoji, err)
 		} else {

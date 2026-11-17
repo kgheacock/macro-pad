@@ -244,14 +244,14 @@ func TestRenderTopLayer(t *testing.T) {
 		}
 	}
 
-	// Key 0 has count 3: its pip is red beside the digit, in the bottom-right
+	// Key 0 has count 3: its badge is red beside the digit, in the bottom-right
 	// corner. Key 1 has none.
-	centre := pipDiscRect().Min.Add(image.Pt(pipDisc/2-14, pipDisc/2))
-	if c := color.NRGBAModel.Convert(out2.glyph(t, 0).At(centre.X, centre.Y)); c != color.Color(pipRed) {
-		t.Errorf("key 0 has %v on its pip, want %v", c, pipRed)
+	centre := badgeDiscRect(FillRed).Min.Add(image.Pt(badgeDisc/2-10, badgeDisc/2))
+	if c := color.NRGBAModel.Convert(out2.glyph(t, 0).At(centre.X, centre.Y)); c != color.Color(badgeFills[FillRed]) {
+		t.Errorf("key 0 has %v on its badge, want %v", c, badgeFills[FillRed])
 	}
-	if c := color.NRGBAModel.Convert(out2.glyph(t, 1).At(centre.X, centre.Y)); c == color.Color(pipRed) {
-		t.Error("key 1 has a pip but a count of 0")
+	if c := color.NRGBAModel.Convert(out2.glyph(t, 1).At(centre.X, centre.Y)); c == color.Color(badgeFills[FillRed]) {
+		t.Error("key 1 has a badge but a count of 0")
 	}
 }
 
@@ -616,20 +616,20 @@ func TestIconRefCannotLeaveAssets(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(assets, "ok.png"), data, 0o644)
 
-	if _, err := renderGlyph(assets, "ok.png", 0, ColorNone); err != nil {
+	if _, err := renderGlyph(assets, "ok.png", Badges{}, ColorNone); err != nil {
 		t.Errorf("a file under assets: %v", err)
 	}
 	for _, ref := range []string{"../secret.png", "link.png", "/etc/passwd"} {
-		if _, err := renderGlyph(assets, ref, 0, ColorNone); err == nil {
+		if _, err := renderGlyph(assets, ref, Badges{}, ColorNone); err == nil {
 			t.Errorf("iconRef %q rendered", ref)
 		}
 	}
 }
 
-func TestPipText(t *testing.T) {
+func TestBadgeText(t *testing.T) {
 	for count, want := range map[int]string{1: "1", 42: "42", 99: "99", 100: "99+", 5000: "99+"} {
-		if got := pipText(count); got != want {
-			t.Errorf("pipText(%d) = %q, want %q", count, got, want)
+		if got := badgeText(count); got != want {
+			t.Errorf("badgeText(%d) = %q, want %q", count, got, want)
 		}
 	}
 }

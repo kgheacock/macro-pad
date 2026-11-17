@@ -15,11 +15,13 @@ puts the frame in the slot. The cache is RAM only: this module writes no file an
 byte of non-volatile memory, because flash has a limited number of erase
 cycles (task 0044).
 
-Task 0062 adds the count pip. The last `PIP_BUFFERS` buffers of the pool are
-pip buffers, two for each key, and the host numbers only the first `SLOT_COUNT`
-slots. A Show frames with pips message copies a slot into a pip buffer and
-stamps the pip on the copy, so a slot never holds a pip and one icon on one
-color is one slot, whatever its count.
+Task 0062 adds the count pip, and task 0091 replaces it with three count badges.
+The last `PIP_BUFFERS` buffers of the pool are overlay buffers, two for each key,
+and the host numbers only the first `SLOT_COUNT` slots. A Show frames with badges
+message copies a slot into one of them and stamps the badges on the copy, so a
+slot never holds a badge and one icon on one color is one slot, whatever its
+counts. The pip sheet of task 0062 is allocated only if a Store pip sheet message
+arrives, which the driver no longer sends.
 
 See tasks/complete/0061-cache-composed-glyph-frames-on-the-board.md and
 tasks/complete/0062-red-circle-count-pip-with-a-real-font.md.
@@ -94,14 +96,18 @@ class FrameCache:
         self._filled = [False] * slot_count
         self.slot_count = slot_count
         self.pip_buffers = pip_buffers
-        # The pip sprites (task 0062): the sheet's bitmap, allocated here so the
-        # heap is the same for the whole run, and the key color of each disc.
-        # `None` until a Store pip sheet message arrives.
-        self._sheet = displayio.Bitmap(
-            display_render.PIP_SHEET_WIDTH,
-            display_render.PIP_SHEET_HEIGHT,
+        # The badge sprites (task 0091): the sheet's bitmap, allocated here so the
+        # heap is the same for the whole run, and the key color of each column of
+        # discs. `None` until a Store badge sheet message arrives.
+        self._badge_sheet = displayio.Bitmap(
+            display_render.BADGE_SHEET_WIDTH,
+            display_render.BADGE_SHEET_HEIGHT,
             display_render.FRAME_COLORS,
         )
+        self._badge_colors = None
+        # The pip sprites (task 0062), kept for a host that still sends them. The
+        # bitmap is allocated when the sheet arrives.
+        self._sheet = None
         self._sheet_colors = None
 
     def store(self, slot, color, pixels):
@@ -144,12 +150,30 @@ class FrameCache:
         reads as 256x64, big-endian RGB565 as in a glyph. `colors[i]` is the key
         color that disc `i` is blended against.
         """
+        if self._sheet is None:
+            self._sheet = displayio.Bitmap(
+                display_render.PIP_SHEET_WIDTH,
+                display_render.PIP_SHEET_HEIGHT,
+                display_render.FRAME_COLORS,
+            )
         data = pixels if isinstance(pixels, memoryview) else array.array("H", pixels)
         bitmaptools.arrayblit(self._sheet, data)
         self._sheet_colors = list(colors)
 
     def has_sheet(self):
         return self._sheet_colors is not None
+
+    def set_badge_sheet(self, colors, pixels):
+        """Keep the badge sprites. `pixels` is the sheet, 256x150 items that
+        this reads as 16-bit, big-endian RGB565 as in a glyph. `colors[i]` is the
+        key color that column `i` of discs is blended against.
+        """
+        data = pixels if isinstance(pixels, memoryview) else array.array("H", pixels)
+        bitmaptools.arrayblit(self._badge_sheet, data)
+        self._badge_colors = list(colors)
+
+    def has_badge_sheet(self):
+        return self._badge_colors is not None
 
     def pip_buffer(self, key, which):
         """The pool index of buffer `which` (0 or 1) of key `key`, or `None` when
@@ -178,3 +202,27 @@ class FrameCache:
         else:
             self._views[buffer][:] = self._views[slot]
             display_render.stamp_pip(self._bitmaps[buffer], self._sheet, disc, count)
+
+    def stamp_badges(self, buffer, slot, red, green, yellow):
+        """Copy the frame in `slot` into overlay buffer `buffer` (from
+        `pip_buffer`) and stamp the three badges on the copy. The slot is not
+        changed. The discs are the column for the slot's color, or the first
+        column when the sheet has none for it. The caller makes sure that no push
+        of the buffer is queued or on the wire.
+        """
+        colors = self._badge_colors
+        color = self._colors[slot]
+        column = colors.index(color) if color in colors else 0
+        sheet = self._badge_sheet
+        if self._bitmaps is None:
+            # The slots are outside the heap, so compose into the one bitmap.
+            self._compose_view[:] = self._views[slot]
+            display_render.stamp_badges(
+                self._compose_bitmap, sheet, column, red, green, yellow
+            )
+            self._views[buffer][:] = self._compose_view
+        else:
+            self._views[buffer][:] = self._views[slot]
+            display_render.stamp_badges(
+                self._bitmaps[buffer], sheet, column, red, green, yellow
+            )

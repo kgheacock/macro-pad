@@ -1,14 +1,14 @@
 ---
 id: "0092"
 title: "A repo key shows the repo emoji, a red issue count, a green PR count and a yellow count"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0092-repo-key-emoji-and-counts"
 related: ["0062", "0073", "0081", "0082", "0087", "0088", "0089", "0090", "0091", "0093"]
 tags: ["inbox", "repos", "emoji", "badges"]
 ---

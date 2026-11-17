@@ -114,23 +114,9 @@ func drawIconText(img *image.NRGBA, text string) error {
 		l.sizes = sizes
 	}
 
-	faces := make(map[int]font.Face)
-	faceOf := func(px int) (font.Face, error) {
-		if face, ok := faces[px]; ok {
-			return face, nil
-		}
-		face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
-		if err != nil {
-			return nil, err
-		}
-		faces[px] = face
-		return face, nil
-	}
-	defer func() {
-		for _, face := range faces {
-			face.Close()
-		}
-	}()
+	set := newFaceSet(f)
+	defer set.close()
+	faceOf := set.face
 
 	// Each line takes the largest size that fits the box, then the larger of
 	// two lines steps down until both fit the height of the box.
@@ -138,19 +124,15 @@ func drawIconText(img *image.NRGBA, text string) error {
 	boxH := textBoxY1 - textBoxY0
 	for _, l := range lines {
 		l.text = replaceMissing(f, l.text)
-		for l.size = 0; l.size < len(l.sizes); l.size++ {
-			face, err := faceOf(l.sizes[l.size])
-			if err != nil {
-				return err
-			}
-			l.face = face
-			if l.w = textWidth(face, l.text); l.w <= boxW {
-				break
-			}
+		var err error
+		if l.size, err = set.fitSize(l.text, l.sizes, boxW); err != nil {
+			return err
 		}
-		if l.size == len(l.sizes) {
-			l.size = len(l.sizes) - 1
+		l.face, err = faceOf(l.sizes[l.size])
+		if err != nil {
+			return err
 		}
+		l.w = textWidth(l.face, l.text)
 	}
 	height := func() int {
 		h := textLineGap * (len(lines) - 1)
@@ -197,6 +179,52 @@ func drawIconText(img *image.NRGBA, text string) error {
 		y += lineHeight(l.face) + textLineGap
 	}
 	return nil
+}
+
+// faceSet is the faces of one font, one for each pixel size that a drawing
+// asks for. Both the text icon and the id tile (task 0094) fit their lines
+// with it.
+type faceSet struct {
+	font  *opentype.Font
+	faces map[int]font.Face
+}
+
+func newFaceSet(f *opentype.Font) *faceSet {
+	return &faceSet{font: f, faces: make(map[int]font.Face)}
+}
+
+// face returns the face at px pixels.
+func (s *faceSet) face(px int) (font.Face, error) {
+	if face, ok := s.faces[px]; ok {
+		return face, nil
+	}
+	face, err := opentype.NewFace(s.font, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
+	if err != nil {
+		return nil, err
+	}
+	s.faces[px] = face
+	return face, nil
+}
+
+func (s *faceSet) close() {
+	for _, face := range s.faces {
+		face.Close()
+	}
+}
+
+// fitSize returns the index in sizes, largest first, of the largest size at
+// which text is at most maxW pixels wide, or of the last size when none is.
+func (s *faceSet) fitSize(text string, sizes []int, maxW int) (int, error) {
+	for i, px := range sizes {
+		face, err := s.face(px)
+		if err != nil {
+			return 0, err
+		}
+		if textWidth(face, text) <= maxW {
+			return i, nil
+		}
+	}
+	return len(sizes) - 1, nil
 }
 
 // lineHeight is the height of one line of text in face, in pixels.

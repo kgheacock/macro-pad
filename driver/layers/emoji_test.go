@@ -32,7 +32,7 @@ func emojiTile(t *testing.T, ref, caption string, emoji []string, count int, key
 // decodes it.
 func emojiIcon(t *testing.T, ref, caption string, emoji []string, round bool, count int, key uint16) *image.NRGBA {
 	t.Helper()
-	data, err := renderIcon(assetsDir, ref, caption, joinEmoji(emoji), round, Badges{Red: byte(count)}, key)
+	data, err := renderIcon(assetsDir, ref, caption, "", joinEmoji(emoji), round, Badges{Red: byte(count)}, key)
 	if err != nil {
 		t.Fatalf("%q %q %q: %v", ref, caption, emoji, err)
 	}

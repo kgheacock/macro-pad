@@ -72,29 +72,29 @@ func assetPath(dir, ref string) (string, error) {
 }
 
 // RenderGlyph is renderGlyph for a tool that stores frames itself, as
-// `blinksend --scenario=pips` does: the same picture a layer shows.
-func RenderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, error) {
-	return renderGlyph(assetsDir, ref, count, keyColor)
+// `blinksend --scenario=badges` does: the same picture a layer shows.
+func RenderGlyph(assetsDir, ref string, counts Badges, keyColor uint16) ([]byte, error) {
+	return renderGlyph(assetsDir, ref, counts, keyColor)
 }
 
 // renderGlyph builds the 128x128 PNG for one key: the icon at ref under
-// assetsDir, if ref is not empty, on a white round, and a count pip when count
-// is above zero. Transparent pixels show the key color behind them. keyColor is
-// the color the edges of the round and the pip are blended against, so that no
-// edge pixel is half transparent (task 0062).
-func renderGlyph(assetsDir, ref string, count int, keyColor uint16) ([]byte, error) {
-	return renderIcon(assetsDir, ref, "", "", false, count, keyColor)
+// assetsDir, if ref is not empty, on a white round, and a badge for each count
+// above zero. Transparent pixels show the key color behind them. keyColor is
+// the color the edges of the round and the badges are blended against, so that
+// no edge pixel is half transparent (tasks 0062 and 0091).
+func renderGlyph(assetsDir, ref string, counts Badges, keyColor uint16) ([]byte, error) {
+	return renderIcon(assetsDir, ref, "", "", false, counts, keyColor)
 }
 
 // renderIcon is renderGlyph for an icon that is a PNG at ref, the words in text
 // (task 0069), or the emoji in emoji, joined by line breaks, with text as their
 // caption (task 0073). A text icon is a plain white tile, so the key color
-// cannot show; the pip is blended against ColorNone, as the board draws it on a
+// cannot show; the badges are blended against ColorNone, as the board draws them on a
 // frame stored for a text icon. An emoji icon is a white tile too, with the key
-// color only in its strip (task 0082), so its pip is blended the same way. With
+// color only in its strip (task 0082), so its badges are blended the same way. With
 // round, an emoji icon is drawn on the round of task 0073 instead, as a
 // top-level key is, and the key color shows around it.
-func renderIcon(assetsDir, ref, text, emoji string, round bool, count int, keyColor uint16) ([]byte, error) {
+func renderIcon(assetsDir, ref, text, emoji string, round bool, counts Badges, keyColor uint16) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
 	if emoji != "" {
 		refs := splitEmoji(emoji)
@@ -139,8 +139,8 @@ func renderIcon(assetsDir, ref, text, emoji string, round bool, count int, keyCo
 		drawIconRound(canvas, keyColor)
 		draw.Draw(canvas, canvas.Bounds(), icon, icon.Bounds().Min, draw.Over)
 	}
-	if count > 0 {
-		if err := DrawPip(canvas, keyColor, count); err != nil {
+	if counts.Any() {
+		if err := DrawBadges(canvas, keyColor, counts); err != nil {
 			return nil, err
 		}
 	}

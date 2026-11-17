@@ -1,14 +1,14 @@
 ---
 id: "0091"
 title: "Show a red, a green, and a yellow count on one key, stamped by the board"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
-branch: null
+pr: "https://github.com/kgheacock/macro-pad/pull/120"
+branch: "0091-three-colored-count-badges-on-a-key"
 related: ["0062", "0061", "0063", "0082", "0092"]
 tags: ["driver", "firmware", "wire-protocol", "layers", "rendering", "platform"]
 ---
@@ -98,17 +98,20 @@ An outside reviewer verifies each item without help from the implementer. Each
 item names its proof. The task moves to `complete/` only when every box is
 ticked.
 
-- [ ] **DoD-1** — The host builds a badge sheet that inflates to exactly 76,800 bytes. Every digit cell lies inside the red disc of its fill. **Proof:** `cd driver && go test ./layers -run 'TestBadgeSheet|TestBadgeDigitsFitDisc'` passes, and `driver/layers/testdata/badge-sheet.png` shows every sprite.
-- [ ] **DoD-2** — Counts of 0 draw nothing. Each count draws only in its own rectangle, red at x 89 to 123. A count of 100 draws `99+`. **Proof:** `cd driver && go test ./layers -run TestBadges` passes, with `driver/layers/testdata/icon-badges.png`.
-- [ ] **DoD-3** — Changing any of the three counts from 1 to 99 on one picture sends one Show with badges. It sends no Store frame and uses one slot. **Proof:** `cd driver && go test ./layers -run TestBadgesNoStore` passes.
-- [ ] **DoD-4** — Types 15 and 16 round-trip in Go and Python. After a reconnect, the host sends the sheet before the first type 16. **Proof:** `cd driver && go test ./transport -run 'Badge|Reconnect'` and `.venv/bin/pytest test/test_wire.py -k badge` pass.
-- [ ] **DoD-5** — On the board, a Show with badges changes the copy only inside the badge rectangles. The slot bytes stay the same. Before the sheet arrives, the key shows the slot with no badge. **Proof:** `.venv/bin/pytest test/test_app.py -k badge` passes.
-- [ ] **DoD-6** — `setLayerKey` with only `count: 3` draws one red badge, the same as `countGreen: 0, countYellow: 0`. Negative counts drop the message and change nothing. **Proof:** `cd driver && go test ./layers ./plugin -run 'TestBadgeCounts|TestSetLayerKeyCounts'` and `cd inbox && node --test test/protocol.test.js` pass.
-- [ ] **DoD-7** — `docs/wire-protocol.md` defines types 15 and 16, the sheet layout, and the three fields. `driver/README.md` replaces its "Count pip" text. **Proof:** `docs/wire-protocol.md`, sections "Store badge sheet" and "Show frames with badges".
+- [x] **DoD-1** — The host builds a badge sheet that inflates to exactly 76,800 bytes. Every digit cell lies inside the red disc of its fill. **Proof:** `cd driver && go test ./layers -run 'TestBadgeSheet|TestBadgeDigitsFitDisc'` passes, and `driver/layers/testdata/badge-sheet.png` shows every sprite.
+- [x] **DoD-2** — Counts of 0 draw nothing. Each count draws only in its own rectangle, red at x 89 to 123. A count of 100 draws `99+`. **Proof:** `cd driver && go test ./layers -run TestBadges` passes, with `driver/layers/testdata/icon-badges.png`.
+- [x] **DoD-3** — Changing any of the three counts from 1 to 99 on one picture sends one Show with badges. It sends no Store frame and uses one slot. **Proof:** `cd driver && go test ./layers -run TestBadgesNoStore` passes.
+- [x] **DoD-4** — Types 15 and 16 round-trip in Go and Python. After a reconnect, the host sends the sheet before the first type 16. **Proof:** `cd driver && go test ./transport -run 'Badge|Reconnect'` and `.venv/bin/pytest test/test_wire.py -k badge` pass.
+- [x] **DoD-5** — On the board, a Show with badges changes the copy only inside the badge rectangles. The slot bytes stay the same. Before the sheet arrives, the key shows the slot with no badge. **Proof:** `.venv/bin/pytest test/test_app.py -k badge` passes.
+- [x] **DoD-6** — `setLayerKey` with only `count: 3` draws one red badge, the same as `countGreen: 0, countYellow: 0`. Negative counts drop the message and change nothing. **Proof:** `cd driver && go test ./layers ./plugin -run 'TestBadgeCounts|TestSetLayerKeyCounts'` and `cd inbox && node --test test/protocol.test.js` pass.
+- [x] **DoD-7** — `docs/wire-protocol.md` defines types 15 and 16, the sheet layout, and the three fields. `driver/README.md` replaces its "Count pip" text. **Proof:** `docs/wire-protocol.md`, sections "Store badge sheet" and "Show frames with badges".
 - [ ] **DoD-8** — On the board, a Show of six keys with three badges each takes at most 230 ms in three runs. The span runs from `SHOW_WITH_PIPS_STARTED` to the last `REFRESH_DONE`. **Proof:** the `six keys in` line of `make blink-trace SCENARIO=badges`.
+  - Not confirmed: it needs the board. `blinksend --scenario=badges` and the `badges` scenario of `tools/blink_trace.py` (limit 230 ms) are ready; the owner runs `make blink-trace SCENARIO=badges` three times.
 - [ ] **DoD-9** — At least 2 MB of heap stay free with the sheet loaded. **Proof:** the figure in `firmware/README.md` from `make slot-probe`.
+  - Not confirmed: it needs the board. The owner runs `make slot-probe` and adds the free-heap figure to the "The count badges" section of `firmware/README.md`.
 - [ ] **DoD-10** — The owner sees three discs with legible digits on a white tile and on a key of each status color. **Proof:** `cd driver && go run ./cmd/blinksend --scenario=badges`, then the owner's note in this spec.
-- [ ] **DoD-11** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `.venv/bin/pytest test/ -q`, `cd inbox && node --test`, and the PR body.
+  - Not confirmed: it needs the board. The owner runs `cd driver && go run ./cmd/blinksend --vendor-id=... --product-id=... --scenario=badges --trace-file=/dev/null` and notes the result here. The scenario shows five status colors and a white tile, three discs each.
+- [x] **DoD-11** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `.venv/bin/pytest test/ -q`, `cd inbox && node --test`, and the PR body.
 
 ## Risks
 
@@ -124,4 +127,6 @@ ticked.
 ## Notes
 
 - Measured in task 0062: a Store frame takes 94 to 109 ms, and one stamp 15.4 ms. `frameTable` in `driver/layers/frames.go` has `transport.SlotCount` (52) slots, because 12 of the 64 buffers are pip buffers.
+- Implementation (task 0091): the driver no longer has `StorePipSheet` or `ShowFramesWithPips` in `transport.Transport`; types 13 and 14 stay in the firmware and in the wire doc as retired. `transport.Badges` (`Red`, `Green`, `Yellow` as bytes) is the three counts, and `layers.Badges` is an alias of it. The fields for task 0092 are `count` (red), `countGreen`, and `countYellow` on `setLayerKey` (`plugin.SetLayerKeyPayload`), `layers.Update`, and `layers.Node`.
+- Implementation: the sheet has a disc for each of 3 fills and each of 5 key colors (the status colors), in the first 5 of the 7 columns that fit 256 px. The fills are red `#E02020`, green `#2ECC40`, and yellow `#FFD700`. A Go sheet and `display_render.stamp_badges` gave the same pixels on the same frame in a one-off comparison. The firmware allocates the 256 by 150 sheet at start and the old 256 by 64 pip sheet only if a type 13 message arrives, so the heap grows by 45 KB.
 - A strip of colored cells in place of discs is a position, not a mechanism. It would also hide the status color, so it is not an approach.

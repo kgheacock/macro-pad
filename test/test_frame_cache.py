@@ -196,3 +196,63 @@ def test_a_stamp_changes_only_the_pip_box():
                 continue
             i = (y * 128 + x) * 2
             assert stamped[i : i + 2] == slot[i : i + 2]
+
+
+def _badge_sheet_pixels():
+    """76,800 bytes: the disc of fill f on column c is 0x1100 + 0x10 * f + c; the
+    rest is the digits of the fill, as in test_app."""
+    sheet = bytearray(256 * 150 * 2)
+    for f in range(3):
+        for column in range(3):
+            for y in range(34 * f, 34 * (f + 1)):
+                for x in range(34 * column, 34 * (column + 1)):
+                    value = 0x1100 + 0x10 * f + column
+                    sheet[(y * 256 + x) * 2 : (y * 256 + x) * 2 + 2] = _be(value)
+    for f, y0 in enumerate((102, 118, 134)):
+        for y in range(y0, y0 + 16):
+            for x in range(0, 140):
+                sheet[(y * 256 + x) * 2 : (y * 256 + x) * 2 + 2] = _be(0x2000 + 0x100 * f + x // 11)
+    return bytes(sheet)
+
+
+def _badge_stamped(core, badges):
+    cache = frame_cache.FrameCache(slot_count=2, core=core)
+    cache.set_badge_sheet([0x1111, 0xF800, 0x2222], _badge_sheet_pixels())
+    pixels = bytearray(_be(0x07E0) * PIXEL_COUNT)
+    pixels[0:2] = b"\x00\x00"
+    cache.store(0, 0xF800, bytes(pixels))
+    buffer = cache.pip_buffer(0, 1)
+    cache.stamp_badges(buffer, 0, *badges)
+    return bytes(cache.view(buffer)), bytes(cache.view(0))
+
+
+@pytest.mark.parametrize("badges", [(1, 0, 0), (42, 7, 0), (100, 99, 5)])
+def test_a_badge_stamp_with_the_module_equals_a_stamp_on_the_heap_and_leaves_the_slot(badges):
+    on_heap, slot_on_heap = _badge_stamped(None, badges)
+    with_module, slot_with_module = _badge_stamped(FakeGlyphcore(), badges)
+
+    assert with_module == on_heap
+    assert slot_with_module == slot_on_heap
+    assert on_heap != slot_on_heap  # the badges are there
+    # The discs of 0xF800 are column 1 of the sheet: the red interior is 0x1101.
+    assert on_heap[(92 * 128 + 92) * 2 : (92 * 128 + 92) * 2 + 2] == _be(0x1101)
+
+
+def test_a_badge_stamp_changes_only_the_badge_rectangles_of_the_counts_above_0():
+    stamped, slot = _badge_stamped(FakeGlyphcore(), (42, 0, 7))
+
+    for y in range(128):
+        for x in range(128):
+            if 89 <= y < 123 and (89 <= x < 123 or 15 <= x < 49):
+                continue
+            i = (y * 128 + x) * 2
+            assert stamped[i : i + 2] == slot[i : i + 2]
+
+
+def test_the_pip_sheet_is_allocated_only_when_one_arrives():
+    cache = frame_cache.FrameCache(slot_count=2, core=None)
+
+    assert cache._sheet is None and not cache.has_sheet() and not cache.has_badge_sheet()
+    cache.set_sheet([0x1111], bytes(32768))
+    assert cache.has_sheet() and cache._sheet is not None
+    assert not cache.has_badge_sheet()

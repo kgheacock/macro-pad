@@ -660,6 +660,114 @@ def test_show_frames_with_pips_of_an_odd_length_is_dropped():
     assert list(glyph_reader.feed(reader).counts) == [5]
 
 
+# --- The count badges (task 0091) ----------------------------------------------
+
+
+def _framed_badge_sheet(colors, pixels):
+    writer = FakeWriter()
+    payload = bytes((len(colors),))
+    for color in colors:
+        payload += bytes((color & 0xFF, color >> 8))
+    payload += zlib.compress(pixels, 9)
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_BADGE_SHEET, payload)
+    return bytes(writer.written)
+
+
+def _framed_show_frames_badges(slots, red, green, yellow):
+    writer = FakeWriter()
+    payload = b"".join(
+        bytes(entry) for entry in zip(slots, red, green, yellow)
+    )
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_BADGES, payload)
+    return bytes(writer.written)
+
+
+def test_the_badge_message_types_are_15_and_16_and_the_pip_types_stay():
+    assert wire.MESSAGE_TYPE_STORE_BADGE_SHEET == 15
+    assert wire.MESSAGE_TYPE_SHOW_FRAMES_BADGES == 16
+    assert wire.MESSAGE_TYPE_STORE_PIP_SHEET == 13
+    assert wire.MESSAGE_TYPE_SHOW_FRAMES_PIPS == 14
+    assert wire.BADGE_SHEET_PIXELS_SIZE == 76800
+
+
+def test_a_badge_sheet_decodes_to_its_colors_and_pixels():
+    pixels = bytes(range(256)) * 300
+    glyph_reader, reader = _read_all(
+        _framed_badge_sheet([0x3AFF, 0x16C9, 0xF800, 0xFFE0, 0x0000], pixels)
+    )
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.BadgeSheet)
+    assert message.colors == [0x3AFF, 0x16C9, 0xF800, 0xFFE0, 0x0000]
+    assert len(message.pixels) == 76800
+    assert bytes(message.pixels) == pixels
+
+
+def test_a_badge_sheet_that_does_not_inflate_to_76800_bytes_is_dropped():
+    writer = FakeWriter()
+    # A glyph's 32,768 bytes are the size of a pip sheet, not of a badge sheet.
+    wire.write_frame(
+        writer,
+        wire.MESSAGE_TYPE_STORE_BADGE_SHEET,
+        bytes((1, 0x1F, 0x00)) + zlib.compress(bytes(32768), 9),
+    )
+    framed = bytes(writer.written) + _framed_show_frames_badges([2], [9], [8], [7])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    message = glyph_reader.feed(reader)
+    assert list(message.slots) == [2] and message.badges(0) == (9, 8, 7)
+
+
+@pytest.mark.parametrize("names", [0, 6])
+def test_a_badge_sheet_that_names_no_color_or_too_many_is_dropped(names):
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_STORE_BADGE_SHEET, bytes((names, 1, 2, 3)))
+    framed = bytes(writer.written) + _framed_show_frames_badges([2], [9], [0], [0])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert list(glyph_reader.feed(reader).slots) == [2]
+
+
+def test_show_frames_with_badges_decodes_a_slot_and_three_counts_for_each_key():
+    slots = [0, 51, wire.SLOT_UNCHANGED, 5, wire.SLOT_UNCHANGED, 40]
+    red = [0, 7, 0, 100, 255, 1]
+    green = [0, 0, 9, 99, 3, 2]
+    yellow = [1, 0, 0, 100, 4, 3]
+    glyph_reader, reader = _read_all(_framed_show_frames_badges(slots, red, green, yellow))
+
+    message = glyph_reader.feed(reader)
+
+    assert isinstance(message, wire.ShowFramesBadges)
+    assert list(message.slots) == slots
+    assert list(message.red) == red
+    assert list(message.green) == green
+    assert list(message.yellow) == yellow
+    assert message.badges(3) == (100, 99, 100)
+
+
+@pytest.mark.parametrize("length", [3, 6, 5])
+def test_show_frames_with_badges_of_a_length_that_is_not_a_multiple_of_4_is_dropped(length):
+    writer = FakeWriter()
+    wire.write_frame(writer, wire.MESSAGE_TYPE_SHOW_FRAMES_BADGES, bytes(range(1, length + 1)))
+    framed = bytes(writer.written) + _framed_show_frames_badges([4], [5], [6], [7])
+    reader = _StallingReader(framed, chunk_size=len(framed))
+    glyph_reader = wire.CustomGlyphReader(clock=_TickingClock(step_ns=1000))
+
+    with pytest.raises(ValueError):
+        glyph_reader.feed(reader)
+
+    assert glyph_reader.feed(reader).badges(0) == (5, 6, 7)
+
+
 # --- The second core (task 0059) ---------------------------------------------
 
 from fake_glyphcore import FakeGlyphcore  # noqa: E402

@@ -62,11 +62,16 @@ func ValidStatus(s string) bool {
 // Node is a top-level key or a child. A child has the same fields, and
 // children of its own down to MaxDepth (task 0086).
 type Node struct {
-	ID      string `json:"id"`
-	Icon    byte   `json:"icon"`
-	Status  string `json:"status"`
-	Count   int    `json:"count"`
-	IconRef string `json:"iconRef"`
+	ID     string `json:"id"`
+	Icon   byte   `json:"icon"`
+	Status string `json:"status"`
+	// Count is the red count of the key's badges. CountGreen and CountYellow
+	// are the green and the yellow count (task 0091). A count of 0 draws no
+	// disc. A file from before task 0091 has neither, and loads as red counts.
+	Count       int    `json:"count"`
+	CountGreen  int    `json:"countGreen,omitempty"`
+	CountYellow int    `json:"countYellow,omitempty"`
+	IconRef     string `json:"iconRef"`
 	// IconText is words drawn as the icon instead of a PNG (task 0069). It
 	// excludes IconRef.
 	IconText string `json:"iconText,omitempty"`
@@ -84,7 +89,7 @@ type Node struct {
 // hasContent reports whether n shows anything. A key with no content is a
 // reserved slot: the controller does not draw it.
 func (n *Node) hasContent() bool {
-	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || n.Opens || len(n.Children) > 0
+	return n.Status != "" || n.Icon != 0 || n.Count != 0 || n.CountGreen != 0 || n.CountYellow != 0 || n.IconRef != "" || n.IconText != "" || len(n.IconEmoji) > 0 || n.Opens || len(n.Children) > 0
 }
 
 // Doc is the whole layers.json object.
@@ -332,6 +337,12 @@ func (n *Node) validate() error {
 	}
 	if n.Count < 0 {
 		return fmt.Errorf("negative count %d", n.Count)
+	}
+	if n.CountGreen < 0 {
+		return fmt.Errorf("negative countGreen %d", n.CountGreen)
+	}
+	if n.CountYellow < 0 {
+		return fmt.Errorf("negative countYellow %d", n.CountYellow)
 	}
 	if err := ValidateIconRef(n.IconRef); err != nil {
 		return err

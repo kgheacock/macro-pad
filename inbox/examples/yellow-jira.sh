@@ -40,8 +40,12 @@ secret=$(security find-generic-password -s inbox-jira -w 2>/dev/null) || {
 
 jql="labels = \"$repo\" AND statusCategory != Done ORDER BY updated DESC"
 
+# A quoted value of a curl config takes \\ and \" as escapes, so a token
+# that holds a backslash or a quote must be escaped to reach curl whole.
+quote() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
+
 # The credential goes to curl on a pipe, not on its command line.
-printf 'user = "%s:%s"\n' "$JIRA_USER" "$secret" |
+printf 'user = "%s:%s"\n' "$(quote "$JIRA_USER")" "$(quote "$secret")" |
   curl -sS --fail --max-time 15 --config - -G "$JIRA_URL/rest/api/3/search/jql" \
     --data-urlencode "jql=$jql" --data-urlencode "fields=summary" --data-urlencode "maxResults=200" |
   jq --arg base "$JIRA_URL" '[.issues[] | { id: .key, title: .fields.summary, url: ($base + "/browse/" + .key) }]'

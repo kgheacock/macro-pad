@@ -216,7 +216,8 @@ test('TestRepoLayerLifecycle', (t) => {
     assert.equal(node.parent, undefined);
     assert.equal(node.count, 0);
   }
-  assert.equal(nodes[0].iconText, 'A-1');
+  assert.deepEqual(nodes[0].iconLines, ['A-1']);
+  assert.equal(nodes[0].iconText, undefined);
   assert.equal(r.owns('repo.alpha'), true);
   assert.equal(r.owns('repo.beta'), false);
   assert.equal(r.owns('repos'), false);
@@ -266,7 +267,8 @@ test('TestRepoLayerStable', (t) => {
   const rows = [sessionRow(folder('alpha', '3f2a91c0'), { status: 'waiting' })];
   const joined = planOf(r, { fed, path, rows });
   assert.deepEqual(itemNodes(joined).map((k) => [k.id, k.status]), [['y:A-2', 'WARN']]);
-  assert.equal(itemNodes(joined)[0].iconEmoji.length, 2, 'the session emoji follows');
+  // A yellow item shows the repository emoji only (task 0096).
+  assert.equal(itemNodes(joined)[0].iconEmoji.length, 1, 'no session emoji on an item with an id');
 
   // Items of one repository at a time.
   const other = planOf(r, { fed, path: ['repos', 'repo.beta'], rows });

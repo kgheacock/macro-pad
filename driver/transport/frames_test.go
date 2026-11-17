@@ -169,87 +169,99 @@ func TestDecodeBatchIncompleteRejectsAWrongLength(t *testing.T) {
 }
 
 // TestPoolIs64Buffers: the pool stays at the 64 buffers of task 0063. Twelve are
-// the pip buffers of task 0062, two for each key, so the host numbers 52.
+// the overlay buffers of tasks 0062 and 0091, two for each key, so the host numbers 52.
 func TestPoolIs64Buffers(t *testing.T) {
 	if PoolSize != 64 || PipBufferCount != 12 || SlotCount != 52 {
-		t.Fatalf("pool %d, pip buffers %d, slots %d; want 64, 12, 52", PoolSize, PipBufferCount, SlotCount)
+		t.Fatalf("pool %d, overlay buffers %d, slots %d; want 64, 12, 52", PoolSize, PipBufferCount, SlotCount)
 	}
 }
 
-func TestPipSheetCodecRoundTrips(t *testing.T) {
-	pixels := make([]byte, CustomGlyphPixelsSize)
+func TestBadgeSheetCodecRoundTrips(t *testing.T) {
+	pixels := make([]byte, BadgeSheetPixelsSize)
 	for i := range pixels {
 		pixels[i] = byte(i % 7)
 	}
+	if BadgeSheetPixelsSize != 76800 {
+		t.Fatalf("the badge sheet is %d bytes, want 76,800", BadgeSheetPixelsSize)
+	}
 	colors := []uint16{0x3AFF, 0x16C9, 0xF800}
-	payload, err := encodeStorePipSheet(colors, pixels)
+	payload, err := encodeStoreBadgeSheet(colors, pixels)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := decodeStorePipSheet(payload)
+	got, err := decodeStoreBadgeSheet(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Colors) != 3 || got.Colors[1] != 0x16C9 || !bytes.Equal(got.Pixels, pixels) {
 		t.Fatalf("decoded %+v", got.Colors)
 	}
-	if _, err := encodeStorePipSheet(nil, pixels); err == nil {
+	if _, err := encodeStoreBadgeSheet(nil, pixels); err == nil {
 		t.Error("a sheet with no colors was accepted")
 	}
-	if _, err := encodeStorePipSheet(colors, pixels[:10]); err == nil {
+	if _, err := encodeStoreBadgeSheet(make([]uint16, MaxBadgeColors+1), pixels); err == nil {
+		t.Error("a sheet with too many colors was accepted")
+	}
+	if _, err := encodeStoreBadgeSheet(colors, pixels[:10]); err == nil {
 		t.Error("a sheet of the wrong size was accepted")
 	}
-	if _, err := decodeStorePipSheet(payload[:3]); err == nil {
+	if _, err := encodeStoreBadgeSheet(colors, make([]byte, CustomGlyphPixelsSize)); err == nil {
+		t.Error("a sheet the size of a glyph was accepted")
+	}
+	if _, err := decodeStoreBadgeSheet(payload[:3]); err == nil {
 		t.Error("a short payload was decoded")
 	}
 }
 
-func TestShowFramesPipsCodecRoundTrips(t *testing.T) {
+func TestShowFramesBadgesCodecRoundTrips(t *testing.T) {
 	slots := []byte{0, 5, SlotUnchanged, 51, 2, 3}
-	counts := []byte{0, 7, 0, 100, 255, 1}
-	payload, err := encodeShowFramesPips(slots, counts)
+	badges := []Badges{{}, {Red: 7}, {Green: 1}, {Red: 100, Green: 255, Yellow: 99}, {Yellow: 4}, {Red: 1, Green: 2, Yellow: 3}}
+	payload, err := encodeShowFramesBadges(slots, badges)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(payload) != 12 {
-		t.Fatalf("payload is %d bytes, want 2 for each key", len(payload))
+	if len(payload) != 24 {
+		t.Fatalf("payload is %d bytes, want 4 for each key", len(payload))
 	}
-	gs, gc, err := decodeShowFramesPips(payload)
-	if err != nil || !bytes.Equal(gs, slots) || !bytes.Equal(gc, counts) {
-		t.Fatalf("decoded %v %v, %v", gs, gc, err)
+	if !bytes.Equal(payload[12:16], []byte{51, 100, 255, 99}) {
+		t.Fatalf("key 3 is %v, want the slot, red, green, and yellow", payload[12:16])
 	}
-	if _, err := encodeShowFramesPips([]byte{SlotCount}, []byte{1}); err == nil {
+	gs, gb, err := decodeShowFramesBadges(payload)
+	if err != nil || !bytes.Equal(gs, slots) || !reflect.DeepEqual(gb, badges) {
+		t.Fatalf("decoded %v %v, %v", gs, gb, err)
+	}
+	if _, err := encodeShowFramesBadges([]byte{SlotCount}, []Badges{{Red: 1}}); err == nil {
 		t.Error("a slot above the last was accepted")
 	}
-	if _, err := encodeShowFramesPips([]byte{1, 2}, []byte{1}); err == nil {
-		t.Error("slots and counts of different length were accepted")
+	if _, err := encodeShowFramesBadges([]byte{1, 2}, []Badges{{Red: 1}}); err == nil {
+		t.Error("slots and badges of different length were accepted")
 	}
-	if _, _, err := decodeShowFramesPips([]byte{1, 2, 3}); err == nil {
-		t.Error("an odd payload was decoded")
+	if _, _, err := decodeShowFramesBadges([]byte{1, 2, 3, 4, 5, 6}); err == nil {
+		t.Error("a payload that is not a multiple of 4 was decoded")
 	}
 }
 
-func TestPipsCrossAnEmulator(t *testing.T) {
+func TestBadgesCrossAnEmulator(t *testing.T) {
 	e := NewEmulator()
 	defer e.Close()
-	pixels := make([]byte, CustomGlyphPixelsSize)
+	pixels := make([]byte, BadgeSheetPixelsSize)
 	go func() {
-		e.StorePipSheet([]uint16{1, 2}, pixels)
+		e.StoreBadgeSheet([]uint16{1, 2}, pixels)
 		e.StoreFrame(3, 0xF800, nil)
-		e.ShowFramesWithPips([]byte{3, SlotUnchanged}, []byte{42, 0})
+		e.ShowFramesWithBadges([]byte{3, SlotUnchanged}, []Badges{{Red: 42, Green: 5, Yellow: 100}, {}})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, n := e.LastShowFrames(); n == 1 {
-			if _, ok := e.PipSheet(); !ok {
+			if _, ok := e.BadgeSheet(); !ok {
 				t.Fatal("the Show arrived before the sheet")
 			}
-			if c := e.LastShowCounts(); len(c) != 2 || c[0] != 42 {
-				t.Fatalf("counts = %v", c)
+			if b := e.LastShowBadges(); len(b) != 2 || b[0] != (Badges{Red: 42, Green: 5, Yellow: 100}) {
+				t.Fatalf("badges = %v", b)
 			}
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("no Show with pips arrived")
+	t.Fatal("no Show with badges arrived")
 }

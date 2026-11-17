@@ -10,8 +10,9 @@ import (
 )
 
 // PoolSize is the number of 32 KB buffers the board allocates for frames:
-// 64, the cap of task 0063. PipBufferCount of them are pip buffers, two for
-// each key, and the rest are the slots the host numbers.
+// 64, the cap of task 0063. PipBufferCount of them are overlay buffers for the
+// badges (task 0062 called them pip buffers), two for each key, and the rest
+// are the slots the host numbers.
 const (
 	PoolSize       = 64
 	PipBufferCount = 12
@@ -171,29 +172,46 @@ func decodeShowMiss(payload []byte) (byte, error) {
 	return payload[0], nil
 }
 
-// MaxPipSprites is the most key colors a Store pip sheet names: one disc for
-// each.
-const MaxPipSprites = 8
+// The badge sheet (task 0091) is a 256 by 150 image in the pixel format of a
+// custom glyph: 76,800 bytes. The layout of its sprites is the contract of
+// driver/layers/pip.go and firmware/display_render.py, and "Store badge
+// sheet" in docs/wire-protocol.md describes it.
+const (
+	BadgeSheetWidth      = 256
+	BadgeSheetHeight     = 150
+	BadgeSheetPixelsSize = BadgeSheetWidth * BadgeSheetHeight * 2
+	// MaxBadgeColors is the most background colors a Store badge sheet names:
+	// one column of discs for each.
+	MaxBadgeColors = 5
+)
 
-// PipSheet is one decoded Store pip sheet message: the key color of each disc
-// of the sheet, and the sheet's pixels, a 256 by 64 image in the pixel format
-// of a custom glyph. See "Store pip sheet" in docs/wire-protocol.md (task
-// 0062).
-type PipSheet struct {
+// Badges is the three counts of a key (task 0091): the red, the green, and the
+// yellow disc. A count of 0 draws no disc. A count of 100 or more draws "99+".
+type Badges struct {
+	Red, Green, Yellow byte
+}
+
+// Any reports whether at least one of the three discs is drawn.
+func (b Badges) Any() bool { return b.Red > 0 || b.Green > 0 || b.Yellow > 0 }
+
+// BadgeSheet is one decoded Store badge sheet message: the key color each
+// column of discs is blended against, and the sheet's pixels, a 256 by 150 image
+// in the pixel format of a custom glyph. See "Store badge sheet" in
+// docs/wire-protocol.md (task 0091).
+type BadgeSheet struct {
 	Colors []uint16
 	Pixels []byte
 }
 
-// encodeStorePipSheet builds a Store pip sheet payload: the number of discs,
-// their key colors (little-endian), then a zlib stream of the pixels. The
-// pixels are CustomGlyphPixelsSize bytes, the same size as a glyph, so the
-// stream fits one frame whenever a glyph's does.
-func encodeStorePipSheet(colors []uint16, pixels []byte) ([]byte, error) {
-	if len(colors) == 0 || len(colors) > MaxPipSprites {
-		return nil, fmt.Errorf("transport: pip sheet names %d colors, want 1 to %d", len(colors), MaxPipSprites)
+// encodeStoreBadgeSheet builds a Store badge sheet payload: the number of
+// background colors, the colors (little-endian), then a zlib stream of the
+// pixels.
+func encodeStoreBadgeSheet(colors []uint16, pixels []byte) ([]byte, error) {
+	if len(colors) == 0 || len(colors) > MaxBadgeColors {
+		return nil, fmt.Errorf("transport: badge sheet names %d colors, want 1 to %d", len(colors), MaxBadgeColors)
 	}
-	if len(pixels) != CustomGlyphPixelsSize {
-		return nil, fmt.Errorf("%w: pip sheet is %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	if len(pixels) != BadgeSheetPixelsSize {
+		return nil, fmt.Errorf("%w: badge sheet is %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), BadgeSheetPixelsSize)
 	}
 	buf := make([]byte, 1+2*len(colors), 1+2*len(colors)+4096)
 	buf[0] = byte(len(colors))
@@ -211,67 +229,68 @@ func encodeStorePipSheet(colors []uint16, pixels []byte) ([]byte, error) {
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
-	if out.Len() > customGlyphPayload-1 {
-		return nil, fmt.Errorf("%w: pip sheet is %d bytes", ErrFrameTooLarge, out.Len())
+	if out.Len() > customGlyphPayload {
+		return nil, fmt.Errorf("%w: badge sheet is %d bytes", ErrFrameTooLarge, out.Len())
 	}
 	return out.Bytes(), nil
 }
 
-func decodeStorePipSheet(payload []byte) (PipSheet, error) {
+func decodeStoreBadgeSheet(payload []byte) (BadgeSheet, error) {
 	if len(payload) < 1 {
-		return PipSheet{}, errors.New("transport: pip sheet payload is empty")
+		return BadgeSheet{}, errors.New("transport: badge sheet payload is empty")
 	}
 	n := int(payload[0])
-	if n == 0 || n > MaxPipSprites || len(payload) <= 1+2*n {
-		return PipSheet{}, fmt.Errorf("transport: pip sheet payload is %d bytes for %d colors", len(payload), n)
+	if n == 0 || n > MaxBadgeColors || len(payload) <= 1+2*n {
+		return BadgeSheet{}, fmt.Errorf("transport: badge sheet payload is %d bytes for %d colors", len(payload), n)
 	}
-	sheet := PipSheet{Colors: make([]uint16, n)}
+	sheet := BadgeSheet{Colors: make([]uint16, n)}
 	for i := range sheet.Colors {
 		sheet.Colors[i] = binary.LittleEndian.Uint16(payload[1+2*i:])
 	}
 	zr, err := zlib.NewReader(bytes.NewReader(payload[1+2*n:]))
 	if err != nil {
-		return PipSheet{}, fmt.Errorf("transport: pip sheet: %w", err)
+		return BadgeSheet{}, fmt.Errorf("transport: badge sheet: %w", err)
 	}
 	defer zr.Close()
-	pixels, err := io.ReadAll(io.LimitReader(zr, CustomGlyphPixelsSize+1))
+	pixels, err := io.ReadAll(io.LimitReader(zr, BadgeSheetPixelsSize+1))
 	if err != nil {
-		return PipSheet{}, fmt.Errorf("transport: pip sheet: %w", err)
+		return BadgeSheet{}, fmt.Errorf("transport: badge sheet: %w", err)
 	}
-	if len(pixels) != CustomGlyphPixelsSize {
-		return PipSheet{}, fmt.Errorf("%w: pip sheet inflated to %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), CustomGlyphPixelsSize)
+	if len(pixels) != BadgeSheetPixelsSize {
+		return BadgeSheet{}, fmt.Errorf("%w: badge sheet inflated to %d bytes, want %d", ErrInvalidGlyphSize, len(pixels), BadgeSheetPixelsSize)
 	}
 	sheet.Pixels = pixels
 	return sheet, nil
 }
 
-// encodeShowFramesPips builds a Show frames with pips payload: two bytes for
-// each key, key 0 first, the slot (or SlotUnchanged) and the count. slots and
-// counts have one entry for each key.
-func encodeShowFramesPips(slots, counts []byte) ([]byte, error) {
+// encodeShowFramesBadges builds a Show frames with badges payload: four bytes
+// for each key, key 0 first: the slot (or SlotUnchanged), the red count, the
+// green count, and the yellow count. slots and badges have one entry for each
+// key.
+func encodeShowFramesBadges(slots []byte, badges []Badges) ([]byte, error) {
 	if len(slots) == 0 {
 		return nil, fmt.Errorf("%w: no key", ErrInvalidSlot)
 	}
-	if len(counts) != len(slots) {
-		return nil, fmt.Errorf("transport: %d slots but %d counts", len(slots), len(counts))
+	if len(badges) != len(slots) {
+		return nil, fmt.Errorf("transport: %d slots but %d badge sets", len(slots), len(badges))
 	}
 	if _, err := encodeShowFrames(slots); err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, 2*len(slots))
+	out := make([]byte, 0, 4*len(slots))
 	for i, slot := range slots {
-		out = append(out, slot, counts[i])
+		out = append(out, slot, badges[i].Red, badges[i].Green, badges[i].Yellow)
 	}
 	return out, nil
 }
 
-func decodeShowFramesPips(payload []byte) (slots, counts []byte, err error) {
-	if len(payload) == 0 || len(payload)%2 != 0 {
-		return nil, nil, fmt.Errorf("transport: show frames with pips payload is %d bytes, want 2 for each key", len(payload))
+func decodeShowFramesBadges(payload []byte) (slots []byte, badges []Badges, err error) {
+	if len(payload) == 0 || len(payload)%4 != 0 {
+		return nil, nil, fmt.Errorf("transport: show frames with badges payload is %d bytes, want 4 for each key", len(payload))
 	}
-	for i := 0; i < len(payload); i += 2 {
+	for i := 0; i < len(payload); i += 4 {
 		slots = append(slots, payload[i])
-		counts = append(counts, payload[i+1])
+		badges = append(badges, Badges{Red: payload[i+1], Green: payload[i+2], Yellow: payload[i+3]})
 	}
-	return slots, counts, nil
+	return slots, badges, nil
 }

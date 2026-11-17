@@ -150,7 +150,7 @@ layer, saves the object, and shows the same layer after a restart. See task
 through it (task 0061). Each distinct picture over each color is a frame, and
 the controller keeps a table of 52 slots with least-recently-used eviction: it
 never overwrites a slot that a key shows. The board's pool is 64 buffers, and 12
-of them are pip buffers (task 0062). A layer change stores the frames the
+of them are overlay buffers for the badges (tasks 0062 and 0091). A layer change stores the frames the
 board lacks, then sends one Show frames for all the keys that change. At start,
 and after each change to the tree, a preload stores the frames of every node of
 the layer tree while the pad is idle. A press pauses it until
@@ -159,17 +159,27 @@ after it, a switch to any layer sends a Show frames and no image. A key whose
 glyph does not compress to fit one frame is drawn with a glyph and a key state,
 as before.
 
-**Count pip.** A key with a count shows a pip in the bottom-right corner: a red
-disc (`#E02020`) of 44 pixels with a 2 pixel white ring and a white number, drawn
-with Go Bold. The count is not part of a frame, so one icon on one color is one
-slot, whatever its count. The daemon draws the pip sprites once, at start-up
-(`layers.BuildPipSheet`), and sends them in a Store pip sheet message, again at
-every reconnect. A count change sends a Show frames with pips: the board copies
-the frame, stamps the pip on the copy, and shows it, so the change sends no
-image. A key that is not cached, such as one whose picture does not compress,
-gets the same pip drawn into its glyph. The pip's size, colors, and font are the
+**Count badges.** A key shows up to three count badges along its bottom edge
+(task 0091, which replaces the one count pip of task 0062): a red disc for
+`count`, a green one for `countGreen`, and a yellow one for `countYellow`. Each is
+a disc of 34 pixels with a 2 pixel white ring and a number in Go Bold, 11 by 16
+pixels (`99+` is 8 by 12 pixels), at least 13 pixels high. The red digits are
+white, and the green and yellow digits are black. The discs sit 5 pixels above the
+bottom edge and 3 pixels apart, in fixed places: red at x 89 to 123 (the right
+corner), green at x 52 to 86, and yellow at x 15 to 49. A count of 0 draws no
+disc and leaves a gap, so a color stays in one place. A count of 100 or more
+shows `99+`. The counts are not part of a frame, so one icon on one color is one
+slot, whatever its counts. The daemon draws the badge sprites once, at start-up
+(`layers.BuildBadgeSheet`), and sends them in a Store badge sheet message, again
+at every reconnect, before any Show frames with badges. A count change sends a
+Show frames with badges (type 16): the board copies the frame, stamps the discs on
+the copy, and shows it, so the change sends no image and takes no slot. A key that
+is not cached, such as one whose picture does not compress, gets the same badges
+drawn into its glyph (`layers.DrawBadges`). The size, colors, and font are the
 constants of `driver/layers/pip.go`; the sheet's layout is in
-[`docs/wire-protocol.md`](../docs/wire-protocol.md#store-pip-sheet-cdc-host--device).
+[`docs/wire-protocol.md`](../docs/wire-protocol.md#store-badge-sheet-cdc-host--device).
+The driver no longer sends types 13 and 14 (Store pip sheet and Show frames with
+pips); the firmware still accepts them until a later task removes them.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -230,7 +240,7 @@ the poller used is not read any more; delete it.
   largest size that fits 112 px: 44, 36, 28, 22, or 18 px for a text of one
   line, and 28, 22, 18, or 14 px for each line of a text of two lines. A line
   that is still too wide ends in `…`. A rune that Go Bold lacks, such as an
-  emoji, draws as `?`. The text stays above the count pip. Two keys with the
+  emoji, draws as `?`. The text stays above the count badges. Two keys with the
   same text share one frame on the board, whatever their colors.
 - `iconEmoji` is one or two pictures under `assets/emoji/` (task 0073), and it
   excludes `iconRef`. They sit on an opaque white tile with the key color as a
@@ -240,8 +250,8 @@ the poller used is not read any more; delete it.
   and one emoji alone is 80 px, or 100 px). With `iconEmoji`, `iconText` is a
   caption of one line and at most 16 runes, across the top in black Go Bold
   at the largest of 22, 20, 18, 16, or 14 px that fits 120 px. A third ref, a
-  ref outside `emoji/`, or a longer caption drops the message. The count pip
-  covers the lower right of the hero. That is how a key in a child layer draws
+  ref outside `emoji/`, or a longer caption drops the message. The count badges
+  cover the lower part of the hero. That is how a key in a child layer draws
   it; a top-level key keeps task 0073's look: the emoji side by side on the
   white round, 48 px each (64 px for one), the caption above them at up to
   20 px and 84 px wide, and the key color around the round.
@@ -253,9 +263,15 @@ the poller used is not read any more; delete it.
 - Where the font is missing or has no picture for a ref, the ref draws
   `assets/emoji/<codepoints>.png`: Microsoft Fluent Emoji (flat, MIT), one per
   line of `assets/emoji/set.txt` and `extra.txt`, drawn by `tools/emoji/` to fit the round.
-- `count` is drawn as a pip, a red disc with a white ring and a white number,
-  in the bottom-right corner of the image (see "Count pip," above). A count of
-  0 has no pip, and a count above 99 shows `99+`.
+- `count`, `countGreen`, and `countYellow` are drawn as three badges, a red, a
+  green, and a yellow disc, each with a white ring and a number, along the
+  bottom edge of the image (see "Count badges," above). Each is an integer of 0
+  or more, and 0 is the default and draws no disc. A count above 99 shows `99+`.
+  A message with only `count` draws as before, as a red badge in the bottom-right
+  corner. A negative count drops the message and changes nothing. `layers.json`
+  stays at version 1: a file from before task 0091 has no `countGreen` or
+  `countYellow` and loads as red counts. Task 0092 gives the three counts a
+  meaning on a repo key.
 
 | status | color | RGB565 |
 |---|---|---|
@@ -500,6 +516,7 @@ Every message on the connection is JSON, shaped by
   {"kind": "setLayerKey", "setLayerKey": {"id": "windows", "slot": 4}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "code", "path": ["apps", "app.pad"], "iconText": "code"}}
   {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "opens": true}}
+  {"kind": "setLayerKey", "setLayerKey": {"id": "repo.macro-pad", "parent": "repos", "iconText": "macro-pad", "count": 3, "countGreen": 2, "countYellow": 1}}
   ```
 
 - **`removeLayerKey`** — client to server. Removes one key or child from the

@@ -212,6 +212,84 @@ def stamp_pip(frame, sheet, disc: int, count: int) -> None:
         )
 
 
+# The count badges (task 0091). The host draws the sprites into a sheet of 256x150
+# pixels and sends it; the layout is the contract of docs/wire-protocol.md's
+# "Store badge sheet" and of driver/layers/pip.go. The sheet has a 34x34 disc for
+# each fill (red, green, yellow: the rows) and each background color (the
+# columns) at (34 * column, 34 * fill). Below them is a set of characters for
+# each fill at y BADGE_CELL_Y[fill]: "0" to "9" and "+" as cells of 11x16 at
+# (11 * index, y), and the "9" and "+" of "99+" as cells of 8x12 after them. A
+# transparent sheet pixel keeps what lies under it.
+BADGE_SHEET_WIDTH = 256
+BADGE_SHEET_HEIGHT = 150
+BADGE_DISC = 34
+BADGE_GAP = 3
+BADGE_MARGIN = 5
+BADGE_BIG_W = 11
+BADGE_BIG_H = 16
+BADGE_SMALL_W = 8
+BADGE_SMALL_H = 12
+BADGE_CELL_Y = (102, 118, 134)
+BADGE_MAX_COUNT = 99
+BADGE_FILLS = 3
+
+
+def badge_disc_origin(fill: int):
+    """The (x, y) of the top-left corner of the disc of `fill` on the panel: red
+    (0) at the right, then green (1), then yellow (2), 3 px apart."""
+    x = FRAME_WIDTH - BADGE_MARGIN - BADGE_DISC - fill * (BADGE_DISC + BADGE_GAP)
+    y = FRAME_HEIGHT - BADGE_MARGIN - BADGE_DISC
+    return x, y
+
+
+def _badge_cell(fill: int, char: str, small: bool):
+    """The (x1, y1, x2, y2) of a character's cell of `fill` on the sheet."""
+    index = 10 if char == "+" else ord(char) - 48
+    y = BADGE_CELL_Y[fill]
+    if not small:
+        x = BADGE_BIG_W * index
+        return x, y, x + BADGE_BIG_W, y + BADGE_BIG_H
+    x = BADGE_BIG_W * 11 + (BADGE_SMALL_W if char == "+" else 0)
+    return x, y, x + BADGE_SMALL_W, y + BADGE_SMALL_H
+
+
+def stamp_badges(frame, sheet, column: int, red: int, green: int, yellow: int) -> None:
+    """Draw the count badges along the bottom edge of `frame`, a 128x128
+    `Bitmap`: for each count above 0, the disc of column `column` of `sheet`, then
+    the characters of the count centred on it. A count of 100 or more is "99+". A
+    count of 0 draws no disc. This changes `frame` in place, so the caller passes
+    a copy of a cached frame, never the frame itself.
+    """
+    counts = (red, green, yellow)
+    for fill in range(BADGE_FILLS):
+        count = counts[fill]
+        if count <= 0:
+            continue
+        x0, y0 = badge_disc_origin(fill)
+        bitmaptools.blit(
+            frame,
+            sheet,
+            x0,
+            y0,
+            x1=BADGE_DISC * column,
+            y1=BADGE_DISC * fill,
+            x2=BADGE_DISC * (column + 1),
+            y2=BADGE_DISC * (fill + 1),
+            skip_source_index=TRANSPARENT_PIXEL,
+        )
+        small = count > BADGE_MAX_COUNT
+        text = "99+" if small else str(count)
+        width = BADGE_SMALL_W if small else BADGE_BIG_W
+        height = BADGE_SMALL_H if small else BADGE_BIG_H
+        x = x0 + (BADGE_DISC - len(text) * width) // 2
+        y = y0 + (BADGE_DISC - height) // 2
+        for position, char in enumerate(text):
+            x1, y1, x2, y2 = _badge_cell(fill, char, small)
+            bitmaptools.blit(
+                frame, sheet, x + position * width, y, x1=x1, y1=y1, x2=x2, y2=y2
+            )
+
+
 def _compose(color: int, pixels: bytes) -> memoryview:
     """Build one frame: fill it with `color`, then blit `pixels` over it,
     skipping the transparent value. `pixels` may be `None`.

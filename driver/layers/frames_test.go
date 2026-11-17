@@ -17,9 +17,9 @@ type fakeFrameOut struct {
 	slots map[byte]fakeFrame
 	// storeErr, when set, is what every StoreFrame returns.
 	storeErr error
-	// counts is the counts of each Show frames with pips, and sheets is how
-	// many pip sheets arrived.
-	counts [][]byte
+	// badges is the badges of each Show frames with badges, and sheets is how
+	// many badge sheets arrived.
+	badges [][]transport.Badges
 	sheets int
 }
 
@@ -43,15 +43,15 @@ func (f *fakeFrameOut) StoreFrame(slot byte, color uint16, png []byte) error {
 	return nil
 }
 
-func (f *fakeFrameOut) ShowFramesWithPips(slots, counts []byte) error {
+func (f *fakeFrameOut) ShowFramesWithBadges(slots []byte, badges []transport.Badges) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf("show %v", slots))
-	f.counts = append(f.counts, append([]byte(nil), counts...))
+	f.badges = append(f.badges, append([]transport.Badges(nil), badges...))
 	return nil
 }
 
-func (f *fakeFrameOut) StorePipSheet(colors []uint16, pixels []byte) error {
+func (f *fakeFrameOut) StoreBadgeSheet(colors []uint16, pixels []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sheets++
@@ -227,43 +227,78 @@ func TestFrameTable_NeverNamesASlotAbove127(t *testing.T) {
 	}
 }
 
-// TestPipNoStore is task 0062's DoD-6: counts 1 to 99 on one icon and color use
-// one slot, and a count change sends a Show frames with pips and no Store frame.
-func TestPipNoStore(t *testing.T) {
+// TestBadgesNoStore is task 0091's DoD-3: a change of any of the three counts
+// from 1 to 99 on one icon and color sends one Show frames with badges, no Store
+// frame, and uses one slot.
+func TestBadgesNoStore(t *testing.T) {
 	out := newFakeFrameOut()
 	c := openFrames(t, out, time.Millisecond)
 	if out.sheets != 1 {
-		t.Fatalf("the board got %d pip sheets, want 1 before the first Show", out.sheets)
+		t.Fatalf("the board got %d badge sheets, want 1 before the first Show", out.sheets)
 	}
-	if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: 1}); err != nil {
+	update := func(red, green, yellow int) error {
+		return c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: red, CountGreen: green, CountYellow: yellow})
+	}
+	if err := update(1, 1, 1); err != nil {
 		t.Fatal(err)
 	}
 	if !c.WaitPreload(10 * time.Second) {
 		t.Fatal("the preload did not finish")
 	}
 	out.takeCalls()
+	stored := func() int {
+		out.mu.Lock()
+		defer out.mu.Unlock()
+		return len(out.slots)
+	}
+	before := stored()
 
-	for count := 2; count <= 99; count++ {
-		if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: count}); err != nil {
+	for which := 0; which < 3; which++ {
+		for count := 2; count <= 99; count++ {
+			counts := [3]int{1, 1, 1}
+			counts[which] = count
+			if err := update(counts[0], counts[1], counts[2]); err != nil {
+				t.Fatal(err)
+			}
+			calls, _ := out.takeCalls()
+			if len(calls) != 1 || !strings.HasPrefix(calls[0], "show ") {
+				t.Fatalf("count %d of %d: calls = %q, want one Show frames with badges and no Store", count, which, calls)
+			}
+			out.mu.Lock()
+			got := out.badges[len(out.badges)-1][0]
+			out.mu.Unlock()
+			want := transport.Badges{Red: 1, Green: 1, Yellow: 1}
+			switch which {
+			case 0:
+				want.Red = byte(count)
+			case 1:
+				want.Green = byte(count)
+			case 2:
+				want.Yellow = byte(count)
+			}
+			if got != want {
+				t.Fatalf("count %d of %d: the Show named %v for key 0, want %v", count, which, got, want)
+			}
+		}
+		if err := update(1, 1, 1); err != nil {
 			t.Fatal(err)
 		}
-		calls, _ := out.takeCalls()
-		if len(calls) != 1 || !strings.HasPrefix(calls[0], "show ") {
-			t.Fatalf("count %d: calls = %q, want one Show frames with pips and no Store", count, calls)
-		}
-		out.mu.Lock()
-		got := out.counts[len(out.counts)-1][0]
-		out.mu.Unlock()
-		if int(got) != count {
-			t.Fatalf("count %d: the Show named count %d for key 0", count, got)
-		}
+		out.takeCalls()
 	}
-	// A count of 0 shows the frame as it is: the pip goes, with no Store.
-	if err := c.SetKey(Update{ID: "github", Status: StatusRunning, IconRef: "github.png", Count: 0}); err != nil {
+	if got := stored(); got != before {
+		t.Errorf("the board holds %d frames after the changes, want the %d it held before", got, before)
+	}
+	// Counts of 0 draw no discs: the frame shows as it is, with no Store.
+	if err := update(0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	calls, _ := out.takeCalls()
 	if len(calls) != 1 || !strings.HasPrefix(calls[0], "show ") {
-		t.Fatalf("count 0: calls = %q, want one Show frames with pips", calls)
+		t.Fatalf("counts 0: calls = %q, want one Show frames with badges", calls)
 	}
+	out.mu.Lock()
+	if got := out.badges[len(out.badges)-1][0]; got.Any() {
+		t.Errorf("counts 0: the Show named %v for key 0", got)
+	}
+	out.mu.Unlock()
 }

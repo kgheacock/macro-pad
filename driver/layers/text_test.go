@@ -24,7 +24,7 @@ import (
 // textTile renders a text icon with no count and decodes it.
 func textTile(t *testing.T, text string) *image.NRGBA {
 	t.Helper()
-	data, err := renderIcon(assetsDir, "", text, "", false, 0, ColorError)
+	data, err := renderIcon(assetsDir, "", text, "", false, Badges{}, ColorError)
 	if err != nil {
 		t.Fatalf("%q: %v", text, err)
 	}
@@ -49,10 +49,10 @@ func TestIconText(t *testing.T) {
 	var tiles []image.Image
 	for _, text := range cases {
 		tile := textTile(t, text)
-		if got := tile.NRGBAAt(0, 0); got != pipWhite {
+		if got := tile.NRGBAAt(0, 0); got != badgeWhite {
 			t.Errorf("%q: the corner is %v, want plain white", text, got)
 		}
-		if got := tile.NRGBAAt(64, 100); got != pipWhite {
+		if got := tile.NRGBAAt(64, 100); got != badgeWhite {
 			t.Errorf("%q: (64, 100) is %v, want white (no round)", text, got)
 		}
 		dark := 0
@@ -166,7 +166,7 @@ func TestIconTextFit(t *testing.T) {
 				if px.A != 0xFF {
 					t.Fatalf("%q: (%d, %d) has alpha %d", text, x, y, px.A)
 				}
-				if px == pipWhite {
+				if px == badgeWhite {
 					continue
 				}
 				if x < textBoxX0 || x >= textBoxX1 || y < textBoxY0 || y >= textBoxY1 {
@@ -196,27 +196,27 @@ func TestIconTextFit(t *testing.T) {
 	}
 }
 
-// TestIconTextPip checks that the count pip lies below the text, so it covers
-// no letter.
-func TestIconTextPip(t *testing.T) {
+// TestIconTextBadges checks that the count badges lie below the text, so they
+// cover no letter.
+func TestIconTextBadges(t *testing.T) {
 	plain := textTile(t, "parent\nname")
-	data, err := renderIcon(assetsDir, "", "parent\nname", "", false, 42, ColorDone)
+	data, err := renderIcon(assetsDir, "", "parent\nname", "", false, Badges{Red: 42}, ColorDone)
 	if err != nil {
 		t.Fatal(err)
 	}
 	img, _ := png.Decode(bytes.NewReader(data))
-	disc := pipDiscRect()
+	disc := badgeDiscRect(FillRed)
 	for y := 0; y < transport.CustomGlyphHeight; y++ {
 		for x := 0; x < transport.CustomGlyphWidth; x++ {
-			inPip := image.Pt(x, y).In(disc)
+			inBadge := image.Pt(x, y).In(disc)
 			same := color.NRGBAModel.Convert(img.At(x, y)) == color.NRGBA(plain.NRGBAAt(x, y))
-			if !inPip && !same {
-				t.Fatalf("(%d, %d) changed outside the pip sprite", x, y)
+			if !inBadge && !same {
+				t.Fatalf("(%d, %d) changed outside the badge sprite", x, y)
 			}
 		}
 	}
 	if disc.Min.Y < textBoxY1 {
-		t.Errorf("the pip starts at y %d, above the text box end %d", disc.Min.Y, textBoxY1)
+		t.Errorf("the badges start at y %d, above the text box end %d", disc.Min.Y, textBoxY1)
 	}
 }
 
@@ -304,7 +304,7 @@ func TestIconTextPersist(t *testing.T) {
 // TestInboxTextIcon checks that the text `inbox` sends for a channel, with a
 // count pip, draws and decodes for the board (task 0066, now by text).
 func TestInboxTextIcon(t *testing.T) {
-	data, err := renderIcon(assetsDir, "", "macro-pad\ndriver", "", false, 3, StatusColor(StatusWarn))
+	data, err := renderIcon(assetsDir, "", "macro-pad\ndriver", "", false, Badges{Red: 3}, StatusColor(StatusWarn))
 	if err != nil {
 		t.Fatalf("renderIcon: %v", err)
 	}

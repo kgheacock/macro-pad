@@ -867,9 +867,18 @@ six times with three counts on every key. `cd driver && go run ./cmd/blinksend
 --scenario=badges` sends the same run for the owner to look at: five status colors
 and a white tile with three discs each.
 
-The figures on the board (the free heap with the sheet loaded, from `make
-slot-probe`, and `six keys in` for three runs) are not measured yet. They need the
-board: the owner adds them here.
+Figures of 2026-11-17, on a Pico Plus 2 with CircuitPython 10.2.1 (stock, no `glyphcore`):
+
+| Figure | Value |
+|---|---|
+| `six keys in` (`make blink-trace SCENARIO=badges`) | 167.9, 168.0, and 168.8 ms in three runs (limit 230) |
+| `push span` | 34.1, 34.1, and 33.8 ms |
+| Free heap after the pool (`make slot-probe`) | 5,935,088 bytes, from 8,309,968 before, 52 slots allocated in 623 ms (limit 2,097,152) |
+| 32 KB copy | 5,798 us (best 5,615, worst 5,828, 5 trials) |
+
+`make slot-probe` builds a `FrameCache` only, so its figure does not include the
+sheet. The sheet is 76,800 bytes (type 15), so with it loaded at least 5.8 MB of heap
+stay free, far over the limit.
 
 ## The second core: the `glyphcore` module (task 0059)
 

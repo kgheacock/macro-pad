@@ -1,14 +1,14 @@
 ---
 id: "0094"
 title: "Draw two caption lines on a child key, with or without an emoji"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0094-two-line-identifier-caption-on-item-keys"
 related: ["0069", "0073", "0082", "0086", "0096"]
 tags: ["driver", "layers", "rendering", "wire-protocol", "platform"]
 ---

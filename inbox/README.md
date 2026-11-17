@@ -507,9 +507,10 @@ draws no key, but it counts for the top key.
 - **A repository key** shows the highest status of the unseen messages of its
   sessions: waiting, then running, then done. A repository with no unseen
   message has no color. A stored status outside the three counts as `done`.
-- **The `repos` key** shows the highest status of all sessions, and its pip
-  counts the sessions that wait. A session stays in the rows for an hour after
-  its last message. The key has no color when every message is seen.
+- **The `repos` key** shows the highest status of all sessions, and the totals
+  of the counts of its repository keys (see "Repo keys"). A session stays in
+  the rows for an hour after its last message. The key has no color when every
+  message is seen.
 - **While the repos layer is open** no repository key moves or goes; a new
   repository goes last. When the layer is closed the keys follow the order.
 - **On every connect** the daemon removes the keys `ai-inbox`,
@@ -709,6 +710,32 @@ The store keeps the answer in `yellow_answers(repo, items, checked_at, tried_at,
 error)` (schema 9), one row per repository name; `items` is the JSON list.
 `yellowCounts(now)` gives `{ repo: count }` and `yellowItems(repo, now)` the
 list, both ignoring an answer older than 24 hours.
+
+### Repo keys
+
+A repository key (task 0092) shows the emoji of `repo:KEY` as one picture, the
+repository name as the caption, and up to three count badges (task 0091).
+`src/repo-key.js` makes the fields; the renderer of the repos plugin reads the
+tables each time it plans, so the badges always show the tables as they are.
+
+- **Caption.** The repository name, at most 16 runes. A longer name is cut to
+  15 runes and "…".
+- **Red badge.** The open issues of the repository (`repos.issues`, task 0089),
+  in the field `count`.
+- **Green badge.** The open PRs (`repos.prs`), in `countGreen`.
+- **Yellow badge.** The items of the criteria provider (`yellowCounts`, task
+  0093; see "Yellow criteria"), in `countYellow`. The count is by repository
+  name, and an answer older than 24 hours counts 0.
+- **A count of 0** sets no field. Each message is a full upsert, so the driver
+  draws no badge for a field that is missing.
+- **A count above 99** draws as "99+". The inbox sends at most 100, so a
+  change from 150 to 160 sends no message.
+- **Strip.** The strip under the picture shows the worst session status of the
+  repository: `waiting` is `WARN`, `running` is `RUNNING`, `done` is `DONE`, and
+  none is no color.
+- **The `repos` key** keeps its picture (`github.png`), shows the sum of each
+  of the three counts over the repository keys on the pad (also capped at
+  100), and the worst status of all sessions.
 
 ### Repo layer
 

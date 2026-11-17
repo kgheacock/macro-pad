@@ -1,13 +1,13 @@
 ---
 id: "0094"
 title: "Draw two caption lines on a child key, with or without an emoji"
-status: "ongoing"
+status: "complete"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/121"
 branch: "0094-two-line-identifier-caption-on-item-keys"
 related: ["0069", "0073", "0082", "0086", "0096"]
 tags: ["driver", "layers", "rendering", "wire-protocol", "platform"]
@@ -106,7 +106,7 @@ ticked.
 - [x] **DoD-7** — `iconLines` survives a save and a load of `layers.json`, and an old file with no `iconLines` still loads at version 1. **Proof:** `cd driver && go test ./layers -run TestIconLinesPersist` passes.
 - [x] **DoD-8** — A `setLayerKey` with `iconLines` reaches the controller and draws a glyph. A bad one is logged and dropped. **Proof:** `cd driver && go test ./plugin -run TestSetLayerKeyIconLines` and `cd inbox && node --test test/protocol.test.js` pass.
 - [x] **DoD-9** — `driver/README.md` records the field, the layouts, and the sizes. **Proof:** `driver/README.md`, section "Protocol", bullet `iconLines`.
-- [ ] **DoD-10** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `cd inbox && node --test`, and the PR body.
+- [x] **DoD-10** — Both suites pass, and the PR in the `pr` field links to this spec. **Proof:** `cd driver && go test ./...`, `cd inbox && node --test`, and the PR body.
 
 ## Risks
 

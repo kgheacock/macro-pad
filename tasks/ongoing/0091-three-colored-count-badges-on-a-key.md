@@ -1,14 +1,14 @@
 ---
 id: "0091"
 title: "Show a red, a green, and a yellow count on one key, stamped by the board"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-16"
 updated: "2026-11-16"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0091-three-colored-count-badges-on-a-key"
 related: ["0062", "0061", "0063", "0082", "0092"]
 tags: ["driver", "firmware", "wire-protocol", "layers", "rendering", "platform"]
 ---

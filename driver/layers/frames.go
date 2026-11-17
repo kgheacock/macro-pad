@@ -15,14 +15,14 @@ type FrameOut interface {
 	// StoreFrame composes png over color into the board's slot, and draws
 	// nothing. A nil png is a frame of the color alone.
 	StoreFrame(slot byte, color uint16, png []byte) error
-	// ShowFramesWithPips draws, for each key k, the frame in slots[k] with a
-	// count pip of counts[k] stamped on it, or leaves the key alone for
-	// transport.SlotUnchanged. A count of 0 draws the frame as it is. The panels
-	// change together (task 0062).
-	ShowFramesWithPips(slots, counts []byte) error
-	// StorePipSheet sends the sprites of the count pip. colors is the key
-	// color each disc of the sheet is blended against.
-	StorePipSheet(colors []uint16, pixels []byte) error
+	// ShowFramesWithBadges draws, for each key k, the frame in slots[k] with
+	// the badges of badges[k] stamped on it, or leaves the key alone for
+	// transport.SlotUnchanged. A count of 0 draws no disc. The panels change
+	// together (tasks 0062 and 0091).
+	ShowFramesWithBadges(slots []byte, badges []transport.Badges) error
+	// StoreBadgeSheet sends the sprites of the badges. colors is the key
+	// color each column of discs on the sheet is blended against.
+	StoreBadgeSheet(colors []uint16, pixels []byte) error
 }
 
 // DefaultPreloadIdle is how long the pad must go without a press before the
@@ -34,8 +34,8 @@ const noSlot = transport.SlotUnchanged
 // frameKey is what one frame on the board shows: one picture over one color.
 // A glyph is the icon at ref under the assets directory, if ref is not empty,
 // on a white round, or the words in text on a white tile (task 0069). The count
-// pip is not part of it: the board stamps the pip on a copy of the frame (task
-// 0062). An emoji icon (task 0073) is emoji, the refs joined by line breaks,
+// badges are not part of it: the board stamps them on a copy of the frame (tasks
+// 0062 and 0091). An emoji icon (task 0073) is emoji, the refs joined by line breaks,
 // under text as a caption, on a white tile with a strip of the color (task
 // 0082), or on the white round when round is set, as on a top-level key.
 type frameKey struct {
@@ -66,8 +66,8 @@ func frameKeyOf(w view) frameKey {
 }
 
 // storeColor is the color the board stores the frame over, which also picks
-// the disc of its pip. An emoji icon is an opaque tile with its color in the
-// strip, and its pip sits on white, so it is stored over ColorNone, as a text
+// the column of discs of its badges. An emoji icon is an opaque tile with its
+// color in the strip, and its badges sit on white, so it is stored over ColorNone, as a text
 // icon is (task 0082). On the round, its pip sits on the key color.
 func (k frameKey) storeColor() uint16 {
 	if k.emoji != "" && !k.round {
@@ -187,7 +187,7 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	var png []byte
 	if k.hasGlyph() {
 		var err error
-		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.emoji, k.round, 0, k.color)
+		png, err = renderIcon(c.assetsDir, k.ref, k.text, k.emoji, k.round, Badges{}, k.color)
 		if err != nil {
 			// A glyph that cannot be drawn leaves the color alone, rather than
 			// nothing.
@@ -209,15 +209,15 @@ func (c *Controller) storeFrame(k frameKey, evict bool) (byte, bool) {
 	return slot, true
 }
 
-// storePipSheet sends the pip sprites to the board. A board that does not get
-// them draws a frame with no pip. The caller holds sendMu.
-func (c *Controller) storePipSheet() {
-	sheet, err := BuildPipSheet()
+// storeBadgeSheet sends the badge sprites to the board. A board that does not
+// get them draws a frame with no badge. The caller holds sendMu.
+func (c *Controller) storeBadgeSheet() {
+	sheet, err := BuildBadgeSheet()
 	if err == nil {
-		err = c.frameOut.StorePipSheet(sheet.Colors, sheet.Pixels)
+		err = c.frameOut.StoreBadgeSheet(sheet.Colors, sheet.Pixels)
 	}
 	if err != nil {
-		c.logf("layers: pip sheet: %v", err)
+		c.logf("layers: badge sheet: %v", err)
 	}
 }
 
@@ -230,7 +230,7 @@ func (c *Controller) storePipSheet() {
 func (c *Controller) flushFrames(want [KeyCount]view) {
 	start := time.Now()
 	slots := make([]byte, KeyCount)
-	counts := make([]byte, KeyCount)
+	badges := make([]transport.Badges, KeyCount)
 	for i := range slots {
 		slots[i] = transport.SlotUnchanged
 	}
@@ -240,8 +240,8 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 		if w == have || (w.kind == kindBlank && have.kind == kindUnknown) {
 			continue
 		}
-		if have.kind != kindUnknown && c.slotShown[i] != noSlot && frameKeyOf(w) == frameKeyOf(have) && w.count == have.count {
-			// The same picture on the same color with the same pip: nothing to
+		if have.kind != kindUnknown && c.slotShown[i] != noSlot && frameKeyOf(w) == frameKeyOf(have) && w.badges() == have.badges() {
+			// The same picture on the same color with the same badges: nothing to
 			// redraw.
 			c.shown[i] = w
 			continue
@@ -259,12 +259,12 @@ func (c *Controller) flushFrames(want [KeyCount]view) {
 			continue
 		}
 		slots[i] = slot
-		counts[i] = byte(min(want[i].count, 255))
+		badges[i] = want[i].badges()
 	}
 
 	shown := 0
 	if len(fallback) < len(changed) {
-		err := c.frameOut.ShowFramesWithPips(slots, counts)
+		err := c.frameOut.ShowFramesWithBadges(slots, badges)
 		for _, i := range changed {
 			if slots[i] == transport.SlotUnchanged {
 				continue

@@ -210,7 +210,8 @@ class MacroPad:
         self.resyncs = 0
         # The open Begin batch, or `None`.
         self._batch = None
-        # Which of a key's two pip buffers the next stamp writes (task 0062).
+        # Which of a key's two overlay buffers the next stamp writes (tasks 0062
+        # and 0091).
         self._pip_next = [0] * len(switches)
 
     def step(self, now_us):
@@ -430,6 +431,12 @@ class MacroPad:
         if isinstance(glyph, wire.ShowFramesPips):
             self._show_frames(glyph, now_us)
             return True
+        if isinstance(glyph, wire.BadgeSheet):
+            self._frame_cache.set_badge_sheet(glyph.colors, glyph.pixels)
+            return True
+        if isinstance(glyph, wire.ShowFramesBadges):
+            self._show_frames(glyph, now_us)
+            return True
 
         if self._tracer is not None:
             self._tracer.record(
@@ -502,15 +509,38 @@ class MacroPad:
         self._pip_next[key_index] = 1 - which
         return view
 
+    def _badge_frame(self, key_index, slot, red, green, yellow):
+        """The byte view of a copy of `slot` with the badges of the three counts
+        stamped on it, in one of the key's two overlay buffers (task 0091). The
+        buffer that the key's last stamp did not use goes first, so a push that
+        still reads the last one is not disturbed. Returns `None` when there is
+        no badge sheet yet, or no overlay buffer for the key; the caller then
+        shows the slot as it is.
+        """
+        cache = self._frame_cache
+        if not cache.has_badge_sheet():
+            return None
+        which = self._pip_next[key_index]
+        buffer = cache.pip_buffer(key_index, which)
+        if buffer is None:
+            return None
+        view = cache.view(buffer)
+        self._wait_for_view(view)
+        cache.stamp_badges(buffer, slot, red, green, yellow)
+        self._pip_next[key_index] = 1 - which
+        return view
+
     def _show_frames(self, message, now_us):
         """Queue the push of every key that a Show frames message names, in
         one pass, so the pushes start together. A key that names an empty slot
         keeps its image, and the board answers with a Show miss for those keys.
         An open batch is released first, like a new Begin batch does.
         """
-        # A Show frames with pips has a count for each key; a plain one has none.
+        # A Show frames with pips has a count for each key, and one with badges has
+        # three; a plain one has none.
         counts = getattr(message, "counts", None)
-        if counts is not None:
+        badged = isinstance(message, wire.ShowFramesBadges)
+        if counts is not None or badged:
             named = 0
             for key_index in range(min(len(message.slots), len(self.key_states))):
                 if message.slots[key_index] != wire.SLOT_UNCHANGED:
@@ -533,6 +563,11 @@ class MacroPad:
             if counts is not None and counts[key_index] > 0:
                 frame = self._pip_frame(key_index, slot, counts[key_index])
                 # A frame with a pip has a picture, whatever the slot holds.
+                has_glyph = has_glyph or frame is not None
+            elif badged and any(message.badges(key_index)):
+                red, green, yellow = message.badges(key_index)
+                frame = self._badge_frame(key_index, slot, red, green, yellow)
+                # A frame with a badge has a picture, whatever the slot holds.
                 has_glyph = has_glyph or frame is not None
             if frame is None:
                 frame = cache.view(slot)

@@ -299,29 +299,30 @@ func (s *Server) ShowFrames(slots []byte) error {
 	return s.showFrames(slots, nil)
 }
 
-// ShowFramesWithPips is ShowFrames with a count pip on the keys whose count is
-// above 0. The clients get the frame with the pip drawn on it. It implements
-// layers.FrameOut (task 0062).
-func (s *Server) ShowFramesWithPips(slots, counts []byte) error {
-	return s.showFrames(slots, counts)
+// ShowFramesWithBadges is ShowFrames with the badges on the keys that have a
+// count above 0. The clients get the frame with the badges drawn on it. It
+// implements layers.FrameOut (tasks 0062 and 0091).
+func (s *Server) ShowFramesWithBadges(slots []byte, badges []transport.Badges) error {
+	return s.showFrames(slots, badges)
 }
 
-// StorePipSheet sends the pip sprites to the board. A client needs none: it
-// gets the pip drawn into the image. It implements layers.FrameOut (task 0062).
-func (s *Server) StorePipSheet(colors []uint16, pixels []byte) error {
-	if err := s.dev.StorePipSheet(colors, pixels); err != nil {
-		s.logf("storePipSheet failed: %v", err)
+// StoreBadgeSheet sends the badge sprites to the board. A client needs none: it
+// gets the badges drawn into the image. It implements layers.FrameOut (tasks
+// 0062 and 0091).
+func (s *Server) StoreBadgeSheet(colors []uint16, pixels []byte) error {
+	if err := s.dev.StoreBadgeSheet(colors, pixels); err != nil {
+		s.logf("storeBadgeSheet failed: %v", err)
 		return err
 	}
 	return nil
 }
 
-func (s *Server) showFrames(slots, counts []byte) error {
+func (s *Server) showFrames(slots []byte, badges []transport.Badges) error {
 	var err error
-	if counts == nil {
+	if badges == nil {
 		err = s.dev.ShowFrames(slots)
 	} else {
-		err = s.dev.ShowFramesWithPips(slots, counts)
+		err = s.dev.ShowFramesWithBadges(slots, badges)
 	}
 	if err != nil {
 		s.logf("showFrames failed: %v", err)
@@ -338,10 +339,10 @@ func (s *Server) showFrames(slots, counts []byte) error {
 			continue
 		}
 		frame := rec.png
-		if counts != nil && counts[key] > 0 {
+		if badges != nil && badges[key].Any() {
 			var perr error
-			if frame, perr = withPip(rec.png, rec.color, int(counts[key])); perr != nil {
-				s.logf("showFrames key=%d: draw the pip: %v", key, perr)
+			if frame, perr = withBadges(rec.png, rec.color, badges[key]); perr != nil {
+				s.logf("showFrames key=%d: draw the badges: %v", key, perr)
 				frame = rec.png
 			}
 		}
@@ -366,9 +367,9 @@ func (s *Server) showFrames(slots, counts []byte) error {
 	return nil
 }
 
-// withPip returns the PNG of a frame with the count pip drawn on it. A nil png
-// is a frame with no picture, and gets a transparent image under the pip.
-func withPip(frame []byte, key uint16, count int) ([]byte, error) {
+// withBadges returns the PNG of a frame with the count badges drawn on it. A nil
+// png is a frame with no picture, and gets a transparent image under the badges.
+func withBadges(frame []byte, key uint16, badges transport.Badges) ([]byte, error) {
 	canvas := image.NewNRGBA(image.Rect(0, 0, transport.CustomGlyphWidth, transport.CustomGlyphHeight))
 	if len(frame) > 0 {
 		img, err := png.Decode(bytes.NewReader(frame))
@@ -377,7 +378,7 @@ func withPip(frame []byte, key uint16, count int) ([]byte, error) {
 		}
 		draw.Draw(canvas, canvas.Bounds(), img, img.Bounds().Min, draw.Src)
 	}
-	if err := layers.DrawPip(canvas, key, count); err != nil {
+	if err := layers.DrawBadges(canvas, key, badges); err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer
@@ -508,7 +509,7 @@ func (s *Server) readPump(c *client) {
 			p := msg.SetLayerKey
 			err := l.SetKey(layers.Update{
 				ID: p.ID, Parent: p.Parent, Path: p.Path, Slot: p.Slot,
-				Icon: p.Icon, Status: p.Status, Count: p.Count, IconRef: p.IconRef, IconText: p.IconText, IconEmoji: p.IconEmoji, Opens: p.Opens,
+				Icon: p.Icon, Status: p.Status, Count: p.Count, CountGreen: p.CountGreen, CountYellow: p.CountYellow, IconRef: p.IconRef, IconText: p.IconText, IconEmoji: p.IconEmoji, Opens: p.Opens,
 			})
 			if err != nil {
 				s.logf("setLayerKey id=%q dropped: %v", p.ID, err)

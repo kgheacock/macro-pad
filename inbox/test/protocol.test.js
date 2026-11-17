@@ -11,6 +11,21 @@ test('TestEncodeMatchesFixtures', () => {
   }
 });
 
+// Task 0091: a key has a red count, a green count, and a yellow count. The
+// daemon sends them as count, countGreen, and countYellow, and a message with
+// only count draws one red badge.
+test('TestSetLayerKeyCounts', () => {
+  const withCounts = fixtures.setLayerKey.find((f) => f.setLayerKey.countGreen !== undefined);
+  assert.deepEqual(
+    { count: withCounts.setLayerKey.count, countGreen: withCounts.setLayerKey.countGreen, countYellow: withCounts.setLayerKey.countYellow },
+    { count: 3, countGreen: 2, countYellow: 1 },
+  );
+  const sent = JSON.parse(encodeSetLayerKey({ id: 'a', status: 'DONE', count: 3 })).setLayerKey;
+  assert.equal(sent.count, 3);
+  assert.equal('countGreen' in sent, false);
+  assert.equal('countYellow' in sent, false);
+});
+
 test('TestEncodeRemoveMatchesFixtures', () => {
   for (const fixture of fixtures.removeLayerKey) {
     const { id, parent, path } = fixture.removeLayerKey;

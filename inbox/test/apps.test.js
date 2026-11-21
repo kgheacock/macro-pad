@@ -9,6 +9,7 @@ import { emojiFor } from '../src/emoji.js';
 import apps, { appName, chooseApps, createAppsRenderer, press, scan, startOfDay } from '../src/plugins/apps.js';
 import { dateRef } from '../src/activity.js';
 import { fetchFeed, syncFeed } from '../src/repolist.js';
+import { fakeGitHub, isGraphql } from '../testlib/github.js';
 import { openStore } from '../src/store.js';
 import { run, scratch } from '../testlib/helpers.js';
 import { TestServer, waitFor } from '../testlib/wsserver.js';
@@ -456,7 +457,10 @@ test('TestGitLogNotesActivity', async (t) => {
   mkdirSync(path.join(root, 'bare', '.git'), { recursive: true });
   const store = storeFor(t, sc);
   const execFile = (file, args, options, callback) =>
-    setImmediate(() => callback(args[0] === 'repo' ? null : new Error('offline'), args[0] === 'repo' ? '[]' : '', ''));
+    setImmediate(() => {
+      const got = isGraphql(args) ? fakeGitHub()(args) : { error: new Error('offline') };
+      callback(got.error ?? null, got.stdout ?? '', '');
+    });
   const answer = await fetchFeed({ env, store, execFile, log: () => {} });
   syncFeed(store, answer);
   assert.deepEqual(store.activityRows(0).map((r) => [r.repo, r.kind, r.ref]), [['commit', 'git', dateRef(at)]]);

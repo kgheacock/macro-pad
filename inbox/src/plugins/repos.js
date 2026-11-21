@@ -264,8 +264,11 @@ export default {
   statuses: REPOS_STATUSES,
   defaultStatus: 'done',
   about: `The repos key opens one key per repository of the GitHub owner
-(\$INBOX_REPOS_OWNER, default kgheacock), the ones you worked on first. A
-Claude Code session colours the key of its repository: waiting (yellow),
+(\$INBOX_REPOS_OWNER, default kgheacock) that you work on, the ones you worked
+on first, at most 128: the ones you contributed to (commits, PRs, reviews,
+issues), your clones under \$INBOX_APPS_ROOT, and the ones in the activity
+ledger. Their issue and PR counts are read every \$INBOX_REPOS_COUNTS_EVERY
+seconds (default 300). A Claude Code session colours the key of its repository: waiting (yellow),
 running (blue), done (green). The top key shows the highest status of all
 sessions, and its badges total the open issues (red), the open PRs (green)
 and the yellow items of its repositories. A session stays on

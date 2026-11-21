@@ -7,7 +7,7 @@ updated: "2026-11-21"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/127"
 branch: "claude/project-thread-r806g0"
 related: ["0085", "0087", "0089", "0090", "0092"]
 tags: ["inbox", "repos", "github", "gh", "feed", "graphql"]

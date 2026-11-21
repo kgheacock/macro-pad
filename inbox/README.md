@@ -262,6 +262,7 @@ For code that reads the store (`src/store.js`), `openStore(file, env,
 | `INBOX_REPOS_OWNER` | The GitHub user or organisation whose repositories the repos feed lists (see "Repositories"). `install.sh --repos-owner OWNER` sets it in the wrapper. | `kgheacock` |
 | `INBOX_REPOS_YELLOW_CMD` | The program that gives the yellow items of a repository (see "Yellow criteria"). `install.sh --yellow-cmd PATH` sets it in the wrapper. Also `INBOX_REPOS_YELLOW_EVERY` (seconds, default 300) and `INBOX_REPOS_YELLOW_TIMEOUT` (seconds, default 20). | unset |
 | `INBOX_REPOS_ARCHIVED` | `1` keeps archived repositories in the repos feed. | unset (archived ones stay out) |
+| `INBOX_REPOS_COUNTS_EVERY` | Seconds between two counts queries for all shown repositories (see "Repositories"); at least 30. | `300` |
 | `INBOX_APPS_ROOT` | The folder of the `apps` plugin's repositories. `install.sh --apps-root DIR` sets it in the wrapper. | unset (no app keys) |
 | `INBOX_APPS_COUNT` | How many apps the `apps` key shows, 1 to 20. `install.sh --apps-count N`. | `5` |
 | `INBOX_APPS_RUN` | Run commands that win over detection, `NAME=CMD;NAME=CMD`. `install.sh --apps-run NAME=CMD`. | unset |
@@ -576,28 +577,51 @@ steps, and the limits.
 
 ### Repositories
 
-The repos feed (task 0089) lists every repository of one owner, with its open
-issue count (pull requests not counted) and its open PR count. It is the
-data for the `repos` plugin (task 0087). The daemon asks
-GitHub once a minute with one call,
-`gh repo list OWNER --limit 1000 --no-archived --json ...`, and `gh` pages
-by itself, so an owner with more than 100 repositories is complete. The owner
+The repos feed (tasks 0089 and 0097) lists the repositories of one owner that
+you work on, with the open issue count (pull requests not counted) and the open
+PR count of each. It is the data for the `repos` plugin (task 0087). The owner
 is `$INBOX_REPOS_OWNER` (default `kgheacock`; `install.sh --repos-owner OWNER`
 writes it into the wrapper). A name that GitHub does not allow, such as `-x`,
-is refused before `gh` runs. Archived repositories stay out unless
-`INBOX_REPOS_ARCHIVED=1`; forks stay in.
+is refused before `gh` runs. No step lists every repository of the owner, so an
+organisation with thousands of repositories costs the same as a user with ten.
+
+Every minute the feed builds the **candidates**, the union of three sources,
+kept to the repositories of the owner:
+
+1. **Your contributions.** One GraphQL query (`gh api graphql`, cost 1), paged
+   by 100, at most 5 pages: `viewer.repositoriesContributedTo` with commits,
+   PRs, PR reviews and issues, your own repositories included, newest push
+   first. GitHub counts about the last year.
+2. **Your clones.** Each folder under `$INBOX_APPS_ROOT` whose `.git/logs/HEAD`
+   changed in the last 30 days (the same scan that feeds the `git` kind of the
+   activity ledger).
+3. **The activity ledger.** Each repository with a row in the ledger (see
+   "Activity"): GitHub events, Claude sessions, `Code` presses.
+
+It ranks the candidates by the ledger's score (a repository with no score by
+its newest push) and keeps the first 128 (`REPO_MAX_CHILDREN`). Only these get
+**counts**: one aliased GraphQL query per 50 repositories, each a
+`repository(owner, name) { url isFork isArchived pushedAt issues(states: OPEN)
+{ totalCount } pullRequests(states: OPEN) { totalCount } }`. The counts of all
+shown repositories are asked every `$INBOX_REPOS_COUNTS_EVERY` seconds (default
+300, at least 30); in between, only a new candidate with no stored row is
+asked. A repository GitHub does not have is dropped. Archived repositories
+stay out unless `INBOX_REPOS_ARCHIVED=1`; forks stay in. A repository that you
+never touched does not show.
 
 The store keeps the answer in the `repos` table (schema 6), one row per
 `(owner, name)`: `key` (the name in lower case, a dot becoming `-`), `url`,
 `is_fork`, `is_archived`, `pushed_at`, `issues`, `prs`, `synced_at`. Every
 plugin reads the same table, through `listRepos(owner)` and
-`replaceRepos(owner, repos, { complete })` in `src/store.js`. A repository
-that leaves the answer loses its row. An answer of 1000 rows may be cut, so it
-adds and updates rows but deletes none.
+`replaceRepos(owner, repos, { complete })` in `src/store.js`. The table holds
+the shown set: a repository that leaves it loses its row.
 
 - **A failure** (no `gh`, not logged in, no network) keeps the stored rows and
   logs one line, `inbox: cannot read GitHub repositories: WHY`, until a read
   succeeds.
+- **A failed counts query** keeps the stored counts and logs one line,
+  `inbox: cannot read the counts of GitHub repositories: WHY`, until a counts
+  query succeeds. A new candidate shows with no counts until then.
 - **A start without a network** draws the stored rows: the daemon calls the
   feed's `cold` hook once when the first read fails.
 

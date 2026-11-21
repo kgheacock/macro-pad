@@ -179,7 +179,8 @@ export function headLogTime(dir) {
 }
 
 // One `git` event per repository folder of `root` whose .git/logs/HEAD
-// changed after `since`: [{ repo, kind: 'git', ref: DATE, at }]. A folder
+// changed after `since`: [{ repo, kind: 'git', ref: DATE, at, name }], where
+// name is the folder's name (the repos feed asks GitHub for it). A folder
 // that is not a repository, or a root that cannot be read, gives none.
 export function gitEvents(root, { since = 0 } = {}) {
   let entries;
@@ -192,7 +193,7 @@ export function gitEvents(root, { since = 0 } = {}) {
   for (const entry of entries) {
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const at = headLogTime(path.join(root, entry.name));
-    if (at > since) events.push({ repo: repoKey(entry.name), kind: 'git', ref: dateRef(at), at: Math.round(at) });
+    if (at > since) events.push({ repo: repoKey(entry.name), kind: 'git', ref: dateRef(at), at: Math.round(at), name: entry.name });
   }
   return events;
 }

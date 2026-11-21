@@ -19,6 +19,7 @@ import {
 import { fetchFeed, syncFeed } from '../src/repolist.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
+import { fakeGitHub, isGraphql } from '../testlib/github.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 16, 20, 0, 0);
@@ -43,18 +44,8 @@ function stubGh(answers) {
   return { calls, execFile };
 }
 
-const repoList = (names) =>
-  JSON.stringify(
-    names.map((name) => ({
-      name,
-      url: `https://github.com/kgheacock/${name}`,
-      isFork: false,
-      isArchived: false,
-      pushedAt: '2026-11-16T00:00:00Z',
-      issues: { totalCount: 0 },
-      pullRequests: { totalCount: 0 },
-    })),
-  );
+// GitHub with these repositories, contributed to, as the repos feed asks it.
+const repoList = (names) => fakeGitHub({ contributed: names });
 
 test('TestNoteActivityUpsert', (t) => {
   const { db } = scratch(t);
@@ -230,7 +221,7 @@ test('TestEventsFailureKeepsLedger', async (t) => {
   const logs = [];
   // gh lists the repositories, and fails on api.
   const { execFile } = stubGh((args) =>
-    args[0] === 'repo' ? { stdout: repoList(['macro-pad', 'web']) } : { error: Object.assign(new Error('x'), { code: 1 }), stderr: 'gh: not logged in\n' },
+    isGraphql(args) ? repoList(['macro-pad', 'web'])(args) : { error: Object.assign(new Error('x'), { code: 1 }), stderr: 'gh: not logged in\n' },
   );
   const answer = await fetchFeed({ env: {}, store, execFile, log: (l) => logs.push(l) });
   assert.deepEqual(answer.repos.map((r) => r.name), ['macro-pad', 'web']);
@@ -253,7 +244,7 @@ test('TestFeedAsksLoginOnce', async (t) => {
   t.after(() => store.close());
   let failEvents = false;
   const { calls, execFile } = stubGh((args) => {
-    if (args[0] === 'repo') return { stdout: repoList(['web']) };
+    if (isGraphql(args)) return repoList(['web'])(args);
     if (args[1] === 'user') return { stdout: 'kgheacock\n' };
     if (failEvents) return { error: Object.assign(new Error('x'), { code: 1 }), stderr: 'gh: HTTP 401\n' };
     return { stdout: '[]' };
@@ -285,13 +276,13 @@ test('TestFeedWritesEventsAndGitLog', async (t) => {
     }
   }
   const { calls, execFile } = stubGh((args) => {
-    if (args[0] === 'repo') return { stdout: repoList(['web', 'cold']) };
+    if (isGraphql(args)) return repoList(['web', 'cold'])(args);
     if (args[1] === 'user') return { stdout: 'kgheacock\n' };
     return { stdout: JSON.stringify([event(7, 'PushEvent', 'kgheacock/web', { created_at: new Date().toISOString() })]) };
   });
   const answer = await fetchFeed({ env: { INBOX_APPS_ROOT: root }, store, execFile });
   // The first run, with no gh event in the ledger, reads one page here (a short page ends it).
-  assert.equal(calls.filter((c) => c.args[0] === 'api' && c.args[1] !== 'user').length, 1);
+  assert.equal(calls.filter((c) => c.args[0] === 'api' && c.args[1] !== 'user' && c.args[1] !== 'graphql').length, 1);
   syncFeed(store, answer);
   const rows = store.activityRows(0);
   assert.deepEqual(rows.map((r) => [r.repo, r.kind]).sort(), [['web', 'git'], ['web', 'push']]);

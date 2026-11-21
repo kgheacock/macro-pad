@@ -5,7 +5,8 @@ import test from 'node:test';
 import { acquirePidFile, pidPath, startDaemon } from '../src/daemon.js';
 import { DaemonRunningError } from '../src/errors.js';
 import repos, { createReposRenderer } from '../src/plugins/repos.js';
-import { feed as reposFeed, fetchRepos } from '../src/repolist.js';
+import { createCountsState, feed as reposFeed, fetchFeed } from '../src/repolist.js';
+import { fakeGitHub, isGraphql } from '../testlib/github.js';
 import { openStore } from '../src/store.js';
 import { scratch } from '../testlib/helpers.js';
 import { emojiFor } from '../src/emoji.js';
@@ -473,19 +474,32 @@ test('TestDaemonFeedFails', async (t) => {
   await waitFor(() => server.received.some((m) => m.setLayerKey?.id === 'repo.macro-pad'), 1000, 'the repo key');
 });
 
-// The repos plugin with the repos feed (task 0089) and a gh that answers
-// from `results`, one per run. `fed` records what the renderer is given.
+// The repos plugin with the repos feed (tasks 0089 and 0097) and a GitHub
+// that answers its GraphQL queries from `results`, one per run: an error, or
+// { repos: [ghRow] }. The login and the events always answer.
+// `fed` records what the renderer is given.
 function reposPlugin(results) {
   const seen = [];
   let runs = 0;
-  const execFile = (file, args, options, callback) => {
+  const counts = createCountsState();
+  const fetch = ({ env, store, log }) => {
     const next = results[Math.min(runs, results.length - 1)];
     runs++;
-    setImmediate(() => callback(next.error ?? null, next.stdout ?? '', next.stderr ?? ''));
+    const github = next.repos
+      ? fakeGitHub({ contributed: next.repos.map((r) => r.name), repos: Object.fromEntries(next.repos.map((r) => [r.name, r])) })
+      : () => next;
+    const execFile = (file, args, options, callback) => {
+      let got;
+      if (isGraphql(args)) got = github(args);
+      else if (args[1] === 'user') got = { stdout: 'kgheacock\n' };
+      else got = { stdout: '[]' };
+      setImmediate(() => callback(got.error ?? null, got.stdout ?? '', got.stderr ?? ''));
+    };
+    return fetchFeed({ env, store, log, execFile, counts });
   };
   const plugin = {
     ...repos,
-    feed: { ...reposFeed, fetch: ({ env }) => fetchRepos({ env, execFile }) },
+    feed: { ...reposFeed, fetch },
     createRenderer: ({ slot }) => {
       const renderer = createReposRenderer({ slot });
       return { ...renderer, plan: (args) => (seen.push(args.fed), renderer.plan(args)) };
@@ -494,15 +508,7 @@ function reposPlugin(results) {
   return { plugin, seen, runs: () => runs };
 }
 
-const ghRow = (name, issues, prs) => ({
-  name,
-  url: `https://github.com/kgheacock/${name}`,
-  isFork: false,
-  isArchived: false,
-  pushedAt: null,
-  issues: { totalCount: issues },
-  pullRequests: { totalCount: prs },
-});
+const ghRow = (name, issues, prs) => ({ name, issues, prs });
 const exit1 = (stderr) => ({ error: Object.assign(new Error('exit 1'), { code: 1 }), stderr });
 
 test('TestReposFeedOffline', async (t) => {
@@ -528,7 +534,7 @@ test('TestReposColdStart', async (t) => {
   const kept = { name: 'macro-pad', key: 'macro-pad', url: 'u', fork: false, archived: false, pushedAt: null, issues: 1, prs: 2 };
   writer.replaceRepos('kgheacock', [kept]);
   // gh fails at start, then answers.
-  const fed = reposPlugin([exit1('no network'), { stdout: JSON.stringify([ghRow('macro-pad', 0, 5)]) }]);
+  const fed = reposPlugin([exit1('no network'), { repos: [ghRow('macro-pad', 0, 5)] }]);
   launch(t, sc, server, { plugin: fed.plugin, feedMs: 150 });
   await waitFor(() => fed.seen.some((answer) => answer?.offline), 2000, 'the cold answer');
   const cold = fed.seen.find((answer) => answer?.offline);

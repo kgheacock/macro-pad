@@ -18,7 +18,8 @@ export const CHILD_ID = 'run';
 export const CHANNEL = 'ping.run';
 export const DEFAULT_SHORTCUT = 'Ping';
 export const MAX_NAME = 128;
-export const SHORTCUT_TIMEOUT_MS = 10 * 1000;
+// A run takes 5 to 7 s on Keith's Mac (task 0098), so 10 s left too little room.
+export const SHORTCUT_TIMEOUT_MS = 20 * 1000;
 
 // The pad status of each state. Done shows on the child only.
 const PAD = { running: 'RUNNING', done: 'DONE', failed: 'ERROR' };
@@ -64,6 +65,14 @@ export function createPingRenderer({ slot } = {}) {
   };
 }
 
+// `shortcuts run` reads its input from stdin when stdin is a pipe, and waits for
+// the end of it. execFile leaves that pipe open, so the command would never end.
+const closeStdin = (execFile) => (file, args, options, callback) => {
+  const child = execFile(file, args, options, callback);
+  child?.stdin?.end();
+  return child;
+};
+
 // One run at a time: a second press while the shortcut runs does nothing.
 let running = false;
 
@@ -89,7 +98,7 @@ export async function press({ parent, child, store, env = process.env, changed =
     changed();
     try {
       if (platform !== 'darwin') throw new Error('this key works on macOS only');
-      await run(execFile, 'shortcuts', ['run', name], { timeout: timeoutMs });
+      await run(closeStdin(execFile), 'shortcuts', ['run', name], { timeout: timeoutMs });
       store.insert(CHANNEL, `ran ${name}`, cwd, { status: 'done' });
     } catch (e) {
       const code = e.code === undefined ? '' : ` (exit code ${e.code})`;

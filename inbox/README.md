@@ -922,8 +922,8 @@ the Ping intent of
 [macro-spotlight-intents](https://github.com/kgheacock/macro-spotlight-intents),
 so one key press proves the path from the pad to an App Intent.
 
-The plugin runs `shortcuts run NAME` with `execFile`, with no shell and a 10 s
-timeout. `NAME` is a saved shortcut that holds the Ping action. Make it once:
+The plugin runs `shortcuts run NAME` with `execFile`, with no shell, its
+stdin closed, and a 20 s timeout. `NAME` is a saved shortcut that holds the Ping action. Make it once:
 
 1. Install the macro-spotlight-intents app in `/Applications` and open it once.
 2. In the Shortcuts app, click **+**, search the actions for `Ping`, and add the

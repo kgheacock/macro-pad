@@ -49,6 +49,17 @@ test('runs shortcuts run Ping with execFile', async (t) => {
   assert.equal(calls[0].options.shell, false);
 });
 
+test('closes stdin so shortcuts does not wait for input', async (t) => {
+  const { store } = storeFor(t);
+  let ended = 0;
+  const execFile = (file, args, options, callback) => {
+    callback(null, '', '');
+    return { stdin: { end: () => ended++ } };
+  };
+  await press({ ...base, store, deps: { ...base.deps, execFile } });
+  assert.equal(ended, 1);
+});
+
 test('INBOX_PING_SHORTCUT names the shortcut', async (t) => {
   const { store } = storeFor(t);
   const { calls, execFile } = fakeExec();
@@ -87,14 +98,14 @@ test('sets ERROR and logs the exit code', async (t) => {
   assert.match(lines[0], /Shortcut not found/);
 });
 
-test('times out after 10 s', async (t) => {
+test('times out after 20 s', async (t) => {
   const { store } = storeFor(t);
   const lines = [];
   const { calls, execFile } = fakeExec(Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM' }));
   await press({ ...base, store, log: (line) => lines.push(line), deps: { ...base.deps, execFile } });
-  assert.equal(calls[0].options.timeout, 10000);
+  assert.equal(calls[0].options.timeout, 20000);
   assert.equal(latest(store).status, 'failed');
-  assert.match(lines[0], /did not answer within 10 s/);
+  assert.match(lines[0], /did not answer within 20 s/);
 });
 
 test('refuses a name that starts with a dash', async (t) => {

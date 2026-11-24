@@ -99,7 +99,9 @@ Files to change:
 
 - `inbox/src/plugins/ping.js` — new
 - `inbox/src/plugins/index.js` — list the plugin in `PLUGINS`
+- `inbox/src/apps.js` — export `run`, the `execFile` helper that `ping.js` reuses
 - `inbox/test/ping.test.js` — new, with a fake `execFile`
+- `inbox/test/cli.test.js` — the lists of plugins now include `ping`, because one daemon runs every plugin and gives `ping` a key slot (task 0075)
 - `inbox/README.md` — new section "The ping plugin", beside "The apps plugin"
 
 ## Definition of done

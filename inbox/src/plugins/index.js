@@ -24,10 +24,11 @@ import { UsageError } from '../errors.js';
 import { DEFAULT_PLUGIN } from '../store.js';
 import apps from './apps.js';
 import basic from './basic.js';
+import ping from './ping.js';
 import repos from './repos.js';
 
 export { DEFAULT_PLUGIN };
-export const PLUGINS = { basic, repos, apps };
+export const PLUGINS = { basic, repos, apps, ping };
 
 // Names that an older install still sends (task 0087): the hook says
 // `--plugin ai`, and the service file may say `--plugin ai` or `--slot ai=2`.

@@ -461,7 +461,7 @@ paragraph of help. The store, the commands, "here", the daemon, and the
 install are shared. A plugin may also have a feed, which the daemon runs to
 write the plugin's own messages (`repos` asks GitHub). The plugins live in
 `src/plugins/`; to add one, write `src/plugins/NAME.js` and list it in
-`src/plugins/index.js`.
+`src/plugins/index.js`. The `ping` plugin (task 0098) has its own section at the end.
 
 ```
 inbox plugins
@@ -914,3 +914,55 @@ inbox --plugin apps list --all-channels
 The `apps` key takes one slot, like every plugin; `--slot apps=N` places it.
 Without `$INBOX_APPS_ROOT` the plugin shows no
 key and logs `cannot read apps: no INBOX_APPS_ROOT` once.
+
+### The ping plugin
+
+One key, `ping`, with one child, `Ping` (task 0098). A press on the child runs
+the Ping intent of
+[macro-spotlight-intents](https://github.com/kgheacock/macro-spotlight-intents),
+so one key press proves the path from the pad to an App Intent.
+
+The plugin runs `shortcuts run NAME` with `execFile`, with no shell, its
+stdin closed, and a 20 s timeout. `NAME` is a saved shortcut that holds the Ping action. Make it once:
+
+1. Install the macro-spotlight-intents app in `/Applications` and open it once.
+2. In the Shortcuts app, click **+**, search the actions for `Ping`, and add the
+   one under Macro Spotlight Intents.
+3. Name the shortcut `Ping`.
+
+The child shows `RUNNING` while the command runs, then `DONE` when it exits with
+code 0 and `ERROR` when it does not. The daemon logs one line for an error, with
+the exit code. A press while the shortcut still runs does nothing.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `INBOX_PING_SHORTCUT` | the name of the saved shortcut | `Ping` |
+
+A name must start with a letter or a digit and have at most 128 characters on one
+line, so that `shortcuts` never reads it as an option. Any other name is refused,
+the child shows `ERROR`, and the daemon logs `refused INBOX_PING_SHORTCUT`. The
+variable is read from the environment of the daemon. For a run in a terminal:
+
+```
+INBOX_PING_SHORTCUT=Ping inbox daemon --plugin ping
+```
+
+The plugin works on macOS only.
+
+To check the whole chain, press the key, or press it on the virtual pad
+(`driver/plugin/web/virtualpad.html`). Then read the log of the intents app. The
+subsystem is the bundle ID, that is `<BUNDLE_ID_PREFIX>.MacroSpotlightIntents`,
+where the prefix comes from `Config/Signing.local.xcconfig` in that repository:
+
+```
+/usr/bin/log show --last 1m --predicate 'subsystem == "<prefix>.MacroSpotlightIntents"'
+```
+
+The output holds `PingIntent started` and `PingIntent finished in N ms`. Use the
+full path `/usr/bin/log`: in zsh, plain `log` is a shell builtin.
+
+| Channel | Statuses |
+|---|---|
+| `ping.run` | `running`, `done`, `failed` |
+
+The `ping` key takes one slot, like every plugin; `--slot ping=N` places it.

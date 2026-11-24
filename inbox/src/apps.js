@@ -142,7 +142,7 @@ const TYPE_SCRIPT = [
 
 const script = (lines) => lines.flatMap((line) => ['-e', line]);
 
-function run(execFile, file, args, options) {
+export function run(execFile, file, args, options) {
   return new Promise((resolve, reject) => {
     execFile(file, args, { shell: false, ...options }, (error, stdout, stderr) => {
       if (!error) {

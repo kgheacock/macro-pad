@@ -1,14 +1,14 @@
 ---
 id: "0098"
 title: "A ping inbox plugin: one key press runs the Ping intent of macro-spotlight-intents"
-status: "backlog"
+status: "ongoing"
 created: "2026-11-23"
 updated: "2026-11-23"
 owner: "kgheacock"
 issue: null
 issue_url: null
 pr: null
-branch: null
+branch: "0098-ping-plugin-triggers-the-intents-ping"
 related: ["0029", "0075", "0085"]
 tags: ["inbox", "plugin", "intents", "macos"]
 ---

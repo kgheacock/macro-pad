@@ -1,13 +1,13 @@
 ---
 id: "0098"
 title: "A ping inbox plugin: one key press runs the Ping intent of macro-spotlight-intents"
-status: "ongoing"
+status: "complete"
 created: "2026-11-23"
 updated: "2026-11-23"
 owner: "kgheacock"
 issue: null
 issue_url: null
-pr: null
+pr: "https://github.com/kgheacock/macro-pad/pull/128"
 branch: "0098-ping-plugin-triggers-the-intents-ping"
 related: ["0029", "0075", "0085"]
 tags: ["inbox", "plugin", "intents", "macos"]
@@ -118,7 +118,7 @@ ticked.
 - [x] **DoD-6** — The whole inbox suite still passes. **Proof:** `cd inbox && npm test` exits 0
 - [x] **DoD-7** — On Keith's Mac, a key press writes `PingIntent started` and `PingIntent finished` in the intents app log. **Proof:** with the saved shortcut `Ping` and the app installed, press the `Ping` key (or press it on `driver/plugin/web/virtualpad.html`), then run `/usr/bin/log show --last 1m --predicate 'subsystem == "<prefix>.MacroSpotlightIntents"'`. `<prefix>` is `BUNDLE_ID_PREFIX` in macro-spotlight-intents `Config/Signing.local.xcconfig`
 - [x] **DoD-8** — `inbox/README.md` records the plugin, the variable, and the saved shortcut it needs. **Proof:** `inbox/README.md`, section "The ping plugin"
-- [ ] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** PR body
+- [x] **DoD-9** — The PR in the `pr` field links to this spec. **Proof:** PR body
 - [x] **DoD-10** — The plugin closes the stdin of `shortcuts`. Left open, `shortcuts run` waits for input and never ends. **Proof:** the test `closes stdin so shortcuts does not wait for input` passes, and DoD-7 shows `PingIntent started` after a press that goes through the daemon
 
 ## Risks
